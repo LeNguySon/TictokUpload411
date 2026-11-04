@@ -45,8 +45,10 @@ from src.application.services.proxy_service import ProxyService
 from src.application.services.upload_service import UploadService
 from src.application.signals.app_signals import AppSignalBus
 from src.application.workers.metrics_sync_worker import MetricsSyncWorker
+from src.application.workers.orbita_launch_worker import OrbitaLaunchWorker
 from src.application.workers.thread_pool_manager import ThreadPoolManager
 from src.application.workers.upload_worker import UploadWorker
+from src.application.workers.video_import_worker import VideoImportWorker
 from src.infrastructure.browser.orbita_launcher import OrbitaLauncher
 from src.infrastructure.browser.sammonny_daemon_manager import SamMonnyDaemonSupervisor
 from src.infrastructure.credentials.windows_vault import WindowsCredentialVault
@@ -234,7 +236,7 @@ class TikTokManagerMainWindow(QMainWindow):
         self.lbl_video_header.setFixedHeight(34)
         bottom_toolbar.addWidget(self.lbl_video_header)
 
-        self.btn_batch_upload = PushButton(FluentIcon.FOLDER, "Nạp Thư Mục _Phân Bổ", self)
+        self.btn_batch_upload = PushButton(FluentIcon.FOLDER, "Nạp Thư Mục Phân Bổ", self)
         self.btn_batch_upload.setFixedHeight(34)
         self.btn_batch_upload.setIconSize(QSize(16, 16))
         self.btn_batch_upload.clicked.connect(self._on_open_batch_folder_upload)
@@ -625,87 +627,48 @@ class TikTokManagerMainWindow(QMainWindow):
         if not target_ids:
             return
 
-        try:
-            self.daemon_supervisor.ensure_daemon_running()
-        except Exception as de:
-            logger.warning("Daemon supervisor check warning: %s", de)
+        count = len(target_ids)
+        InfoBar.info(
+            title="Đang Khởi Chạy Orbita",
+            content=f"Đang chuẩn bị proxy và bật trình duyệt cho {count} hồ sơ trong nền...",
+            position=InfoBarPosition.TOP,
+            parent=self,
+        )
 
-        success_count = 0
-        last_name = ""
-        last_cdp = ""
+        worker = OrbitaLaunchWorker(
+            profile_ids=target_ids,
+            profile_repo=self.profile_repo,
+            proxy_repo=self.proxy_repo,
+            proxy_service=self.proxy_service,
+            orbita_launcher=self.orbita_launcher,
+            daemon_supervisor=self.daemon_supervisor,
+        )
+        worker.signals.profile_launched.connect(self._on_orbita_profile_launched)
+        worker.signals.batch_completed.connect(self._on_orbita_batch_completed)
+        self.thread_pool.dispatch(worker)
 
-        for profile_id in target_ids:
-            p = self.profile_repo.get_by_id(profile_id)
-            if not p:
-                continue
+    def _on_orbita_profile_launched(self, profile_id: int, profile_name: str, cdp_or_pid: str) -> None:
+        logger.info("Orbita profile launched: %s (ID: %d) -> %s", profile_name, profile_id, cdp_or_pid)
 
-            last_name = p.get("name", "")
-            proxy = self.proxy_repo.get_by_id(p["proxy_id"]) if p.get("proxy_id") else None
-
-            # Auto-rotate proxy if rotating proxy has change_ip_url
-            if proxy and (proxy.get("proxy_type") == "rotating" or proxy.get("change_ip_url")):
-                try:
-                    self.proxy_service.change_rotating_ip(proxy["id"])
-                except Exception as re_err:
-                    logger.debug("Auto rotate proxy notice: %s", re_err)
-
-            # Pre-launch Proxy Guard
-            if proxy and not self._check_proxy_alive(proxy):
-                logger.warning(
-                    "Proxy for profile '%s' is unreachable (%s:%s)",
-                    last_name,
-                    proxy.get("host"),
-                    proxy.get("port"),
-                )
-            try:
-                uuid_val = p.get("uuid")
-                debugger_addr = None
-                if uuid_val:
-                    try:
-                        debugger_addr = self.orbita_launcher.launch_via_gologin_sdk(
-                            profile_id=uuid_val,
-                            proxy_data=proxy,
-                            headless=False,
-                            sync=False,
-                        )
-                    except Exception as sdk_err:
-                        logger.warning(
-                            "GoLogin SDK launch failed for %s, falling back to direct binary: %s", uuid_val, sdk_err
-                        )
-
-                if debugger_addr:
-                    success_count += 1
-                    last_cdp = debugger_addr
-                else:
-                    proc = self.orbita_launcher.launch_profile(p, proxy)
-                    if proc and proc.pid:
-                        success_count += 1
-            except Exception as e:
-                logger.error("Launch orbita failed for profile %d: %s", profile_id, e)
-
+    def _on_orbita_batch_completed(self, success_count: int, total_count: int) -> None:
         if success_count == 1:
-            content_msg = f"Đã mở trình duyệt Orbita cho hồ sơ '{last_name}'"
-            if last_cdp:
-                content_msg += f" (CDP: {last_cdp})."
-            else:
-                content_msg += "."
             InfoBar.success(
                 title="Khởi Chạy Orbita",
-                content=content_msg,
+                content="Đã mở trình duyệt Orbita thành công.",
                 position=InfoBarPosition.TOP,
                 parent=self,
             )
         elif success_count > 1:
             InfoBar.success(
                 title="Khởi Chạy Hàng Loạt Thành Công",
-                content=f"Đã mở đồng thời {success_count} cửa sổ trình duyệt Orbita Antidetect.",
+                content=f"Đã mở đồng thời {success_count} / {total_count} cửa sổ trình duyệt Orbita Antidetect.",
                 position=InfoBarPosition.TOP,
                 parent=self,
             )
         else:
             InfoBar.error(
                 title="Khởi Chạy Thất Bại",
-                content="Không thể mở trình duyệt cho các hồ sơ đã chọn. Vui lòng kiểm tra cấu hình.",
+                content="Không thể mở trình duyệt cho các hồ sơ đã chọn. Vui lòng kiểm tra proxy và cấu hình.",
                 position=InfoBarPosition.TOP,
                 parent=self,
             )
@@ -1311,22 +1274,33 @@ class TikTokManagerMainWindow(QMainWindow):
         if not files:
             return
 
-        added_count = 0
-        for f in files:
-            try:
-                p = Path(f)
-                self.upload_service.enqueue_video(file_path=p, title=p.stem)
-                added_count += 1
-            except Exception as e:
-                logger.error("Error adding video %s: %s", f, e)
-
-        self.refresh_videos()
-        InfoBar.success(
-            title="Đã Thêm Video",
-            content=f"Đã nạp {added_count} video vào hàng đợi.",
+        InfoBar.info(
+            title="Đang Nạp Video",
+            content=f"Đang băm SHA-256 và nạp {len(files)} video vào hàng đợi trong nền...",
             position=InfoBarPosition.TOP,
             parent=self,
         )
+
+        worker = VideoImportWorker(file_paths=files, upload_service=self.upload_service)
+        worker.signals.completed.connect(self._on_video_import_completed)
+        self.thread_pool.dispatch(worker)
+
+    def _on_video_import_completed(self, added_count: int) -> None:
+        self.refresh_videos()
+        if added_count > 0:
+            InfoBar.success(
+                title="Đã Thêm Video",
+                content=f"Đã nạp thành công {added_count} video vào hàng đợi.",
+                position=InfoBarPosition.TOP,
+                parent=self,
+            )
+        else:
+            InfoBar.warning(
+                title="Không Thể Thêm Video",
+                content="Không có video nào được nạp (vui lòng kiểm tra định dạng hoặc trùng lặp).",
+                position=InfoBarPosition.TOP,
+                parent=self,
+            )
 
     def _on_open_batch_folder_upload(self) -> None:
         proj_id = self.project_combo.currentData()
@@ -1592,23 +1566,19 @@ class TikTokManagerMainWindow(QMainWindow):
         )
 
     def _on_videos_dropped(self, file_paths: list[str]) -> None:
-        added_count = 0
-        for f in file_paths:
-            try:
-                p = Path(f)
-                self.upload_service.enqueue_video(file_path=p, title=p.stem)
-                added_count += 1
-            except Exception as e:
-                logger.error("Error enqueuing dropped video %s: %s", f, e)
+        if not file_paths:
+            return
 
-        self.refresh_videos()
-        if added_count > 0:
-            InfoBar.success(
-                title="Đã Kéo Thả Video",
-                content=f"Đã nạp thành công {added_count} video từ Explorer vào hàng đợi.",
-                position=InfoBarPosition.TOP,
-                parent=self,
-            )
+        InfoBar.info(
+            title="Đang Nạp Video",
+            content=f"Đang băm SHA-256 và xử lý {len(file_paths)} video kéo thả từ máy tính trong nền...",
+            position=InfoBarPosition.TOP,
+            parent=self,
+        )
+
+        worker = VideoImportWorker(file_paths=file_paths, upload_service=self.upload_service)
+        worker.signals.completed.connect(self._on_video_import_completed)
+        self.thread_pool.dispatch(worker)
 
     def _on_upload_progress(self, video_id: int, uploaded: int, total: int, pct: float) -> None:
         self.video_table.update_progress(video_id, pct)

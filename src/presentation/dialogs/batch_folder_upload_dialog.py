@@ -10,7 +10,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QThreadPool
 from PyQt6.QtWidgets import (
     QDialog,
     QFileDialog,
@@ -28,11 +28,13 @@ from qfluentwidgets import (
     InfoBarPosition,
     LineEdit,
     PrimaryPushButton,
+    ProgressBar,
     PushButton,
     SpinBox,
 )
 
 from src.application.services.upload_service import UploadService
+from src.application.workers.folder_distribution_worker import FolderDistributionWorker
 from src.infrastructure.database.repositories.profile_repository import ProfileRepository
 
 logger = logging.getLogger(__name__)
@@ -61,8 +63,9 @@ class BatchFolderUploadDialog(QDialog):
         self.project_name = project_name
         self.distributed_videos: list[dict[str, Any]] = []
         self.auto_start_upload: bool = False
+        self.worker: FolderDistributionWorker | None = None
 
-        self.setWindowTitle("Nạp Thư Mục _Phân Bổ (Batch Upload)")
+        self.setWindowTitle("Nạp Thư Mục Phân Bổ (Batch Upload)")
         self.resize(780, 700)
         self._init_ui()
         if self.initial_folder:
@@ -191,10 +194,19 @@ class BatchFolderUploadDialog(QDialog):
 
         main_layout.addWidget(grp_opts)
 
+        # Progress Bar & Async Status (Guarantees zero GUI freeze)
+        self.progress_bar = ProgressBar(self)
+        self.progress_bar.setVisible(False)
+        self.lbl_progress_status = QLabel("", self)
+        self.lbl_progress_status.setVisible(False)
+        self.lbl_progress_status.setStyleSheet("font-size: 12px; color: #0078D4; font-weight: 600;")
+        main_layout.addWidget(self.progress_bar)
+        main_layout.addWidget(self.lbl_progress_status)
+
         # Action Buttons
         btn_layout = QHBoxLayout()
-        btn_cancel = PushButton("Hủy Bỏ", self)
-        btn_cancel.clicked.connect(self.reject)
+        self.btn_cancel = PushButton("Hủy Bỏ", self)
+        self.btn_cancel.clicked.connect(self._on_cancel_clicked)
 
         self.btn_schedule_only = PushButton("Lập Lịch Hàng Đợi (Queue Only)", self)
         self.btn_schedule_only.clicked.connect(self._on_schedule_only)
@@ -202,7 +214,7 @@ class BatchFolderUploadDialog(QDialog):
         self.btn_run_now = PrimaryPushButton("BẮT ĐẦU ĐĂNG NGAY (Run Now)", self)
         self.btn_run_now.clicked.connect(self._on_run_now)
 
-        btn_layout.addWidget(btn_cancel)
+        btn_layout.addWidget(self.btn_cancel)
         btn_layout.addStretch()
         btn_layout.addWidget(self.btn_schedule_only)
         btn_layout.addWidget(self.btn_run_now)
@@ -311,7 +323,103 @@ class BatchFolderUploadDialog(QDialog):
             self.lbl_scan_info.setText(f"Lỗi khi quét thư mục: {e}")
             self.lbl_scan_info.setStyleSheet("font-size: 12px; color: #D83B01; font-weight: 600;")
 
+    def _on_cancel_clicked(self) -> None:
+        """Cooperative cancel handler terminating worker if active before rejecting."""
+        if self.worker and not self.worker.is_cancelled:
+            self.worker.cancel()
+        self.reject()
+
+    def _reset_ui_after_distribution(self) -> None:
+        """Restores UI interactive state after background distribution finishes or errors."""
+        self.btn_schedule_only.setEnabled(True)
+        self.btn_run_now.setEnabled(True)
+        self.btn_browse.setEnabled(True)
+        self.progress_bar.setVisible(False)
+        self.lbl_progress_status.setVisible(False)
+
+    def _start_async_distribution(self, auto_start: bool) -> None:
+        """Dispatches folder distribution to background QThreadPool with non-blocking progress."""
+        folder_str = self.txt_folder.text().strip()
+        if not folder_str or not Path(folder_str).is_dir():
+            InfoBar.error(
+                title="Thư mục không hợp lệ",
+                content="Vui lòng chọn thư mục chứa video thực tế hợp lệ.",
+                position=InfoBarPosition.TOP,
+                parent=self,
+            )
+            return
+
+        selected_pids = self.get_selected_profile_ids()
+        if not selected_pids:
+            InfoBar.warning(
+                title="Chưa chọn tài khoản",
+                content="Vui lòng tích chọn ít nhất 1 tài khoản đích để phân bổ video.",
+                position=InfoBarPosition.TOP,
+                parent=self,
+            )
+            return
+
+        self.auto_start_upload = auto_start
+        self.btn_schedule_only.setEnabled(False)
+        self.btn_run_now.setEnabled(False)
+        self.btn_browse.setEnabled(False)
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setValue(0)
+        self.lbl_progress_status.setVisible(True)
+        self.lbl_progress_status.setText("⏳ Đang chuẩn bị quét và băm SHA-256 khử trùng lặp...")
+
+        self.worker = FolderDistributionWorker(
+            upload_service=self.upload_service,
+            folder_path=folder_str,
+            profile_ids=selected_pids,
+            min_interval_hours=float(self.spin_interval.value()),
+            random_order=self.chk_shuffle.isChecked(),
+            deduplicate=self.chk_deduplicate.isChecked(),
+            caption_template=self.txt_spintax.text().strip() or None,
+            allow_comment=self.chk_comment.isChecked(),
+            allow_duet=self.chk_duet.isChecked(),
+            allow_stitch=self.chk_stitch.isChecked(),
+            allow_hd=self.chk_allow_hd.isChecked(),
+            is_ai_generated=self.chk_is_ai.isChecked(),
+        )
+        self.worker.signals.progress.connect(self._on_worker_progress)
+        self.worker.signals.completed.connect(self._on_worker_completed)
+        self.worker.signals.failed.connect(self._on_worker_failed)
+        QThreadPool.globalInstance().start(self.worker)
+
+    def _on_worker_progress(self, current: int, total: int, file_name: str) -> None:
+        """Updates progress bar and label smoothly on main thread."""
+        self.progress_bar.setMaximum(max(1, total))
+        self.progress_bar.setValue(current)
+        self.lbl_progress_status.setText(f"🔍 Đang phân tích & kiểm tra trùng lặp: {current}/{total} ({file_name})...")
+
+    def _on_worker_completed(self, items: list[dict[str, Any]]) -> None:
+        """Handles successful worker completion."""
+        self.distributed_videos = items
+        if not self.distributed_videos:
+            self._reset_ui_after_distribution()
+            InfoBar.warning(
+                title="Không có video khả dụng",
+                content="Không tìm thấy video mới trong thư mục hoặc toàn bộ video đã được đăng trước đó.",
+                position=InfoBarPosition.TOP,
+                parent=self,
+            )
+            return
+        self.accept()
+
+    def _on_worker_failed(self, error_msg: str) -> None:
+        """Handles worker execution failure."""
+        self._reset_ui_after_distribution()
+        logger.error("Error distributing folder videos asynchronously: %s", error_msg)
+        InfoBar.error(
+            title="Lỗi phân bổ",
+            content=error_msg,
+            position=InfoBarPosition.TOP,
+            parent=self,
+        )
+
     def _execute_distribution(self) -> bool:
+        """Synchronous distribution runner for headless test environments or direct execution."""
         folder_str = self.txt_folder.text().strip()
         if not folder_str or not Path(folder_str).is_dir():
             InfoBar.error(
@@ -369,11 +477,7 @@ class BatchFolderUploadDialog(QDialog):
             return False
 
     def _on_schedule_only(self) -> None:
-        if self._execute_distribution():
-            self.auto_start_upload = False
-            self.accept()
+        self._start_async_distribution(auto_start=False)
 
     def _on_run_now(self) -> None:
-        if self._execute_distribution():
-            self.auto_start_upload = True
-            self.accept()
+        self._start_async_distribution(auto_start=True)

@@ -3,7 +3,7 @@
 ## 1. Context & User Requirement
 Người dùng yêu cầu đơn giản hóa tối đa quy trình và cập nhật phía Giao diện:
 - Phân nhóm tài khoản theo Dự án (Project) tương ứng với việc phân nhóm nguồn video theo từng thư mục riêng của Dự án (ví dụ Nhóm Japan trỏ vào thư mục Japan, Nhóm Hàn trỏ vào thư mục Hàn).
-- Nút bấm thanh công cụ: `📁 Nạp Thư Mục _Phân Bổ`.
+- Nút bấm thanh công cụ: `📁 Nạp Thư Mục Phân Bổ`.
 - Checkbox `Lên lịch TikTok Studio (Cloud)` trực tiếp trên thanh công cụ Video ở màn hình chính, đồng bộ tự động vào `ScheduleVideoDialog`.
 - Bảng Video (`VideoQueueTableWidget`): Bổ sung cột hiển thị `Dự Án` rõ ràng (ở vị trí cột 2, ngay sau cột `Tiêu đề`) để người dùng nhận diện ngay video thuộc chiến dịch nào.
 - Hộp thoại Nạp Thư Mục Phân Bổ (`BatchFolderUploadDialog`):

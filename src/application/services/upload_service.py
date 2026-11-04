@@ -48,10 +48,10 @@ class UploadService:
 
     @staticmethod
     def compute_sha256(path: Path) -> str:
-        """Calculates SHA-256 checksum for file deduplication."""
+        """Calculates SHA-256 checksum for file deduplication with 4MB buffer."""
         hasher = hashlib.sha256()
         with open(path, "rb") as f:
-            while chunk := f.read(1024 * 1024):
+            while chunk := f.read(4 * 1024 * 1024):
                 hasher.update(chunk)
         return hasher.hexdigest()
 
@@ -63,6 +63,7 @@ class UploadService:
         privacy: str = "PUBLIC_TO_EVERYONE",
         schedule_time: str | None = None,
         source_url: str | None = None,
+        assigned_profile_id: int | None = None,
     ) -> int:
         """
         Validates the video file, calculates content hash, and registers it in the database queue.
@@ -84,6 +85,7 @@ class UploadService:
             file_size=file_size,
             mtime=mtime,
             schedule_time=schedule_time,
+            assigned_profile_id=assigned_profile_id,
         )
 
     def distribute_folder_videos_to_queue(
@@ -101,11 +103,14 @@ class UploadService:
         allow_stitch: bool = True,
         allow_hd: bool = True,
         is_ai_generated: bool = False,
+        progress_callback: Callable[[int, int, str], None] | None = None,
+        cancel_token: Callable[[], bool] | None = None,
     ) -> list[dict[str, Any]]:
         """
         Scans folder for videos, filters duplicates, performs fair-share round-robin
         distribution across profile_ids, calculates staggered schedules, and registers
         drafts atomically into video_registry.
+        Supports async progress reporting and cooperative cancellation.
         """
         p = Path(folder_path).resolve()
         if not p.is_dir():
@@ -118,6 +123,9 @@ class UploadService:
         all_video_files: list[Path] = []
 
         for vf in p.rglob("*"):
+            if cancel_token and cancel_token():
+                logger.info("Folder scan cancelled early for: %s", folder_path)
+                return []
             if any(part in ("_posted", ".posted") for part in vf.parts):
                 continue
             if vf.is_file() and vf.suffix.lower() in valid_extensions:
@@ -136,8 +144,15 @@ class UploadService:
         # Deduplication filtering
         available_videos: list[dict[str, Any]] = []
         seen_in_batch: set[str] = set()
+        total_files = len(all_video_files)
 
-        for vf in all_video_files:
+        for idx, vf in enumerate(all_video_files, start=1):
+            if cancel_token and cancel_token():
+                logger.info("Distribution hashing cancelled at file %d/%d", idx, total_files)
+                break
+            if progress_callback:
+                progress_callback(idx, total_files, vf.name)
+
             file_hash = self.compute_sha256(vf)
             if deduplicate:
                 existing = self.video_repo.get_by_hash(file_hash)

@@ -452,7 +452,7 @@ def test_metric_main_window_full_synchronization_pipeline(qapp, metric_db: Path,
     window = TikTokManagerMainWindow(db_path=metric_db)
     try:
         # Check toolbar streamlined button labels
-        assert window.btn_batch_upload.text() == "Nạp Thư Mục _Phân Bổ"
+        assert window.btn_batch_upload.text() == "Nạp Thư Mục Phân Bổ"
         assert window.btn_pick_pc.text() == "Thêm Video"
         assert window.btn_schedule.text() == "Lên lịch"
         assert window.btn_start_upload.text() == "Bắt đầu Upload"

@@ -163,7 +163,7 @@ def test_main_window_project_change_syncs_profiles_and_videos_and_batch_button(
     window = TikTokManagerMainWindow(db_path=test_db)
     try:
         # Check toolbar button text exact match
-        assert window.btn_batch_upload.text() == "Nạp Thư Mục _Phân Bổ"
+        assert window.btn_batch_upload.text() == "Nạp Thư Mục Phân Bổ"
 
         # Initially 'Tất cả dự án' is selected
         assert window.project_combo.currentIndex() == 0
