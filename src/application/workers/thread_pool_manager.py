@@ -1,0 +1,69 @@
+"""
+Thread Pool Manager managing QThreadPool dispatch, worker concurrency limits, and global cancellation.
+"""
+
+import logging
+
+from PyQt6.QtCore import QObject, QThreadPool
+
+from src.application.workers.base_worker import BaseWorker
+
+logger = logging.getLogger(__name__)
+
+
+class ThreadPoolManager(QObject):
+    """
+    Singleton manager controlling thread pool execution, preventing GUI starvation,
+    and ensuring graceful cancellation of ongoing workers.
+    """
+
+    _instance: "ThreadPoolManager | None" = None
+
+    def __init__(self, max_threads: int = 10) -> None:
+        super().__init__()
+        self.pool = QThreadPool.globalInstance()
+        self.pool.setMaxThreadCount(max_threads)
+        self._tracked_workers: list[BaseWorker] = []
+
+    @classmethod
+    def instance(cls, max_threads: int = 10) -> "ThreadPoolManager":
+        if cls._instance is None:
+            cls._instance = cls(max_threads=max_threads)
+        return cls._instance
+
+    @property
+    def max_thread_count(self) -> int:
+        return self.pool.maxThreadCount()
+
+    def set_max_threads(self, count: int) -> None:
+        count = max(1, count)
+        self.pool.setMaxThreadCount(count)
+
+    def track_worker(self, worker: BaseWorker) -> None:
+        """Adds worker to tracking list for cooperative cancellation."""
+        self._tracked_workers.append(worker)
+
+        def _cleanup():
+            if worker in self._tracked_workers:
+                self._tracked_workers.remove(worker)
+
+        if hasattr(worker, "signals") and hasattr(worker.signals, "finished"):
+            worker.signals.finished.connect(_cleanup)
+
+    def dispatch(self, worker: BaseWorker) -> None:
+        """Tracks and launches worker onto the QThreadPool."""
+        self.track_worker(worker)
+        self.pool.start(worker)
+
+    def cancel_all(self) -> None:
+        """Cooperatively signals all active workers to abort."""
+        logger.info("Cancelling %d active background workers", len(self._tracked_workers))
+        for worker in list(self._tracked_workers):
+            try:
+                worker.cancel()
+            except Exception as e:
+                logger.warning("Error cancelling worker: %s", e)
+        self._tracked_workers.clear()
+
+    def active_count(self) -> int:
+        return self.pool.activeThreadCount()
