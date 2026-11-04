@@ -60,6 +60,8 @@ def generate_staggered_schedule(
             # Round minutes to nearest 5
             rounded_minute = round_to_nearest_5_minutes(scheduled_dt.minute)
             scheduled_dt = scheduled_dt.replace(minute=rounded_minute, second=0)
+            if scheduled_dt < min_allowed:
+                scheduled_dt += timedelta(minutes=5)
         else:
             if scheduled_dt < start_time:
                 scheduled_dt = start_time

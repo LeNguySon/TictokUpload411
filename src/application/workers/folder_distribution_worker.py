@@ -36,8 +36,9 @@ class FolderDistributionWorker(QRunnable):
     def __init__(
         self,
         upload_service: UploadService,
-        folder_path: str | Path,
-        profile_ids: list[int],
+        folder_path: str | Path | None = None,
+        profile_ids: list[int] | None = None,
+        project_batches: list[dict[str, Any]] | None = None,
         min_interval_hours: float = 12.0,
         random_order: bool = False,
         prioritize_newest: bool = True,
@@ -53,7 +54,8 @@ class FolderDistributionWorker(QRunnable):
         super().__init__()
         self.upload_service = upload_service
         self.folder_path = folder_path
-        self.profile_ids = profile_ids
+        self.profile_ids = profile_ids or []
+        self.project_batches = project_batches
         self.min_interval_hours = min_interval_hours
         self.random_order = random_order
         self.prioritize_newest = prioritize_newest
@@ -82,23 +84,41 @@ class FolderDistributionWorker(QRunnable):
         """Executes distribution in worker thread and reports progress/completion."""
         self.signals.started.emit()
         try:
-            items: list[dict[str, Any]] = self.upload_service.distribute_folder_videos_to_queue(
-                folder_path=self.folder_path,
-                profile_ids=self.profile_ids,
-                min_interval_hours=self.min_interval_hours,
-                random_order=self.random_order,
-                prioritize_newest=self.prioritize_newest,
-                deduplicate=self.deduplicate,
-                caption_template=self.caption_template,
-                privacy=self.privacy,
-                allow_comment=self.allow_comment,
-                allow_duet=self.allow_duet,
-                allow_stitch=self.allow_stitch,
-                allow_hd=self.allow_hd,
-                is_ai_generated=self.is_ai_generated,
-                progress_callback=lambda cur, tot, name: self.signals.progress.emit(cur, tot, name),
-                cancel_token=lambda: self._cancelled,
-            )
+            if self.project_batches is not None:
+                items: list[dict[str, Any]] = self.upload_service.distribute_multi_project_batches(
+                    project_batches=self.project_batches,
+                    min_interval_hours=self.min_interval_hours,
+                    random_order=self.random_order,
+                    prioritize_newest=self.prioritize_newest,
+                    deduplicate=self.deduplicate,
+                    caption_template=self.caption_template,
+                    privacy=self.privacy,
+                    allow_comment=self.allow_comment,
+                    allow_duet=self.allow_duet,
+                    allow_stitch=self.allow_stitch,
+                    allow_hd=self.allow_hd,
+                    is_ai_generated=self.is_ai_generated,
+                    progress_callback=lambda cur, tot, name: self.signals.progress.emit(cur, tot, name),
+                    cancel_token=lambda: self._cancelled,
+                )
+            else:
+                items: list[dict[str, Any]] = self.upload_service.distribute_folder_videos_to_queue(
+                    folder_path=self.folder_path or "",
+                    profile_ids=self.profile_ids,
+                    min_interval_hours=self.min_interval_hours,
+                    random_order=self.random_order,
+                    prioritize_newest=self.prioritize_newest,
+                    deduplicate=self.deduplicate,
+                    caption_template=self.caption_template,
+                    privacy=self.privacy,
+                    allow_comment=self.allow_comment,
+                    allow_duet=self.allow_duet,
+                    allow_stitch=self.allow_stitch,
+                    allow_hd=self.allow_hd,
+                    is_ai_generated=self.is_ai_generated,
+                    progress_callback=lambda cur, tot, name: self.signals.progress.emit(cur, tot, name),
+                    cancel_token=lambda: self._cancelled,
+                )
             self.signals.completed.emit(items)
         except Exception as e:
             logger.error("FolderDistributionWorker failed: %s", e, exc_info=True)

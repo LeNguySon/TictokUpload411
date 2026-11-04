@@ -24,3 +24,4 @@ Người dùng phản ánh hiện tượng khóa/treo/đơ giao diện (GUI Free
    - Nâng chunk buffer trong `UploadService.compute_sha256` từ 1MB lên 4MB, giảm 75% Windows I/O syscalls.
 5. **Chuẩn Hóa Nhãn Giao Diện**:
    - Sửa toàn bộ `"Nạp Thư Mục _Phân Bổ"` thành `"Nạp Thư Mục Phân Bổ"` trên MainWindow, Dialog title, và các file unit test.
+

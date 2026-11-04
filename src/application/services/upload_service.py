@@ -231,6 +231,157 @@ class UploadService:
         )
         return created_items
 
+    def distribute_multi_project_batches(
+        self,
+        project_batches: list[dict[str, Any]],
+        min_interval_hours: float = 12.0,
+        random_order: bool = False,
+        prioritize_newest: bool = True,
+        deduplicate: bool = True,
+        caption_template: str | None = None,
+        privacy: str = "PUBLIC_TO_EVERYONE",
+        allow_comment: bool = True,
+        allow_duet: bool = True,
+        allow_stitch: bool = True,
+        allow_hd: bool = True,
+        is_ai_generated: bool = False,
+        progress_callback: Callable[[int, int, str], None] | None = None,
+        cancel_token: Callable[[], bool] | None = None,
+    ) -> list[dict[str, Any]]:
+        """
+        Distributes video folders across multiple projects concurrently.
+        Each project batch contains:
+          - 'project_id': int
+          - 'project_name': str
+          - 'folder_path': str | Path
+          - 'profile_ids': list[int]
+        Fair-share distribution ensures videos from a project's folder are only
+        assigned to profiles within that project.
+        """
+        all_created_items: list[dict[str, Any]] = []
+        valid_extensions = {".mp4", ".mov", ".mkv", ".webm", ".avi"}
+        total_files_across_projects = 0
+        batch_file_maps: list[tuple[dict[str, Any], list[Path]]] = []
+
+        for batch in project_batches:
+            f_path_str = batch.get("folder_path")
+            if not f_path_str:
+                continue
+            f_path = Path(f_path_str).resolve()
+            if not f_path.is_dir() or not batch.get("profile_ids"):
+                continue
+
+            v_files: list[Path] = []
+            for vf in f_path.rglob("*"):
+                if cancel_token and cancel_token():
+                    return []
+                if any(part in ("_posted", ".posted") for part in vf.parts):
+                    continue
+                if vf.is_file() and vf.suffix.lower() in valid_extensions:
+                    v_files.append(vf)
+
+            if prioritize_newest:
+                v_files.sort(key=lambda f: f.stat().st_mtime, reverse=True)
+            else:
+                v_files.sort(key=lambda f: f.name)
+
+            total_files_across_projects += len(v_files)
+            batch_file_maps.append((batch, v_files))
+
+        if total_files_across_projects == 0:
+            return []
+
+        processed_so_far = 0
+
+        for batch, v_files in batch_file_maps:
+            if cancel_token and cancel_token():
+                break
+
+            proj_name = batch.get("project_name") or f"Project #{batch.get('project_id')}"
+            profile_ids = batch["profile_ids"]
+
+            seen_in_batch: set[str] = set()
+            available_videos: list[dict[str, Any]] = []
+
+            for vf in v_files:
+                if cancel_token and cancel_token():
+                    break
+
+                processed_so_far += 1
+                if progress_callback:
+                    progress_callback(processed_so_far, total_files_across_projects, f"[{proj_name}] {vf.name}")
+
+                file_hash = self.compute_sha256(vf)
+                if deduplicate:
+                    existing = self.video_repo.get_by_hash(file_hash)
+                    if existing:
+                        continue
+                    if file_hash in seen_in_batch:
+                        continue
+
+                seen_in_batch.add(file_hash)
+                available_videos.append(
+                    {
+                        "path": vf,
+                        "hash": file_hash,
+                        "size": vf.stat().st_size,
+                        "mtime": vf.stat().st_mtime,
+                    }
+                )
+
+            if not available_videos:
+                continue
+
+            if random_order:
+                random.shuffle(available_videos)
+
+            now = datetime.now()
+            for idx, item in enumerate(available_videos):
+                target_profile_id = profile_ids[idx % len(profile_ids)]
+                v_path: Path = item["path"]
+                raw_title = v_path.stem.replace("_", " ").replace("-", " ")
+
+                if caption_template:
+                    final_caption = spin_caption(caption_template, title=raw_title, filename=v_path.name)
+                else:
+                    final_caption = v_path.name
+
+                slot_offset_min = 5 + int(idx * (min_interval_hours * 60))
+                sched_time = (now + timedelta(minutes=slot_offset_min)).strftime("%Y-%m-%d %H:%M:%S")
+
+                vid_id = self.video_repo.register_or_update(
+                    video_hash=item["hash"],
+                    file_path=str(v_path),
+                    file_name=final_caption,
+                    file_size=item["size"],
+                    mtime=item["mtime"],
+                    assigned_profile_id=target_profile_id,
+                    schedule_time=sched_time,
+                )
+
+                all_created_items.append(
+                    {
+                        "id": vid_id,
+                        "file_path": str(v_path),
+                        "file_name": final_caption,
+                        "assigned_profile_id": target_profile_id,
+                        "schedule_time": sched_time,
+                        "privacy": privacy,
+                        "allow_comment": allow_comment,
+                        "allow_duet": allow_duet,
+                        "allow_stitch": allow_stitch,
+                        "allow_hd": allow_hd,
+                        "is_ai_generated": is_ai_generated,
+                    }
+                )
+
+        logger.info(
+            "Multi-project batch distribution completed: %d videos across %d projects",
+            len(all_created_items),
+            len(project_batches),
+        )
+        return all_created_items
+
     def execute_upload(
         self,
         video_id: int,

@@ -1311,6 +1311,7 @@ class TikTokManagerMainWindow(QMainWindow):
             initial_folder=self._get_initial_video_pick_folder(),
             project_id=proj_id,
             project_name=proj_name,
+            project_repo=self.project_repo,
             parent=self,
         )
         if dlg.exec():

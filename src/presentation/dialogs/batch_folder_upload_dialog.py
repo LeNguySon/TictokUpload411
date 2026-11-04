@@ -1,5 +1,5 @@
 """
-Batch Folder Upload Dialog: Allows scanning video directories, multi-profile fair-share distribution,
+Batch Folder Upload Dialog: Allows multi-project directory scanning, multi-profile fair-share distribution,
 golden hour scheduling, spintax templating, and automated batch upload triggering.
 Conforms to Gloglin2609 & SamMonny UI/UX standards with Fluent UI styling.
 """
@@ -21,6 +21,7 @@ from PyQt6.QtWidgets import (
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
+    QWidget,
 )
 from qfluentwidgets import (
     CheckBox,
@@ -36,14 +37,35 @@ from qfluentwidgets import (
 from src.application.services.upload_service import UploadService
 from src.application.workers.folder_distribution_worker import FolderDistributionWorker
 from src.infrastructure.database.repositories.profile_repository import ProfileRepository
+from src.infrastructure.database.repositories.project_repository import ProjectRepository
 
 logger = logging.getLogger(__name__)
 
 
+def count_valid_videos_in_folder(folder_path: str) -> int:
+    """Scans folder recursively and counts valid non-posted video files."""
+    if not folder_path:
+        return 0
+    p = Path(folder_path)
+    if not p.is_dir():
+        return 0
+    valid_exts = {".mp4", ".mov", ".mkv", ".webm", ".avi"}
+    try:
+        return sum(
+            1
+            for f in p.rglob("*")
+            if f.is_file()
+            and f.suffix.lower() in valid_exts
+            and not any(part in ("_posted", ".posted") for part in f.parts)
+        )
+    except Exception:
+        return 0
+
+
 class BatchFolderUploadDialog(QDialog):
     """
-    Comprehensive dialog for bulk folder scanning, deduplication, Spintax captions,
-    and fair-share round-robin distribution to TikTok accounts.
+    Comprehensive dialog for bulk folder scanning, multi-project folder management,
+    deduplication, Spintax captions, and fair-share round-robin distribution to TikTok accounts.
     """
 
     def __init__(
@@ -53,11 +75,13 @@ class BatchFolderUploadDialog(QDialog):
         initial_folder: str | None = None,
         project_id: int | None = None,
         project_name: str | None = None,
+        project_repo: ProjectRepository | None = None,
         parent=None,
     ) -> None:
         super().__init__(parent)
         self.profile_repo = profile_repo
         self.upload_service = upload_service
+        self.project_repo = project_repo or ProjectRepository(profile_repo.db_path)
         self.initial_folder = initial_folder
         self.project_id = project_id
         self.project_name = project_name
@@ -66,12 +90,10 @@ class BatchFolderUploadDialog(QDialog):
         self.worker: FolderDistributionWorker | None = None
 
         self.setWindowTitle("Nạp Thư Mục Phân Bổ (Batch Upload)")
-        self.resize(780, 700)
+        self.resize(850, 720)
         self._init_ui()
-        if self.initial_folder:
-            self.txt_folder.setText(self.initial_folder)
-            self._update_scanned_files_count(self.initial_folder)
-        self._load_profiles()
+        self._load_projects_table()
+        self._sync_profiles_for_selected_projects()
 
     def _init_ui(self) -> None:
         main_layout = QVBoxLayout(self)
@@ -79,36 +101,67 @@ class BatchFolderUploadDialog(QDialog):
         main_layout.setContentsMargins(16, 16, 16, 16)
 
         # 0. Active Project Indicator Banner
-        p_name = self.project_name or "Tất cả dự án (Toàn hệ thống)"
-        self.lbl_project_badge = QLabel(f"🏷️ Chiến Dịch / Dự Án Mục Tiêu: <b>{p_name}</b>", self)
+        if self.project_id is not None:
+            p_title = (
+                f"🏷️ Chiến Dịch Mục Tiêu: <b>{self.project_name}</b> (Có thể tích chọn thêm các nhóm khác bên dưới)"
+            )
+        else:
+            p_title = "🏷️ Chế Độ Phân Bổ: <b>Hỗ trợ phân bổ đồng thời nhiều Dự án / Nhóm theo thư mục riêng</b>"
+        self.lbl_project_badge = QLabel(p_title, self)
         self.lbl_project_badge.setStyleSheet(
             "background-color: #F3F2F1; border: 1px solid #D2D0CE; border-radius: 6px; padding: 8px 12px; font-size: 13px; color: #0078D4;"
         )
         main_layout.addWidget(self.lbl_project_badge)
 
-        # 1. Folder Selection Group
-        grp_folder = QGroupBox("1. Thư Mục Chứa Video Gốc (Source Folder)", self)
-        layout_folder_v = QVBoxLayout(grp_folder)
-        layout_folder_v.setSpacing(6)
+        # 1. Multi-Project Video Folders Table
+        grp_projects = QGroupBox("1. Danh Sách Các Dự Án / Nhóm & Thư Mục Video Riêng (Multi-Project Folders)", self)
+        layout_proj_v = QVBoxLayout(grp_projects)
+        layout_proj_v.setSpacing(6)
 
-        layout_folder_h = QHBoxLayout()
+        proj_btn_row = QHBoxLayout()
+        self.btn_select_all_proj = PushButton("Chọn Tất Cả Nhóm", self)
+        self.btn_select_all_proj.clicked.connect(self._select_all_projects)
+        self.btn_deselect_all_proj = PushButton("Bỏ Chọn", self)
+        self.btn_deselect_all_proj.clicked.connect(self._deselect_all_projects)
+        self.lbl_proj_summary = QLabel("Đã chọn: 0 nhóm", self)
+        self.lbl_proj_summary.setStyleSheet("font-size: 12px; color: #0078D4; font-weight: 600;")
+        proj_btn_row.addWidget(self.btn_select_all_proj)
+        proj_btn_row.addWidget(self.btn_deselect_all_proj)
+        proj_btn_row.addStretch()
+        proj_btn_row.addWidget(self.lbl_proj_summary)
+        layout_proj_v.addLayout(proj_btn_row)
+
+        self.project_table = QTableWidget(self)
+        self.project_table.setColumnCount(5)
+        self.project_table.setHorizontalHeaderLabels(
+            [
+                "Chọn",
+                "Dự Án / Nhóm",
+                "Thư Mục Video Riêng",
+                "Video Hợp Lệ",
+                "Số Kênh LIVE",
+            ]
+        )
+        self.project_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        self.project_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self.project_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        self.project_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        self.project_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        self.project_table.verticalHeader().setVisible(False)
+        self.project_table.setMinimumHeight(140)
+        layout_proj_v.addWidget(self.project_table)
+
+        # Backward compatibility fields (synced transparently)
         self.txt_folder = LineEdit(self)
-        self.txt_folder.setPlaceholderText("Chọn hoặc dán đường dẫn thư mục chứa video...")
-        self.txt_folder.textChanged.connect(self._on_folder_text_changed)
-        self.btn_browse = PushButton("Chọn Thư Mục...", self)
-        self.btn_browse.clicked.connect(self._on_browse_folder)
-        layout_folder_h.addWidget(self.txt_folder, 1)
-        layout_folder_h.addWidget(self.btn_browse)
-        layout_folder_v.addLayout(layout_folder_h)
-
+        self.txt_folder.setVisible(False)
+        self.txt_folder.textChanged.connect(self._update_scanned_files_count)
         self.lbl_scan_info = QLabel("Chưa quét thư mục", self)
-        self.lbl_scan_info.setStyleSheet("font-size: 12px; color: #605E5C; font-weight: 600;")
-        layout_folder_v.addWidget(self.lbl_scan_info)
+        self.lbl_scan_info.setVisible(False)
 
-        main_layout.addWidget(grp_folder)
+        main_layout.addWidget(grp_projects)
 
         # 2. Target Profiles Selection Group
-        grp_profiles = QGroupBox("2. Chọn Các Kênh / Tài Khoản Đăng Video (Target Profiles)", self)
+        grp_profiles = QGroupBox("2. Danh Sách Tài Khoản Nhận Video Của Các Nhóm Đã Chọn (Target Profiles)", self)
         layout_profiles = QVBoxLayout(grp_profiles)
         layout_profiles.setSpacing(6)
 
@@ -118,6 +171,7 @@ class BatchFolderUploadDialog(QDialog):
         self.btn_deselect_all = PushButton("Bỏ Chọn", self)
         self.btn_deselect_all.clicked.connect(self._deselect_all_profiles)
         self.lbl_selected_count = QLabel("Đã chọn: 0 tài khoản", self)
+        self.lbl_selected_count.setStyleSheet("font-size: 12px; color: #107C41; font-weight: 600;")
         btn_row.addWidget(self.btn_select_all)
         btn_row.addWidget(self.btn_deselect_all)
         btn_row.addStretch()
@@ -125,72 +179,65 @@ class BatchFolderUploadDialog(QDialog):
         layout_profiles.addLayout(btn_row)
 
         self.profile_table = QTableWidget(self)
-        self.profile_table.setColumnCount(4)
-        self.profile_table.setHorizontalHeaderLabels(["Chọn", "ID", "Tên Kênh (Profile Name)", "Quốc Gia"])
-        self.profile_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
-        self.profile_table.setColumnWidth(0, 50)
-        self.profile_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
-        self.profile_table.setColumnWidth(1, 60)
-        self.profile_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-        self.profile_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
-        self.profile_table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
-        self.profile_table.setFixedHeight(180)
+        self.profile_table.setColumnCount(5)
+        self.profile_table.setHorizontalHeaderLabels(["Chọn", "ID", "Dự Án / Nhóm", "Tên Tài Khoản", "Quốc Gia"])
+        self.profile_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        self.profile_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self.profile_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        self.profile_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        self.profile_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        self.profile_table.verticalHeader().setVisible(False)
+        self.profile_table.setMinimumHeight(130)
         layout_profiles.addWidget(self.profile_table)
+
         main_layout.addWidget(grp_profiles)
 
-        # 3. Distribution & Schedule Options Group
-        grp_opts = QGroupBox("3. Thuật Toán Phân Bổ & Lịch Giãn Cách (Scheduling Algorithm)", self)
+        # 3. Distribution & Publishing Options
+        grp_opts = QGroupBox("3. Cấu Hình Phân Bổ & Lịch Đăng (Distribution Options)", self)
         layout_opts = QVBoxLayout(grp_opts)
-        layout_opts.setSpacing(6)
+        layout_opts.setSpacing(8)
 
         row1 = QHBoxLayout()
-        self.chk_shuffle = CheckBox("Xáo trộn ngẫu nhiên thứ tự video (Shuffle)", self)
-        self.chk_shuffle.setChecked(True)
-        self.chk_deduplicate = CheckBox("Khử trùng lặp (Bỏ qua video đã nạp/đã đăng)", self)
-        self.chk_deduplicate.setChecked(True)
-        row1.addWidget(self.chk_shuffle)
-        row1.addWidget(self.chk_deduplicate)
-        row1.addStretch()
-        layout_opts.addLayout(row1)
-
-        row2 = QHBoxLayout()
-        row2.addWidget(QLabel("Giãn cách tối thiểu giữa các video (Giờ):", self))
+        row1.addWidget(QLabel("Khoảng cách tối thiểu giữa các video (giờ):", self))
         self.spin_interval = SpinBox(self)
         self.spin_interval.setRange(1, 72)
         self.spin_interval.setValue(12)
-        row2.addWidget(self.spin_interval)
-        row2.addSpacing(20)
-        self.chk_allow_hd = CheckBox("Tải lên chất lượng cao (HD 1080p/4K)", self)
-        self.chk_allow_hd.setChecked(True)
-        self.chk_is_ai = CheckBox("Gắn nhãn do AI tạo ra (AI Generated)", self)
-        self.chk_is_ai.setChecked(False)
-        row2.addWidget(self.chk_allow_hd)
-        row2.addWidget(self.chk_is_ai)
-        row2.addStretch()
+        row1.addWidget(self.spin_interval)
+        row1.addStretch()
+
+        self.chk_shuffle = CheckBox("Xáo trộn video ngẫu nhiên (Random Shuffle)", self)
+        self.chk_shuffle.setChecked(True)
+        self.chk_deduplicate = CheckBox("Khử trùng lặp nội dung (SHA-256 Checksum)", self)
+        self.chk_deduplicate.setChecked(True)
+        row1.addWidget(self.chk_shuffle)
+        row1.addWidget(self.chk_deduplicate)
+        layout_opts.addLayout(row1)
+
+        row2 = QHBoxLayout()
+        row2.addWidget(QLabel("Spintax Tiêu Đề:", self))
+        self.txt_spintax = LineEdit(self)
+        self.txt_spintax.setPlaceholderText("Ví dụ: {Tuyệt đỉnh|Cực phẩm} video {hôm nay|mới nhất} {title} #fyp #viral")
+        row2.addWidget(self.txt_spintax, 1)
         layout_opts.addLayout(row2)
 
-        # Interactions
         row3 = QHBoxLayout()
-        row3.addWidget(QLabel("Tương tác video:", self))
-        self.chk_comment = CheckBox("Bình luận", self)
+        self.chk_comment = CheckBox("Cho phép bình luận", self)
         self.chk_comment.setChecked(True)
-        self.chk_duet = CheckBox("Duet", self)
+        self.chk_duet = CheckBox("Cho phép Duet", self)
         self.chk_duet.setChecked(True)
-        self.chk_stitch = CheckBox("Stitch", self)
+        self.chk_stitch = CheckBox("Cho phép Stitch", self)
         self.chk_stitch.setChecked(True)
+        self.chk_allow_hd = CheckBox("Upload chất lượng cao (HD)", self)
+        self.chk_allow_hd.setChecked(True)
+        self.chk_is_ai = CheckBox("Gắn nhãn AI-Generated", self)
+
         row3.addWidget(self.chk_comment)
         row3.addWidget(self.chk_duet)
         row3.addWidget(self.chk_stitch)
+        row3.addWidget(self.chk_allow_hd)
+        row3.addWidget(self.chk_is_ai)
         row3.addStretch()
         layout_opts.addLayout(row3)
-
-        # Spintax Caption Template
-        row4 = QHBoxLayout()
-        row4.addWidget(QLabel("Mẫu Tiêu Đề Spintax:", self))
-        self.txt_spintax = LineEdit(self)
-        self.txt_spintax.setText("{Tuyệt phẩm|Đỉnh cao|Cực phẩm} {title} #fyp #viral #trending")
-        row4.addWidget(self.txt_spintax, 1)
-        layout_opts.addLayout(row4)
 
         main_layout.addWidget(grp_opts)
 
@@ -220,21 +267,194 @@ class BatchFolderUploadDialog(QDialog):
         btn_layout.addWidget(self.btn_run_now)
         main_layout.addLayout(btn_layout)
 
-    def _load_profiles(self) -> None:
+    def _load_projects_table(self) -> None:
+        """Loads projects into project_table with folder inputs and video counters."""
+        aggregates = self.project_repo.get_aggregates()
+        if not aggregates:
+            projects = self.project_repo.list_all()
+            aggregates = [
+                {
+                    "project_id": p["id"],
+                    "project_name": p["name"],
+                    "video_folder": p.get("video_folder"),
+                    "total_profiles": 0,
+                }
+                for p in projects
+            ]
+
+        self.project_table.setRowCount(len(aggregates))
+        for row, proj in enumerate(aggregates):
+            p_id = proj["project_id"]
+            p_name = proj["project_name"]
+            folder = proj.get("video_folder") or ""
+            if not folder and self.initial_folder and p_id == self.project_id:
+                folder = self.initial_folder
+
+            # Col 0: Checkbox
+            chk_item = QTableWidgetItem()
+            chk_item.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled)
+            chk_item.setData(Qt.ItemDataRole.UserRole, p_id)
+            if self.project_id is not None:
+                chk_item.setCheckState(Qt.CheckState.Checked if p_id == self.project_id else Qt.CheckState.Unchecked)
+            else:
+                chk_item.setCheckState(Qt.CheckState.Checked)
+
+            # Col 1: Project Name
+            name_item = QTableWidgetItem(f"🏷️ {p_name}")
+            name_item.setFlags(Qt.ItemFlag.ItemIsEnabled)
+            name_item.setData(Qt.ItemDataRole.UserRole, p_id)
+
+            # Col 2: Folder selector widget (LineEdit + Browse button)
+            cell_widget = QWidget(self)
+            cell_layout = QHBoxLayout(cell_widget)
+            cell_layout.setContentsMargins(4, 2, 4, 2)
+            cell_layout.setSpacing(6)
+
+            folder_edit = LineEdit(cell_widget)
+            folder_edit.setText(folder)
+            folder_edit.setPlaceholderText("Dán hoặc chọn đường dẫn video của nhóm...")
+
+            browse_btn = PushButton("Chọn...", cell_widget)
+            browse_btn.clicked.connect(
+                lambda _, r=row, pid=p_id, ed=folder_edit: self._on_browse_project_folder(r, pid, ed)
+            )
+            folder_edit.textChanged.connect(
+                lambda text, r=row, pid=p_id: self._on_project_folder_text_changed(r, pid, text)
+            )
+
+            cell_layout.addWidget(folder_edit, 1)
+            cell_layout.addWidget(browse_btn)
+
+            # Col 3: Scanned valid videos count
+            v_count = count_valid_videos_in_folder(folder)
+            scan_item = QTableWidgetItem(
+                f"📁 {v_count} video" if folder and v_count > 0 else ("⚠️ 0 video" if folder else "Chưa chọn")
+            )
+            scan_item.setFlags(Qt.ItemFlag.ItemIsEnabled)
+
+            # Col 4: Total profiles in project
+            prof_count = proj.get("total_profiles") or len(self.profile_repo.list_active(project_id=p_id))
+            prof_item = QTableWidgetItem(f"{prof_count} tài khoản")
+            prof_item.setFlags(Qt.ItemFlag.ItemIsEnabled)
+
+            self.project_table.setItem(row, 0, chk_item)
+            self.project_table.setItem(row, 1, name_item)
+            self.project_table.setCellWidget(row, 2, cell_widget)
+            self.project_table.setItem(row, 3, scan_item)
+            self.project_table.setItem(row, 4, prof_item)
+
+            # Sync initial folder to txt_folder if matching
+            if row == 0 or (self.project_id is not None and p_id == self.project_id):
+                self.txt_folder.setText(folder)
+                self._update_scanned_files_count(folder)
+
+        self.project_table.itemChanged.connect(self._on_project_table_item_changed)
+        self._update_project_summary()
+
+    def _on_browse_project_folder(self, row: int, project_id: int, edit: LineEdit) -> None:
+        folder = QFileDialog.getExistingDirectory(self, "Chọn Thư Mục Chứa Video", edit.text().strip() or "")
+        if folder:
+            edit.setText(folder)
+            self._on_project_folder_text_changed(row, project_id, folder)
+
+    def _on_project_folder_text_changed(self, row: int, project_id: int, text: str) -> None:
+        folder = text.strip()
+        v_count = count_valid_videos_in_folder(folder)
+        scan_text = f"📁 {v_count} video" if folder and v_count > 0 else ("⚠️ 0 video" if folder else "Chưa chọn")
+        item = self.project_table.item(row, 3)
+        if item:
+            item.setText(scan_text)
+        if folder and Path(folder).is_dir():
+            try:
+                self.project_repo.update(project_id, video_folder=folder)
+            except Exception as e:
+                logger.debug("Auto-save project video folder notice: %s", e)
+        self.txt_folder.setText(folder)
+        self._update_scanned_files_count(folder)
+
+    def _on_project_table_item_changed(self, item: QTableWidgetItem) -> None:
+        if item.column() == 0:
+            self._update_project_summary()
+            self._sync_profiles_for_selected_projects()
+
+    def _select_all_projects(self) -> None:
+        self.project_table.blockSignals(True)
+        for row in range(self.project_table.rowCount()):
+            item = self.project_table.item(row, 0)
+            if item:
+                item.setCheckState(Qt.CheckState.Checked)
+        self.project_table.blockSignals(False)
+        self._update_project_summary()
+        self._sync_profiles_for_selected_projects()
+
+    def _deselect_all_projects(self) -> None:
+        self.project_table.blockSignals(True)
+        for row in range(self.project_table.rowCount()):
+            item = self.project_table.item(row, 0)
+            if item:
+                item.setCheckState(Qt.CheckState.Unchecked)
+        self.project_table.blockSignals(False)
+        self._update_project_summary()
+        self._sync_profiles_for_selected_projects()
+
+    def _update_project_summary(self) -> None:
+        count = 0
+        for row in range(self.project_table.rowCount()):
+            item = self.project_table.item(row, 0)
+            if item and item.checkState() == Qt.CheckState.Checked:
+                count += 1
+        self.lbl_proj_summary.setText(f"Đã chọn: {count} nhóm")
+
+    def _sync_profiles_for_selected_projects(self) -> None:
+        """Loads and syncs target profiles for all checked projects."""
+        selected_project_ids = []
+        for row in range(self.project_table.rowCount()):
+            item = self.project_table.item(row, 0)
+            if item and item.checkState() == Qt.CheckState.Checked:
+                p_id = item.data(Qt.ItemDataRole.UserRole)
+                if p_id is not None:
+                    selected_project_ids.append(p_id)
+
+        all_projects = {p["id"]: p["name"] for p in self.project_repo.list_all()}
+        all_profiles = []
+
         if self.project_id is not None:
-            profiles = self.profile_repo.list_active(project_id=self.project_id)
-            if not profiles:
-                profiles = self.profile_repo.list_all()
+            all_profiles = self.profile_repo.list_active(project_id=self.project_id)
+            if not all_profiles:
+                all_profiles = self.profile_repo.list_all()
         else:
-            profiles = self.profile_repo.list_all()
-        self.profile_table.setRowCount(len(profiles))
-        for row, p in enumerate(profiles):
+            default_proj = self.project_repo.get_default_project()
+            default_pid = default_proj["id"] if default_proj else 1
+            seen_ids = set()
+
+            for p_id in selected_project_ids:
+                profs = self.profile_repo.list_active(project_id=p_id)
+                # If default project is selected, also include unassigned profiles
+                if p_id == default_pid:
+                    unassigned = [p for p in self.profile_repo.list_all() if p.get("project_id") is None]
+                    profs.extend(unassigned)
+                for p in profs:
+                    if p["id"] not in seen_ids:
+                        seen_ids.add(p["id"])
+                        all_profiles.append(p)
+
+            if not all_profiles:
+                all_profiles = self.profile_repo.list_all()
+
+        self.profile_table.blockSignals(True)
+        self.profile_table.setRowCount(len(all_profiles))
+        for row, p in enumerate(all_profiles):
             chk_item = QTableWidgetItem()
             chk_item.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled)
             chk_item.setCheckState(Qt.CheckState.Checked)
+            chk_item.setData(Qt.ItemDataRole.UserRole, p.get("project_id"))
 
             id_item = QTableWidgetItem(str(p["id"]))
             id_item.setFlags(Qt.ItemFlag.ItemIsEnabled)
+
+            proj_name = all_projects.get(p.get("project_id")) or "Mặc định"
+            proj_item = QTableWidgetItem(f"🏷️ {proj_name}")
+            proj_item.setFlags(Qt.ItemFlag.ItemIsEnabled)
 
             name_item = QTableWidgetItem(p.get("name") or p.get("account") or f"Profile #{p['id']}")
             name_item.setFlags(Qt.ItemFlag.ItemIsEnabled)
@@ -244,10 +464,11 @@ class BatchFolderUploadDialog(QDialog):
 
             self.profile_table.setItem(row, 0, chk_item)
             self.profile_table.setItem(row, 1, id_item)
-            self.profile_table.setItem(row, 2, name_item)
-            self.profile_table.setItem(row, 3, country_item)
+            self.profile_table.setItem(row, 2, proj_item)
+            self.profile_table.setItem(row, 3, name_item)
+            self.profile_table.setItem(row, 4, country_item)
 
-        self.profile_table.itemChanged.connect(self._update_selected_count)
+        self.profile_table.blockSignals(False)
         self._update_selected_count()
 
     def _select_all_profiles(self) -> None:
@@ -284,24 +505,59 @@ class BatchFolderUploadDialog(QDialog):
                     pass
         return pids
 
-    def _on_browse_folder(self) -> None:
-        folder = QFileDialog.getExistingDirectory(self, "Chọn Thư Mục Chứa Video", "")
-        if folder:
-            self.txt_folder.setText(folder)
-            self._update_scanned_files_count(folder)
+    def get_selected_project_batches(self) -> list[dict[str, Any]]:
+        """Extracts configuration batches for all checked projects in the project_table."""
+        batches: list[dict[str, Any]] = []
+        for row in range(self.project_table.rowCount()):
+            chk = self.project_table.item(row, 0)
+            if not chk or chk.checkState() != Qt.CheckState.Checked:
+                continue
 
-    def _on_folder_text_changed(self, text: str) -> None:
-        self._update_scanned_files_count(text.strip())
+            p_id = chk.data(Qt.ItemDataRole.UserRole)
+            name_item = self.project_table.item(row, 1)
+            raw_name = name_item.text().replace("🏷️ ", "") if name_item else f"Project #{p_id}"
+
+            cell_widget = self.project_table.cellWidget(row, 2)
+            f_edit = cell_widget.findChild(LineEdit) if cell_widget else None
+            f_path = f_edit.text().strip() if f_edit else ""
+
+            # Resolve assigned profile IDs for this project that are checked in profile_table
+            selected_pids = []
+            for p_row in range(self.profile_table.rowCount()):
+                p_chk = self.profile_table.item(p_row, 0)
+                if p_chk and p_chk.checkState() == Qt.CheckState.Checked:
+                    if p_chk.data(Qt.ItemDataRole.UserRole) == p_id:
+                        id_item = self.profile_table.item(p_row, 1)
+                        if id_item:
+                            try:
+                                selected_pids.append(int(id_item.text()))
+                            except ValueError:
+                                pass
+
+            # Fallback to active profiles of project if not displayed
+            if not selected_pids and p_id is not None:
+                selected_pids = [p["id"] for p in self.profile_repo.list_active(project_id=p_id)]
+
+            if f_path and Path(f_path).is_dir() and selected_pids:
+                batches.append(
+                    {
+                        "project_id": p_id,
+                        "project_name": raw_name,
+                        "folder_path": f_path,
+                        "profile_ids": selected_pids,
+                    }
+                )
+
+        return batches
 
     def _update_scanned_files_count(self, folder_str: str) -> None:
+        """Compatibility helper for scanning a single folder."""
         if not folder_str:
             self.lbl_scan_info.setText("Chưa quét thư mục")
-            self.lbl_scan_info.setStyleSheet("font-size: 12px; color: #605E5C; font-weight: 600;")
             return
         p = Path(folder_str)
         if not p.is_dir():
             self.lbl_scan_info.setText("⚠️ Thư mục không tồn tại trên máy tính.")
-            self.lbl_scan_info.setStyleSheet("font-size: 12px; color: #D83B01; font-weight: 600;")
             return
 
         valid_exts = {".mp4", ".mov", ".mkv", ".webm", ".avi"}
@@ -315,13 +571,10 @@ class BatchFolderUploadDialog(QDialog):
             )
             if count > 0:
                 self.lbl_scan_info.setText(f"📁 Đã tìm thấy: {count} video hợp lệ (quét đệ quy toàn bộ thư mục con)")
-                self.lbl_scan_info.setStyleSheet("font-size: 12px; color: #107C41; font-weight: 600;")
             else:
                 self.lbl_scan_info.setText("⚠️ Thư mục này chưa có file video hợp lệ (.mp4, .mov, .mkv, .webm, .avi)")
-                self.lbl_scan_info.setStyleSheet("font-size: 12px; color: #D83B01; font-weight: 600;")
         except Exception as e:
             self.lbl_scan_info.setText(f"Lỗi khi quét thư mục: {e}")
-            self.lbl_scan_info.setStyleSheet("font-size: 12px; color: #D83B01; font-weight: 600;")
 
     def _on_cancel_clicked(self) -> None:
         """Cooperative cancel handler terminating worker if active before rejecting."""
@@ -333,45 +586,45 @@ class BatchFolderUploadDialog(QDialog):
         """Restores UI interactive state after background distribution finishes or errors."""
         self.btn_schedule_only.setEnabled(True)
         self.btn_run_now.setEnabled(True)
-        self.btn_browse.setEnabled(True)
         self.progress_bar.setVisible(False)
         self.lbl_progress_status.setVisible(False)
 
     def _start_async_distribution(self, auto_start: bool) -> None:
-        """Dispatches folder distribution to background QThreadPool with non-blocking progress."""
-        folder_str = self.txt_folder.text().strip()
-        if not folder_str or not Path(folder_str).is_dir():
-            InfoBar.error(
-                title="Thư mục không hợp lệ",
-                content="Vui lòng chọn thư mục chứa video thực tế hợp lệ.",
-                position=InfoBarPosition.TOP,
-                parent=self,
-            )
-            return
-
-        selected_pids = self.get_selected_profile_ids()
-        if not selected_pids:
-            InfoBar.warning(
-                title="Chưa chọn tài khoản",
-                content="Vui lòng tích chọn ít nhất 1 tài khoản đích để phân bổ video.",
-                position=InfoBarPosition.TOP,
-                parent=self,
-            )
-            return
+        """Dispatches multi-project folder distribution to background QThreadPool."""
+        batches = self.get_selected_project_batches()
+        if not batches:
+            # Fallback check for single folder test compatibility
+            single_folder = self.txt_folder.text().strip()
+            single_pids = self.get_selected_profile_ids()
+            if single_folder and Path(single_folder).is_dir() and single_pids:
+                batches = [
+                    {
+                        "project_id": self.project_id or 1,
+                        "project_name": self.project_name or "Dự Án Mục Tiêu",
+                        "folder_path": single_folder,
+                        "profile_ids": single_pids,
+                    }
+                ]
+            else:
+                InfoBar.warning(
+                    title="Chưa có dự án hợp lệ",
+                    content="Vui lòng tích chọn ít nhất 1 Dự Án có thư mục video hợp lệ và có tài khoản đích.",
+                    position=InfoBarPosition.TOP,
+                    parent=self,
+                )
+                return
 
         self.auto_start_upload = auto_start
         self.btn_schedule_only.setEnabled(False)
         self.btn_run_now.setEnabled(False)
-        self.btn_browse.setEnabled(False)
         self.progress_bar.setVisible(True)
         self.progress_bar.setValue(0)
         self.lbl_progress_status.setVisible(True)
-        self.lbl_progress_status.setText("⏳ Đang chuẩn bị quét và băm SHA-256 khử trùng lặp...")
+        self.lbl_progress_status.setText("⏳ Đang chuẩn bị quét và băm SHA-256 các nhóm đã chọn...")
 
         self.worker = FolderDistributionWorker(
             upload_service=self.upload_service,
-            folder_path=folder_str,
-            profile_ids=selected_pids,
+            project_batches=batches,
             min_interval_hours=float(self.spin_interval.value()),
             random_order=self.chk_shuffle.isChecked(),
             deduplicate=self.chk_deduplicate.isChecked(),
@@ -387,11 +640,11 @@ class BatchFolderUploadDialog(QDialog):
         self.worker.signals.failed.connect(self._on_worker_failed)
         QThreadPool.globalInstance().start(self.worker)
 
-    def _on_worker_progress(self, current: int, total: int, file_name: str) -> None:
+    def _on_worker_progress(self, current: int, total: int, msg: str) -> None:
         """Updates progress bar and label smoothly on main thread."""
         self.progress_bar.setMaximum(max(1, total))
         self.progress_bar.setValue(current)
-        self.lbl_progress_status.setText(f"🔍 Đang phân tích & kiểm tra trùng lặp: {current}/{total} ({file_name})...")
+        self.lbl_progress_status.setText(f"🔍 Đang phân tích ({current}/{total}): {msg}")
 
     def _on_worker_completed(self, items: list[dict[str, Any]]) -> None:
         """Handles successful worker completion."""
@@ -400,7 +653,7 @@ class BatchFolderUploadDialog(QDialog):
             self._reset_ui_after_distribution()
             InfoBar.warning(
                 title="Không có video khả dụng",
-                content="Không tìm thấy video mới trong thư mục hoặc toàn bộ video đã được đăng trước đó.",
+                content="Không tìm thấy video mới trong các thư mục hoặc toàn bộ video đã được đăng trước đó.",
                 position=InfoBarPosition.TOP,
                 parent=self,
             )
@@ -410,7 +663,7 @@ class BatchFolderUploadDialog(QDialog):
     def _on_worker_failed(self, error_msg: str) -> None:
         """Handles worker execution failure."""
         self._reset_ui_after_distribution()
-        logger.error("Error distributing folder videos asynchronously: %s", error_msg)
+        logger.error("Error distributing multi-project folder videos asynchronously: %s", error_msg)
         InfoBar.error(
             title="Lỗi phân bổ",
             content=error_msg,
@@ -419,31 +672,32 @@ class BatchFolderUploadDialog(QDialog):
         )
 
     def _execute_distribution(self) -> bool:
-        """Synchronous distribution runner for headless test environments or direct execution."""
-        folder_str = self.txt_folder.text().strip()
-        if not folder_str or not Path(folder_str).is_dir():
-            InfoBar.error(
-                title="Thư mục không hợp lệ",
-                content="Vui lòng chọn thư mục chứa video thực tế hợp lệ.",
-                position=InfoBarPosition.TOP,
-                parent=self,
-            )
-            return False
-
-        selected_pids = self.get_selected_profile_ids()
-        if not selected_pids:
-            InfoBar.warning(
-                title="Chưa chọn tài khoản",
-                content="Vui lòng tích chọn ít nhất 1 tài khoản đích để phân bổ video.",
-                position=InfoBarPosition.TOP,
-                parent=self,
-            )
-            return False
+        """Synchronous runner for headless test environments or direct execution."""
+        batches = self.get_selected_project_batches()
+        if not batches:
+            single_folder = self.txt_folder.text().strip()
+            single_pids = self.get_selected_profile_ids()
+            if single_folder and Path(single_folder).is_dir() and single_pids:
+                batches = [
+                    {
+                        "project_id": self.project_id or 1,
+                        "project_name": self.project_name or "Dự Án Mục Tiêu",
+                        "folder_path": single_folder,
+                        "profile_ids": single_pids,
+                    }
+                ]
+            else:
+                InfoBar.warning(
+                    title="Chưa chọn dự án",
+                    content="Vui lòng chọn ít nhất 1 Dự Án với thư mục hợp lệ và tài khoản đích.",
+                    position=InfoBarPosition.TOP,
+                    parent=self,
+                )
+                return False
 
         try:
-            self.distributed_videos = self.upload_service.distribute_folder_videos_to_queue(
-                folder_path=folder_str,
-                profile_ids=selected_pids,
+            self.distributed_videos = self.upload_service.distribute_multi_project_batches(
+                project_batches=batches,
                 min_interval_hours=float(self.spin_interval.value()),
                 random_order=self.chk_shuffle.isChecked(),
                 deduplicate=self.chk_deduplicate.isChecked(),
@@ -454,26 +708,10 @@ class BatchFolderUploadDialog(QDialog):
                 allow_hd=self.chk_allow_hd.isChecked(),
                 is_ai_generated=self.chk_is_ai.isChecked(),
             )
-
-            if not self.distributed_videos:
-                InfoBar.warning(
-                    title="Không có video khả dụng",
-                    content="Không tìm thấy video mới trong thư mục hoặc toàn bộ video đã được đăng trước đó.",
-                    position=InfoBarPosition.TOP,
-                    parent=self,
-                )
-                return False
-
-            return True
-
+            return len(self.distributed_videos) > 0
         except Exception as e:
-            logger.error("Error distributing folder videos: %s", e)
-            InfoBar.error(
-                title="Lỗi phân bổ",
-                content=str(e),
-                position=InfoBarPosition.TOP,
-                parent=self,
-            )
+            logger.error("Error distributing batches: %s", e)
+            InfoBar.error(title="Lỗi phân bổ", content=str(e), position=InfoBarPosition.TOP, parent=self)
             return False
 
     def _on_schedule_only(self) -> None:
