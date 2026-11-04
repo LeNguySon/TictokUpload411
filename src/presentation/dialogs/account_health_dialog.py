@@ -1,20 +1,27 @@
 """
 AccountHealthDialog — Giao diện Kiểm tra Chất lượng Tài khoản, Gậy Vi phạm & Gậy Nguyên tác TikTok.
-Learned from Gloglin2609/ui/views/account_health_dialog.py with Windows 11 Fluent UI dark styling.
+Bổ sung:
+- Kháng cáo Video Vi phạm / Gậy Nguyên tác (Video Appeal)
+- Kiểm tra Tiến độ Kháng cáo (Check Appeals)
+- Đếm ngược & Nộp lại Đơn Quỹ Nhà Sáng Tạo (Creator Rewards Re-application)
+- Tích hợp GoLogin SDK & Proxy Routing
 """
 
 from __future__ import annotations
 
+import math
 import sqlite3
+from datetime import datetime
 from pathlib import Path
 
-from PyQt6.QtCore import QThreadPool
+from PyQt6.QtCore import QTimer
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
     QDialog,
     QFrame,
     QHBoxLayout,
     QHeaderView,
+    QInputDialog,
     QLabel,
     QPushButton,
     QTableWidget,
@@ -49,12 +56,12 @@ class HealthKpiCard(QFrame):
         layout.addWidget(self.title_label)
 
         self.value_label = QLabel(initial_value)
-        self.value_label.setStyleSheet(f"color: {color}; font-size: 16px; font-weight: bold;")
+        self.value_label.setStyleSheet(f"color: {color}; font-size: 15px; font-weight: bold;")
         layout.addWidget(self.value_label)
 
     def set_value(self, value_text: str, color: str = "#F1F5F9") -> None:
         self.value_label.setText(value_text)
-        self.value_label.setStyleSheet(f"color: {color}; font-size: 16px; font-weight: bold;")
+        self.value_label.setStyleSheet(f"color: {color}; font-size: 15px; font-weight: bold;")
 
 
 class AccountHealthDialog(QDialog):
@@ -70,7 +77,6 @@ class AccountHealthDialog(QDialog):
         self.profile_id = profile_id
         self.db_path = Path(db_path or "data/app.db")
         self.moderation_service = TikTokModerationService(db_path=self.db_path)
-        self.thread_pool = QThreadPool.globalInstance()
 
         self.setWindowTitle(f"🛡️ Kiểm Tra Chất Lượng & Gậy Vi Phạm TikTok — Profile #{profile_id}")
         self.setStyleSheet("""
@@ -119,8 +125,8 @@ class AccountHealthDialog(QDialog):
                 padding: 6px 8px;
             }
         """)
-        self.setMinimumSize(780, 520)
-        self.resize(960, 680)
+        self.setMinimumSize(850, 560)
+        self.resize(1020, 720)
 
         self._build_ui()
         self._load_data()
@@ -130,14 +136,21 @@ class AccountHealthDialog(QDialog):
         layout.setContentsMargins(18, 16, 18, 16)
         layout.setSpacing(12)
 
-        # 1. Header Title & Actions
+        # 1. Header Title & Top Actions
         title_row = QHBoxLayout()
         self.lbl_title = QLabel(f"🛡️ Sức Khỏe Kênh & Gậy Vi Phạm TikTok — Profile #{self.profile_id}")
         self.lbl_title.setStyleSheet("font-size: 16px; font-weight: bold; color: #F1F5F9;")
         title_row.addWidget(self.lbl_title)
         title_row.addStretch(1)
 
-        self.btn_refresh = QPushButton("🔄 Quét Sức Khỏe & Gậy Vi Phạm")
+        self.btn_check_appeals = QPushButton("🔄 Kiểm Tra Tiến Độ Kháng Cáo")
+        self.btn_check_appeals.setStyleSheet(
+            "background-color: #334155; color: #E2E8F0; padding: 6px 14px; border-radius: 6px; font-weight: 600;"
+        )
+        self.btn_check_appeals.clicked.connect(self._on_check_appeals_async)
+        title_row.addWidget(self.btn_check_appeals)
+
+        self.btn_refresh = QPushButton("⚡ Quét Toàn Kênh")
         self.btn_refresh.setStyleSheet(
             "background-color: #0284C7; color: white; padding: 6px 14px; border-radius: 6px; font-weight: bold;"
         )
@@ -145,22 +158,43 @@ class AccountHealthDialog(QDialog):
         title_row.addWidget(self.btn_refresh)
         layout.addLayout(title_row)
 
-        # 2. 4 KPI Status Cards
+        # 2. 5 KPI Status Cards (including Creator Rewards countdown)
         cards_layout = QHBoxLayout()
         cards_layout.setSpacing(10)
 
         self.card_standing = HealthKpiCard("CHẤT LƯỢNG TÀI KHOẢN", "Chưa xác minh", "#64748B")
-        self.card_strikes = HealthKpiCard("GẬY VI PHẠM TÍCH LŨY", "—", "#64748B")
-        self.card_penalty = HealthKpiCard("ĐIỂM PHẠT TOÀN KÊNH", "0 đ", "#64748B")
-        self.card_shadowban = HealthKpiCard("ƯỚC TÍNH RỦI RO CỤC BỘ", "Bình thường", "#10B981")
+        self.card_strikes = HealthKpiCard("GẬY TÍCH LŨY", "—", "#64748B")
+        self.card_penalty = HealthKpiCard("ĐIỂM PHẠT", "0 đ", "#64748B")
+        self.card_shadowban = HealthKpiCard("ƯỚC TÍNH RỦI RO", "Bình thường", "#10B981")
+        self.card_reapply_countdown = HealthKpiCard("QUỸ SÁNG TẠO (REWARDS)", "Đủ điều kiện", "#10B981")
 
         cards_layout.addWidget(self.card_standing)
         cards_layout.addWidget(self.card_strikes)
         cards_layout.addWidget(self.card_penalty)
         cards_layout.addWidget(self.card_shadowban)
+        cards_layout.addWidget(self.card_reapply_countdown)
         layout.addLayout(cards_layout)
 
-        # 3. Diagnostic Banner
+        # 3. Creator Rewards Program Re-application Banner
+        self.reapply_banner = QFrame()
+        self.reapply_banner.setStyleSheet("background-color: #0F172A; border: 1px solid #1E293B; border-radius: 8px;")
+        rb_layout = QHBoxLayout(self.reapply_banner)
+        rb_layout.setContentsMargins(14, 8, 14, 8)
+
+        self.lbl_reapply_status = QLabel("💎 Trạng thái Quỹ Nhà Sáng Tạo:")
+        self.lbl_reapply_status.setStyleSheet("color: #E2E8F0; font-size: 13px; font-weight: 500;")
+        rb_layout.addWidget(self.lbl_reapply_status)
+        rb_layout.addStretch(1)
+
+        self.btn_reapply_creator = QPushButton("💎 Nộp Lại Đơn Gia Nhập Quỹ Sáng Tạo")
+        self.btn_reapply_creator.setStyleSheet(
+            "background-color: #059669; color: white; padding: 6px 16px; border-radius: 6px; font-weight: bold;"
+        )
+        self.btn_reapply_creator.clicked.connect(self._on_reapply_creator_rewards_async)
+        rb_layout.addWidget(self.btn_reapply_creator)
+        layout.addWidget(self.reapply_banner)
+
+        # 4. Diagnostic Banner
         self.diag_frame = QFrame()
         self.diag_frame.setStyleSheet("background-color: #1E293B; border-radius: 8px; border: 1px solid #334155;")
         diag_layout = QVBoxLayout(self.diag_frame)
@@ -177,7 +211,7 @@ class AccountHealthDialog(QDialog):
         diag_layout.addWidget(self.lbl_diag_content)
         layout.addWidget(self.diag_frame)
 
-        # 4. Tabs: Video Vi Phạm & Quản lý
+        # 5. Tabs: Video Vi Phạm & Quản lý
         self.tabs = QTabWidget()
         layout.addWidget(self.tabs, 1)
 
@@ -185,6 +219,7 @@ class AccountHealthDialog(QDialog):
         tab_violate = QWidget()
         v_layout = QVBoxLayout(tab_violate)
         v_layout.setContentsMargins(6, 10, 6, 6)
+        v_layout.setSpacing(8)
 
         self.table_violate = QTableWidget(0, 5)
         self.table_violate.setHorizontalHeaderLabels(
@@ -194,7 +229,36 @@ class AccountHealthDialog(QDialog):
         self.table_violate.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         self.table_violate.setAlternatingRowColors(True)
         self.table_violate.verticalHeader().setVisible(False)
-        v_layout.addWidget(self.table_violate)
+        self.table_violate.itemSelectionChanged.connect(self._on_violate_selection_changed)
+        v_layout.addWidget(self.table_violate, 1)
+
+        # Action bar under violate table
+        action_bar_v = QHBoxLayout()
+        action_bar_v.addStretch(1)
+
+        self.btn_appeal_video = QPushButton("⚖️ Nộp Đơn Kháng Cáo Video Đang Chọn...")
+        self.btn_appeal_video.setEnabled(False)
+        self.btn_appeal_video.setStyleSheet("""
+            QPushButton {
+                background-color: #D97706;
+                color: white;
+                padding: 7px 18px;
+                border-radius: 6px;
+                font-weight: bold;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background-color: #F59E0B;
+            }
+            QPushButton:disabled {
+                background-color: #334155;
+                color: #64748B;
+            }
+        """)
+        self.btn_appeal_video.clicked.connect(lambda: self._on_appeal_selected_video())
+        action_bar_v.addWidget(self.btn_appeal_video)
+        v_layout.addLayout(action_bar_v)
+
         self.tabs.addTab(tab_violate, "⚠️ Video Bị Gậy Vi Phạm & Gậy Nguyên Tác")
 
         # Tab 2: Lịch Sử Vé Kháng Cáo
@@ -209,11 +273,25 @@ class AccountHealthDialog(QDialog):
         self.table_appeals.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
         self.table_appeals.setAlternatingRowColors(True)
         self.table_appeals.verticalHeader().setVisible(False)
-        a_layout.addWidget(self.table_appeals)
+        a_layout.addWidget(self.table_appeals, 1)
+
         self.tabs.addTab(tab_appeals, "📝 Lịch Sử Vé Kháng Cáo (Appeals)")
 
+    def _on_violate_selection_changed(self) -> None:
+        """Enables or disables the appeal button based on row selection."""
+        selected_rows = self.table_violate.selectionModel().selectedRows()
+        if not selected_rows:
+            self.btn_appeal_video.setEnabled(False)
+            return
+
+        row = selected_rows[0].row()
+        st_item = self.table_violate.item(row, 4)
+        status = st_item.text() if st_item else ""
+        # If already appealed, disable button
+        self.btn_appeal_video.setEnabled(status != "Đã nộp kháng cáo")
+
     def _load_data(self) -> None:
-        """Loads profile health and video violations directly from SQLite database."""
+        """Loads profile health, creator rewards countdown, and video violations from database."""
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         try:
@@ -225,8 +303,9 @@ class AccountHealthDialog(QDialog):
             strikes = int(p["strike_count"] or 0)
             points = int(p["total_penalty_points"] or 0)
             sdb = str(p["sdb"] or "0").strip()
+            date_reapply = p["date_reapply"]
 
-            # Update KPI Cards
+            # 1. Update KPI Cards
             if standing == "Good":
                 self.card_standing.set_value("Good", "#10B981")
             elif standing == "Warning":
@@ -250,11 +329,40 @@ class AccountHealthDialog(QDialog):
             self.card_penalty.set_value(f"{points} đ", "#0284C7" if points == 0 else "#EF4444")
 
             if sdb == "1":
-                self.card_shadowban.set_value("Có dấu hiệu Shadowban", "#EF4444")
+                self.card_shadowban.set_value("Dấu hiệu Shadowban", "#EF4444")
             else:
                 self.card_shadowban.set_value("Bình thường (FYF OK)", "#10B981")
 
-            # Update Diagnostic Content
+            # 2. Update Creator Rewards Countdown & Button
+            if date_reapply:
+                try:
+                    target_dt = datetime.fromisoformat(str(date_reapply))
+                    now_dt = datetime.now()
+                    if target_dt.tzinfo is not None and now_dt.tzinfo is None:
+                        now_dt = now_dt.astimezone()
+                    elif target_dt.tzinfo is None and now_dt.tzinfo is not None:
+                        target_dt = target_dt.astimezone()
+
+                    seconds = (target_dt - now_dt).total_seconds()
+                    if seconds > 0:
+                        days_left = max(1, math.ceil(seconds / 86400))
+                        self.card_reapply_countdown.set_value(f"⏳ Còn {days_left} ngày", "#F59E0B")
+                        self.lbl_reapply_status.setText(
+                            f"⏳ Đang chịu thời gian phạt Quỹ Sáng Tạo: Mở lại ngày {str(date_reapply)[:10]} (còn {days_left} ngày)."
+                        )
+                        self.btn_reapply_creator.setEnabled(False)
+                        self.btn_reapply_creator.setText(f"⏳ Còn {days_left} ngày để nộp lại")
+                        self.btn_reapply_creator.setStyleSheet(
+                            "background-color: #334155; color: #94A3B8; padding: 6px 16px; border-radius: 6px; font-weight: bold;"
+                        )
+                    else:
+                        self._set_reapply_eligible()
+                except Exception:
+                    self._set_reapply_eligible()
+            else:
+                self._set_reapply_eligible()
+
+            # 3. Update Diagnostic Content
             if strikes > 0:
                 self.lbl_diag_content.setText(
                     f"⚠️ Cảnh báo: Kênh đang bị dính {strikes}/3 gậy vi phạm chính sách hoặc gậy nguyên tác. "
@@ -267,7 +375,7 @@ class AccountHealthDialog(QDialog):
                 )
                 self.lbl_diag_content.setStyleSheet("color: #34D399; font-size: 13px;")
 
-            # Load violateVideos
+            # 4. Load violateVideos
             violations = conn.execute(
                 "SELECT * FROM violateVideos WHERE profile_id=? ORDER BY id DESC",
                 (self.profile_id,),
@@ -291,10 +399,15 @@ class AccountHealthDialog(QDialog):
                 self.table_violate.setItem(row_idx, 3, QTableWidgetItem(str(v_dict.get("appeal_date") or "—")))
 
                 st_text = str(v_dict.get("status") or "pending")
-                st_item = QTableWidgetItem("Chờ giải trình" if st_text == "pending" else st_text)
-                self.table_violate.setItem(row_idx, 4, st_item)
+                if st_text == "appealed":
+                    disp_status = "Đã nộp kháng cáo"
+                elif st_text == "pending":
+                    disp_status = "Chờ giải trình"
+                else:
+                    disp_status = st_text
+                self.table_violate.setItem(row_idx, 4, QTableWidgetItem(disp_status))
 
-            # Load accountAppeals
+            # 5. Load accountAppeals
             appeals = conn.execute(
                 "SELECT * FROM accountAppeals WHERE profile_id=? ORDER BY id DESC",
                 (self.profile_id,),
@@ -311,25 +424,172 @@ class AccountHealthDialog(QDialog):
         finally:
             conn.close()
 
-    def _run_scan_async(self) -> None:
-        """Executes full moderation scan in background thread."""
-        self.btn_refresh.setEnabled(False)
-        self.btn_refresh.setText("🔄 Đang quét TikTok API...")
+    def _set_reapply_eligible(self) -> None:
+        """Sets UI state to allow re-applying to Creator Rewards."""
+        self.card_reapply_countdown.set_value("Sẵn sàng nộp lại", "#10B981")
+        self.lbl_reapply_status.setText("🟢 Kênh đủ điều kiện nộp lại đơn tham gia Quỹ Nhà Sáng Tạo (Creator Rewards).")
+        self.btn_reapply_creator.setEnabled(True)
+        self.btn_reapply_creator.setText("💎 Nộp Lại Đơn Gia Nhập Quỹ Sáng Tạo")
+        self.btn_reapply_creator.setStyleSheet(
+            "background-color: #059669; color: white; padding: 6px 16px; border-radius: 6px; font-weight: bold;"
+        )
 
-        class ScanWorker(QWidget):
-            def __init__(self, service: TikTokModerationService, profile_id: int):
-                super().__init__()
-                self.service = service
-                self.profile_id = profile_id
+    def _on_appeal_selected_video(self, mock_reason: str | None = None) -> None:
+        """Submits an appeal for the currently selected video."""
+        selected_rows = self.table_violate.selectionModel().selectedRows()
+        if not selected_rows:
+            return
 
-        def do_scan():
-            res = self.moderation_service.scan_full_channel_health(self.profile_id)
-            return res
+        row = selected_rows[0].row()
+        video_id = self.table_violate.item(row, 0).text()
+
+        reason = mock_reason
+        if not reason:
+            reasons = [
+                "1. Video do chính chủ sáng tạo nguyên tác, tuân thủ tiêu chuẩn cộng đồng TikTok.",
+                "2. Đã có bản quyền hợp pháp đối với toàn bộ âm thanh và hình ảnh sử dụng.",
+                "3. Nội dung bình luận, đánh giá hoặc giáo dục có tính biến đổi sáng tạo (Fair Use).",
+            ]
+            item, ok = QInputDialog.getItem(
+                self,
+                "Nộp Đơn Kháng Cáo Video",
+                f"Chọn lý do kháng nghị cho Video #{video_id}:",
+                reasons,
+                0,
+                False,
+            )
+            if not ok or not item:
+                return
+            reason = item
+
+        # Optimistic UI update
+        self.table_violate.setItem(row, 4, QTableWidgetItem("Đã nộp kháng cáo"))
+        self.btn_appeal_video.setEnabled(False)
 
         import concurrent.futures
 
         executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-        future = executor.submit(do_scan)
+        future = executor.submit(
+            self.moderation_service.submit_video_appeal,
+            self.profile_id,
+            video_id,
+            reason,
+        )
+
+        def check_appeal():
+            if future.done():
+                timer.stop()
+                try:
+                    future.result()
+                    self._load_data()
+                    InfoBar.success(
+                        title="Đã Nộp Kháng Cáo",
+                        content=f"Đơn kháng nghị cho video #{video_id} đã được gửi thành công.",
+                        position=InfoBarPosition.TOP,
+                        parent=self,
+                    )
+                except Exception as e:
+                    InfoBar.error(
+                        title="Lỗi Nộp Kháng Cáo",
+                        content=str(e),
+                        position=InfoBarPosition.TOP,
+                        parent=self,
+                    )
+
+        timer = QTimer(self)
+        timer.timeout.connect(check_appeal)
+        timer.start(100)
+
+    def _on_check_appeals_async(self) -> None:
+        """Checks appeal status and reconciles channel health asynchronously."""
+        self.btn_check_appeals.setEnabled(False)
+        self.btn_check_appeals.setText("🔄 Đang kiểm tra...")
+
+        import concurrent.futures
+
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        future = executor.submit(self.moderation_service.check_appeal_status, self.profile_id)
+
+        def check_status():
+            if future.done():
+                timer.stop()
+                try:
+                    res = future.result()
+                    self._load_data()
+                    InfoBar.success(
+                        title="Đồng Bộ Vé Kháng Cáo Hoàn Tất",
+                        content=f"Đã cập nhật {res.get('appeals_count', 0)} vé kháng cáo.",
+                        position=InfoBarPosition.TOP,
+                        parent=self,
+                    )
+                except Exception as e:
+                    InfoBar.error(
+                        title="Lỗi Kiểm Tra Kháng Cáo",
+                        content=str(e),
+                        position=InfoBarPosition.TOP,
+                        parent=self,
+                    )
+                finally:
+                    self.btn_check_appeals.setEnabled(True)
+                    self.btn_check_appeals.setText("🔄 Kiểm Tra Tiến Độ Kháng Cáo")
+
+        timer = QTimer(self)
+        timer.timeout.connect(check_status)
+        timer.start(150)
+
+    def _on_reapply_creator_rewards_async(self) -> None:
+        """Submits re-application to Creator Rewards Program asynchronously."""
+        self.btn_reapply_creator.setEnabled(False)
+        self.btn_reapply_creator.setText("⏳ Đang gửi đơn...")
+
+        import concurrent.futures
+
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        future = executor.submit(self.moderation_service.submit_creator_rewards_reapply, self.profile_id)
+
+        def check_reapply():
+            if future.done():
+                timer.stop()
+                try:
+                    res = future.result()
+                    self._load_data()
+                    if res.get("ok"):
+                        InfoBar.success(
+                            title="Gia Nhập Quỹ Sáng Tạo Thành Công",
+                            content="Đã nộp lại đơn tham gia Quỹ Nhà Sáng Tạo thành công. Trạng thái kênh đã phục hồi.",
+                            position=InfoBarPosition.TOP,
+                            parent=self,
+                        )
+                    else:
+                        InfoBar.warning(
+                            title="Chưa Thể Nộp Đơn",
+                            content=res.get("error", "Vui lòng chờ hết thời gian phạt."),
+                            position=InfoBarPosition.TOP,
+                            parent=self,
+                        )
+                except Exception as e:
+                    InfoBar.error(
+                        title="Lỗi Nộp Đơn Quỹ Sáng Tạo",
+                        content=str(e),
+                        position=InfoBarPosition.TOP,
+                        parent=self,
+                    )
+                finally:
+                    self._load_data()
+
+        timer = QTimer(self)
+        timer.timeout.connect(check_reapply)
+        timer.start(150)
+
+    def _run_scan_async(self) -> None:
+        """Executes full moderation scan in background thread."""
+        self.btn_refresh.setEnabled(False)
+        self.btn_refresh.setText("🔄 Đang quét...")
+
+        import concurrent.futures
+
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        future = executor.submit(self.moderation_service.scan_full_channel_health, self.profile_id)
 
         def on_done():
             try:
@@ -350,10 +610,7 @@ class AccountHealthDialog(QDialog):
                 )
             finally:
                 self.btn_refresh.setEnabled(True)
-                self.btn_refresh.setText("🔄 Quét Sức Khỏe & Gậy Vi Phạm")
-
-        # Check future completion via timer
-        from PyQt6.QtCore import QTimer
+                self.btn_refresh.setText("⚡ Quét Toàn Kênh")
 
         poll_timer = QTimer(self)
 

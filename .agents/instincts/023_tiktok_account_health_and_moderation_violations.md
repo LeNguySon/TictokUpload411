@@ -33,3 +33,4 @@
 - Khi kiểm tra kênh, luôn ưu tiên đọc cookie hợp lệ từ trường `cookies_json` hoặc `cookies_browser` của hồ sơ.
 - Mọi truy vấn mạng TikTok bắt buộc dùng `curl_cffi` với `impersonate="chrome120"` để giữ tính nhất quán vân tay TLS.
 - Không bao giờ block Main GUI Thread khi quét vi phạm hàng loạt.
+

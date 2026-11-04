@@ -196,3 +196,17 @@ def test_main_window_account_health_action_integration(isolated_db, app_instance
         win.close()
         win.deleteLater()
         app_instance.processEvents()
+
+
+def test_parse_cookie_header_with_dpapi():
+    """Verifies that parse_cookie_header_str decrypts DPAPI-protected cookies seamlessly."""
+    from src.infrastructure.credentials.dpapi import protect_text
+    from src.infrastructure.tiktok.moderation_service import parse_cookie_header_str
+
+    raw_cookies = '[{"name": "sessionid", "value": "encrypted_val_999"}, {"name": "ttwid", "value": "ttwid_token"}]'
+    dpapi_encrypted = protect_text(raw_cookies)
+    assert dpapi_encrypted.startswith("gloglin:dpapi:v1:")
+
+    cookie_hdr = parse_cookie_header_str(dpapi_encrypted)
+    assert "sessionid=encrypted_val_999" in cookie_hdr
+    assert "ttwid=ttwid_token" in cookie_hdr
