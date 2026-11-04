@@ -146,8 +146,6 @@ class VideoQueueTableWidget(TableWidget):
             layout.setContentsMargins(4, 2, 4, 2)
             pbar = ProgressBar(container)
             pbar.setValue(progress_pct)
-            pbar.setValMode(ProgressBar.ValMode.CUSTOM)
-            pbar.setCustomText(f"{progress_pct}%")
             layout.addWidget(pbar)
             self.setCellWidget(row_idx, 9, container)
             self._progress_bars[video_id] = pbar
@@ -172,39 +170,129 @@ class VideoQueueTableWidget(TableWidget):
             pbar = self._progress_bars[video_id]
             int_pct = int(min(100.0, max(0.0, percentage)))
             pbar.setValue(int_pct)
-            pbar.setCustomText(f"{int_pct}%")
+
+    def get_selected_videos(self) -> list[dict[str, Any]]:
+        """Returns list of selected video dictionaries stored in UserRole."""
+        selected_rows = sorted({index.row() for index in self.selectedIndexes()})
+        videos = []
+        for row in selected_rows:
+            item = self.item(row, 0)
+            if item:
+                data = item.data(Qt.ItemDataRole.UserRole)
+                if isinstance(data, dict):
+                    videos.append(data)
+                    continue
+            id_item = self.item(row, 11)
+            vid = int(id_item.text()) if id_item and id_item.text().isdigit() else row
+            videos.append({"id": vid, "row_index": row})
+        return videos
 
     def get_selected_video_ids(self) -> list[int]:
-        """Returns list of selected video IDs."""
-        selected_rows = {index.row() for index in self.selectedIndexes()}
-        return list(selected_rows)
+        """Returns list of selected video database IDs."""
+        videos = self.get_selected_videos()
+        return [v["id"] for v in videos if "id" in v]
 
     def contextMenuEvent(self, event) -> None:
-        selected_rows = self.get_selected_video_ids()
-        if not selected_rows:
+        pos = event.pos()
+        item = self.itemAt(pos)
+        if not item:
             return
 
+        clicked_row = item.row()
+        selected_rows = {index.row() for index in self.selectedIndexes()}
+        if clicked_row not in selected_rows:
+            self.clearSelection()
+            self.selectRow(clicked_row)
+
+        selected_videos = self.get_selected_videos()
+        if not selected_videos:
+            return
+
+        selected_ids = [v["id"] for v in selected_videos if "id" in v]
+        count = len(selected_videos)
+        first_video = selected_videos[0]
+        first_id = first_video.get("id")
+
         menu = RoundMenu(parent=self)
-        first_row = selected_rows[0]
 
-        act_edit = Action(FluentIcon.EDIT, "Chỉnh Sửa Thông Tin Video", self)
-        act_edit.triggered.connect(lambda: self.edit_metadata_requested.emit(first_row))
-        menu.addAction(act_edit)
-
-        act_schedule = Action(FluentIcon.CALENDAR, "Lên Lịch Đăng Video Đã Chọn...", self)
-        act_schedule.triggered.connect(lambda: self.schedule_video_requested.emit(selected_rows))
-        menu.addAction(act_schedule)
-
-        menu.addSeparator()
-
-        act_upload = Action(FluentIcon.SEND, "Đăng Ngay Video Này", self)
-        act_upload.triggered.connect(lambda: self.upload_now_requested.emit(first_row))
+        # --- Section 1: Publishing & Scheduling ---
+        upload_title = f"Đăng Ngay ({count} video đã chọn)..." if count > 1 else "Đăng Ngay Video Này"
+        act_upload = Action(FluentIcon.SEND, upload_title, self)
+        act_upload.triggered.connect(lambda: self.upload_now_requested.emit(selected_ids))
         menu.addAction(act_upload)
 
+        sched_title = f"Lên Lịch Đăng ({count} video đã chọn)..." if count > 1 else "Lên Lịch Đăng Video Này..."
+        act_schedule = Action(FluentIcon.CALENDAR, sched_title, self)
+        act_schedule.triggered.connect(lambda: self.schedule_video_requested.emit(selected_ids))
+        menu.addAction(act_schedule)
+
+        act_edit = Action(FluentIcon.EDIT, "Chỉnh Sửa Thông Tin Video...", self)
+        if first_id is not None:
+            act_edit.triggered.connect(lambda: self.edit_metadata_requested.emit(int(first_id)))
+        menu.addAction(act_edit)
+
         menu.addSeparator()
 
-        act_delete = Action(FluentIcon.DELETE, "Xóa Khỏi Bảng", self)
-        act_delete.triggered.connect(lambda: self.delete_video_requested.emit(selected_rows))
+        # --- Section 2: Preview & Local File Operations ---
+        file_path = str(first_video.get("file_path") or "")
+        act_preview = Action(FluentIcon.PLAY, "Xem Trước Video (Play Media)", self)
+        act_preview.setEnabled(bool(file_path))
+        act_preview.triggered.connect(lambda: self.preview_video_requested.emit(file_path))
+        menu.addAction(act_preview)
+
+        act_folder = Action(FluentIcon.FOLDER, "Mở Thư Mục Chứa Video (Explorer)", self)
+        act_folder.setEnabled(bool(file_path))
+        act_folder.triggered.connect(lambda: self.open_folder_requested.emit(file_path))
+        menu.addAction(act_folder)
+
+        tiktok_vid = first_video.get("tiktok_video_id") or first_video.get("publish_id")
+        act_web_vid = Action(FluentIcon.LINK, "Mở Video Đã Đăng (TikTok Web)", self)
+        act_web_vid.setEnabled(bool(tiktok_vid))
+        if tiktok_vid:
+            act_web_vid.triggered.connect(lambda: self.open_published_link_requested.emit(str(tiktok_vid)))
+        menu.addAction(act_web_vid)
+
+        menu.addSeparator()
+
+        # --- Section 3: Copy Information ---
+        copy_menu = RoundMenu("Sao Chép Thông Tin", self)
+        copy_menu.setIcon(FluentIcon.COPY)
+
+        def copy_text(val: str) -> None:
+            cb = QApplication.clipboard()
+            if cb:
+                cb.setText(val)
+
+        title_val = first_video.get("file_name") or first_video.get("title", "")
+        if title_val:
+            act_cp_title = Action(FluentIcon.COPY, "Sao chép Tiêu Đề", self)
+            act_cp_title.triggered.connect(lambda: copy_text(str(title_val)))
+            copy_menu.addAction(act_cp_title)
+
+        if file_path:
+            act_cp_path = Action(FluentIcon.COPY, "Sao chép Đường Dẫn File", self)
+            act_cp_path.triggered.connect(lambda: copy_text(file_path))
+            copy_menu.addAction(act_cp_path)
+
+        src_url = first_video.get("source_url") or first_video.get("pvf_url") or ""
+        if src_url:
+            act_cp_src = Action(FluentIcon.COPY, "Sao chép Link Nguồn / PVF", self)
+            act_cp_src.triggered.connect(lambda: copy_text(str(src_url)))
+            copy_menu.addAction(act_cp_src)
+
+        if tiktok_vid:
+            act_cp_tid = Action(FluentIcon.COPY, f"Sao chép ID TikTok: {tiktok_vid}", self)
+            act_cp_tid.triggered.connect(lambda: copy_text(str(tiktok_vid)))
+            copy_menu.addAction(act_cp_tid)
+
+        menu.addMenu(copy_menu)
+
+        menu.addSeparator()
+
+        # --- Section 4: Removal ---
+        del_title = f"Xóa Khỏi Hàng Đợi ({count})" if count > 1 else "Xóa Khỏi Hàng Đợi"
+        act_delete = Action(FluentIcon.DELETE, del_title, self)
+        act_delete.triggered.connect(lambda: self.delete_video_requested.emit(selected_ids))
         menu.addAction(act_delete)
 
         menu.exec(event.globalPos())

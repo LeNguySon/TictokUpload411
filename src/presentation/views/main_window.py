@@ -3,9 +3,12 @@ Main Application Window: Windows 11 Fluent Design Dual-Table Layout matching SSM
 """
 
 import logging
+import os
+import subprocess
 from pathlib import Path
 
-from PyQt6.QtCore import QPoint, QSize, Qt
+from PyQt6.QtCore import QPoint, QSize, Qt, QUrl
+from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtWidgets import (
     QCheckBox,
     QFileDialog,
@@ -52,6 +55,8 @@ from src.infrastructure.database.repositories.video_repository import VideoRepos
 from src.infrastructure.tiktok.sammonny_adapter import SamMonnyTikTokAdapter
 from src.presentation.dialogs.add_profile_dialog import AddProfileDialog
 from src.presentation.dialogs.api_cookie_dialog import ApiCookieDialog
+from src.presentation.dialogs.assign_project_dialog import AssignProjectDialog
+from src.presentation.dialogs.assign_proxy_dialog import AssignProxyDialog
 from src.presentation.dialogs.bulk_add_profile_dialog import BulkAddProfileDialog
 from src.presentation.dialogs.permissions_dialog import PermissionsDialog
 from src.presentation.dialogs.project_dialog import ProjectManagerDialog
@@ -286,15 +291,23 @@ class TikTokManagerMainWindow(QMainWindow):
         # Context Menu Events on Profile Table
         self.profile_table.open_orbita_requested.connect(self._on_launch_orbita)
         self.profile_table.check_cookie_requested.connect(self._on_check_single_cookie)
+        self.profile_table.sync_metrics_requested.connect(self._on_sync_selected_metrics)
+        self.profile_table.add_video_requested.connect(self._on_add_video_for_profiles)
         self.profile_table.update_proxy_requested.connect(self._on_update_profiles_proxy)
+        self.profile_table.change_project_requested.connect(self._on_change_profiles_project)
+        self.profile_table.open_web_profile_requested.connect(self._on_open_tiktok_web)
+        self.profile_table.open_folder_requested.connect(self._on_open_profile_folder)
         self.profile_table.change_status_requested.connect(self._on_change_profile_status)
         self.profile_table.soft_delete_requested.connect(self._on_soft_delete_profiles)
 
         # Context Menu & Selection Events on Video Table
         self.video_table.upload_now_requested.connect(self._on_upload_single_video)
-        self.video_table.delete_video_requested.connect(self._on_delete_selected_videos)
-        self.video_table.edit_metadata_requested.connect(self._on_edit_video_metadata)
         self.video_table.schedule_video_requested.connect(self._on_schedule_videos_from_table)
+        self.video_table.edit_metadata_requested.connect(self._on_edit_video_metadata)
+        self.video_table.preview_video_requested.connect(self._on_preview_video)
+        self.video_table.open_folder_requested.connect(self._on_open_video_folder)
+        self.video_table.open_published_link_requested.connect(self._on_open_published_link)
+        self.video_table.delete_video_requested.connect(self._on_delete_selected_videos)
         self.video_table.itemSelectionChanged.connect(self._on_video_selection_changed)
 
     def refresh_all_data(self) -> None:
@@ -547,57 +560,82 @@ class TikTokManagerMainWindow(QMainWindow):
         if not selected:
             InfoBar.warning(
                 title="Chưa chọn hồ sơ",
-                content="Vui lòng click chọn 1 hồ sơ trong bảng để mở trình duyệt.",
+                content="Vui lòng click chọn ít nhất 1 hồ sơ trong bảng để mở trình duyệt.",
                 position=InfoBarPosition.TOP,
                 parent=self,
             )
             return
-        self._on_launch_orbita(selected[0])
+        self._on_launch_orbita(selected)
 
-    def _on_launch_orbita(self, profile_id: int) -> None:
-        p = self.profile_repo.get_by_id(profile_id)
-        if not p:
+    def _on_launch_orbita(self, profile_id_or_ids: list[int] | int) -> None:
+        target_ids = profile_id_or_ids if isinstance(profile_id_or_ids, list) else [profile_id_or_ids]
+        if not target_ids:
             return
-        proxy = self.proxy_repo.get_by_id(p["proxy_id"]) if p.get("proxy_id") else None
+
         try:
-            # 1. Ensure SamMonny Daemon is active
             self.daemon_supervisor.ensure_daemon_running()
+        except Exception as de:
+            logger.warning("Daemon supervisor check warning: %s", de)
 
-            # 2. Check if profile has GoLogin UUID
-            uuid_val = p.get("uuid")
-            debugger_addr = None
-            if uuid_val:
-                try:
-                    debugger_addr = self.orbita_launcher.launch_via_gologin_sdk(
-                        profile_id=uuid_val,
-                        headless=False,
-                        sync=False,
-                    )
-                except Exception as sdk_err:
-                    logger.warning(
-                        "GoLogin SDK launch failed for %s, falling back to direct binary: %s", uuid_val, sdk_err
-                    )
+        success_count = 0
+        last_name = ""
+        last_cdp = ""
 
-            if debugger_addr:
-                InfoBar.success(
-                    title="Khởi Chạy Orbita (GoLogin SDK)",
-                    content=f"Đã mở trình duyệt Orbita cho hồ sơ '{p.get('name')}' (CDP: {debugger_addr}).",
-                    position=InfoBarPosition.TOP,
-                    parent=self,
-                )
+        for profile_id in target_ids:
+            p = self.profile_repo.get_by_id(profile_id)
+            if not p:
+                continue
+
+            last_name = p.get("name", "")
+            proxy = self.proxy_repo.get_by_id(p["proxy_id"]) if p.get("proxy_id") else None
+            try:
+                uuid_val = p.get("uuid")
+                debugger_addr = None
+                if uuid_val:
+                    try:
+                        debugger_addr = self.orbita_launcher.launch_via_gologin_sdk(
+                            profile_id=uuid_val,
+                            headless=False,
+                            sync=False,
+                        )
+                    except Exception as sdk_err:
+                        logger.warning(
+                            "GoLogin SDK launch failed for %s, falling back to direct binary: %s", uuid_val, sdk_err
+                        )
+
+                if debugger_addr:
+                    success_count += 1
+                    last_cdp = debugger_addr
+                else:
+                    proc = self.orbita_launcher.launch_profile(p, proxy)
+                    if proc and proc.pid:
+                        success_count += 1
+            except Exception as e:
+                logger.error("Launch orbita failed for profile %d: %s", profile_id, e)
+
+        if success_count == 1:
+            content_msg = f"Đã mở trình duyệt Orbita cho hồ sơ '{last_name}'"
+            if last_cdp:
+                content_msg += f" (CDP: {last_cdp})."
             else:
-                proc = self.orbita_launcher.launch_profile(p, proxy)
-                InfoBar.success(
-                    title="Khởi Chạy Orbita Antidetect",
-                    content=f"Đã mở trình duyệt Orbita cho hồ sơ '{p.get('name')}' (PID: {proc.pid}).",
-                    position=InfoBarPosition.TOP,
-                    parent=self,
-                )
-        except Exception as e:
-            logger.error("Launch orbita failed: %s", e)
+                content_msg += "."
+            InfoBar.success(
+                title="Khởi Chạy Orbita",
+                content=content_msg,
+                position=InfoBarPosition.TOP,
+                parent=self,
+            )
+        elif success_count > 1:
+            InfoBar.success(
+                title="Khởi Chạy Hàng Loạt Thành Công",
+                content=f"Đã mở đồng thời {success_count} cửa sổ trình duyệt Orbita Antidetect.",
+                position=InfoBarPosition.TOP,
+                parent=self,
+            )
+        else:
             InfoBar.error(
                 title="Khởi Chạy Thất Bại",
-                content=f"Không thể mở Orbita: {e}",
+                content="Không thể mở trình duyệt cho các hồ sơ đã chọn. Vui lòng kiểm tra cấu hình.",
                 position=InfoBarPosition.TOP,
                 parent=self,
             )
@@ -750,35 +788,45 @@ class TikTokManagerMainWindow(QMainWindow):
                 parent=self,
             )
 
-    def _on_check_single_cookie(self, profile_id: int) -> None:
-        p = self.profile_repo.get_by_id(profile_id)
-        cookie = p.get("cookie") or p.get("cookies_json") if p else None
-        if not cookie:
-            InfoBar.warning(
-                title="Không có Cookie",
-                content=f"Hồ sơ #{profile_id} chưa lưu cookie đăng nhập.",
+    def _on_check_single_cookie(self, profile_id_or_ids: list[int] | int) -> None:
+        ids = profile_id_or_ids if isinstance(profile_id_or_ids, list) else [profile_id_or_ids]
+        if not ids:
+            return
+
+        live_count = 0
+        die_count = 0
+        for p_id in ids:
+            p = self.profile_repo.get_by_id(p_id)
+            cookie = p.get("cookie") or p.get("cookies_json") if p else None
+            if cookie and ("sessionid=" in cookie or "msToken=" in cookie):
+                new_status = "LIVE"
+                live_count += 1
+            else:
+                new_status = "DIE"
+                die_count += 1
+            self.profile_repo.update(p_id, status=new_status)
+
+        self.refresh_profiles()
+        if len(ids) == 1:
+            stat = "LIVE" if live_count > 0 else "DIE"
+            InfoBar.success(
+                title="Kiểm Tra Cookie",
+                content=f"Hồ sơ #{ids[0]}: Trạng thái hiện tại là {stat}.",
                 position=InfoBarPosition.TOP,
                 parent=self,
             )
-            return
-
-        is_live = bool("sessionid=" in cookie or "msToken=" in cookie)
-        new_status = "LIVE" if is_live else "DIE"
-        self.profile_repo.update(profile_id, status=new_status)
-        self.refresh_profiles()
-        InfoBar.success(
-            title="Kiểm Tra Cookie",
-            content=f"Hồ sơ #{profile_id}: Trạng thái hiện tại là {new_status}.",
-            position=InfoBarPosition.TOP,
-            parent=self,
-        )
+        else:
+            InfoBar.success(
+                title="Kiểm Tra Cookie Hàng Loạt",
+                content=f"Đã kiểm tra {len(ids)} hồ sơ: {live_count} LIVE, {die_count} DIE.",
+                position=InfoBarPosition.TOP,
+                parent=self,
+            )
 
     def _on_update_profiles_proxy(self, profile_ids: list[int]) -> None:
         if not profile_ids:
             return
         try:
-            from src.presentation.dialogs.assign_proxy_dialog import AssignProxyDialog
-
             dlg = AssignProxyDialog(
                 profile_ids=profile_ids,
                 profile_repo=self.profile_repo,
@@ -802,12 +850,103 @@ class TikTokManagerMainWindow(QMainWindow):
                 parent=self,
             )
 
-    def _on_change_profile_status(self, profile_id: int, status: str) -> None:
-        self.profile_repo.update(profile_id, status=status)
+    def _on_change_profiles_project(self, profile_ids: list[int]) -> None:
+        if not profile_ids:
+            return
+        try:
+            dlg = AssignProjectDialog(
+                profile_ids=profile_ids,
+                profile_repo=self.profile_repo,
+                project_repo=self.project_repo,
+                parent=self,
+            )
+            if dlg.exec():
+                self.refresh_profiles()
+                InfoBar.success(
+                    title="Thành Công",
+                    content=f"Đã chuyển {len(profile_ids)} hồ sơ vào dự án.",
+                    position=InfoBarPosition.TOP,
+                    parent=self,
+                )
+        except Exception as e:
+            logger.error("AssignProjectDialog error: %s", e)
+            InfoBar.error(
+                title="Lỗi Chuyển Dự Án",
+                content=str(e),
+                position=InfoBarPosition.TOP,
+                parent=self,
+            )
+
+    def _on_add_video_for_profiles(self, profile_ids: list[int]) -> None:
+        if not profile_ids:
+            return
+        target_profile_id = profile_ids[0]
+        files, _ = QFileDialog.getOpenFileNames(
+            self,
+            f"Chọn video nạp cho hồ sơ #{target_profile_id}",
+            "",
+            "Video Files (*.mp4 *.mov *.webm *.mkv)",
+        )
+        if not files:
+            return
+
+        added_count = 0
+        for f in files:
+            try:
+                p = Path(f)
+                vid_id = self.upload_service.enqueue_video(file_path=p, title=p.stem)
+                self.video_repo.try_reserve(vid_id, target_profile_id)
+                added_count += 1
+            except Exception as e:
+                logger.error("Error adding video for profile %s: %s", target_profile_id, e)
+
+        self.refresh_videos()
+        InfoBar.success(
+            title="Đã Nạp Video Cho Hồ Sơ",
+            content=f"Đã nạp {added_count} video gán cho hồ sơ #{target_profile_id}.",
+            position=InfoBarPosition.TOP,
+            parent=self,
+        )
+
+    def _on_open_tiktok_web(self, username: str) -> None:
+        clean_user = username.strip().lstrip("@")
+        if not clean_user:
+            return
+        url = f"https://www.tiktok.com/@{clean_user}"
+        QDesktopServices.openUrl(QUrl(url))
+
+    def _on_open_profile_folder(self, folder_or_name: str) -> None:
+        folder_path = Path(folder_or_name)
+        if not folder_path.is_absolute():
+            base_dir = Path.home() / ".gologin" / "browser"
+            folder_path = base_dir / folder_or_name
+
+        if folder_path.exists():
+            os.startfile(str(folder_path))
+        else:
+            InfoBar.warning(
+                title="Thư Mục Không Tồn Tại",
+                content=f"Chưa tìm thấy thư mục hồ sơ: {folder_path}",
+                position=InfoBarPosition.TOP,
+                parent=self,
+            )
+
+    def _on_change_profile_status(self, profile_id_or_ids: list[int] | int, status: str) -> None:
+        ids = profile_id_or_ids if isinstance(profile_id_or_ids, list) else [profile_id_or_ids]
+        if not ids:
+            return
+        self.profile_repo.bulk_update_status(ids, status=status)
         self.refresh_profiles()
+        count = len(ids)
+        title = "Đổi Trạng Thái"
+        content = (
+            f"Đã chuyển {count} hồ sơ sang trạng thái: {status}."
+            if count > 1
+            else f"Hồ sơ #{ids[0]} đã chuyển sang trạng thái: {status}."
+        )
         InfoBar.info(
-            title="Đổi Trạng Thái",
-            content=f"Hồ sơ #{profile_id} đã chuyển sang trạng thái: {status}.",
+            title=title,
+            content=content,
             position=InfoBarPosition.TOP,
             parent=self,
         )
@@ -893,9 +1032,11 @@ class TikTokManagerMainWindow(QMainWindow):
 
         dlg = ScheduleVideoDialog(video_count=len(selected_rows), parent=self)
         if dlg.exec() and dlg.generated_schedules:
-            for idx, row in enumerate(selected_rows):
+            for idx, target in enumerate(selected_rows):
                 if idx < len(dlg.generated_schedules):
-                    self.video_table.setItem(row, 6, QTableWidgetItem(dlg.generated_schedules[idx]))
+                    if isinstance(target, int):
+                        self.video_repo.update_metadata(target, file_name=None)
+            self.refresh_videos()
             InfoBar.success(
                 title="Đã Lên Lịch Đăng",
                 content=f"Đã phân bổ lịch đăng cho {len(selected_rows)} video đã chọn.",
@@ -903,23 +1044,67 @@ class TikTokManagerMainWindow(QMainWindow):
                 parent=self,
             )
 
-    def _on_edit_video_metadata(self, row_index: int) -> None:
-        available = self.video_repo.list_available()
-        if row_index < len(available):
-            v = available[row_index]
-            dlg = VideoMetadataDialog(video_data=v, parent=self)
-            if dlg.exec():
-                new_title = dlg.video_data.get("title", "")
-                new_priv = dlg.video_data.get("privacy_level", "Public")
-                self.video_table.item(row_index, 1).setText(new_title)
-                self.video_table.item(row_index, 5).setText(new_priv)
-                self.video_repo.update_metadata(v["id"], file_name=new_title)
-                InfoBar.success(
-                    title="Cập Nhật Video",
-                    content=f"Đã cập nhật thông tin video: {new_title}",
-                    position=InfoBarPosition.TOP,
-                    parent=self,
-                )
+    def _on_edit_video_metadata(self, video_id_or_row: int) -> None:
+        v = self.video_repo.get_by_id(video_id_or_row)
+        if not v:
+            available = self.video_repo.list_available()
+            if video_id_or_row < len(available):
+                v = available[video_id_or_row]
+        if not v:
+            return
+
+        dlg = VideoMetadataDialog(video_data=v, parent=self)
+        if dlg.exec():
+            new_title = dlg.video_data.get("title", "")
+            self.video_repo.update_metadata(v["id"], file_name=new_title)
+            self.refresh_videos()
+            InfoBar.success(
+                title="Cập Nhật Video",
+                content=f"Đã cập nhật thông tin video: {new_title}",
+                position=InfoBarPosition.TOP,
+                parent=self,
+            )
+
+    def _on_preview_video(self, file_path: str) -> None:
+        p = Path(file_path)
+        if p.exists():
+            try:
+                os.startfile(str(p))
+            except Exception as e:
+                logger.error("Failed to preview video %s: %s", file_path, e)
+                InfoBar.error(title="Lỗi Phát Video", content=str(e), parent=self)
+        else:
+            InfoBar.warning(
+                title="Tệp Không Tồn Tại",
+                content=f"Không tìm thấy file video: {file_path}",
+                position=InfoBarPosition.TOP,
+                parent=self,
+            )
+
+    def _on_open_video_folder(self, file_path: str) -> None:
+        p = Path(file_path)
+        if p.exists():
+            try:
+                subprocess.run(["explorer.exe", "/select,", str(p.resolve())], check=False)
+            except Exception as e:
+                logger.error("Failed to open Explorer for %s: %s", file_path, e)
+        else:
+            InfoBar.warning(
+                title="Tệp Không Tồn Tại",
+                content=f"Không tìm thấy file video: {file_path}",
+                position=InfoBarPosition.TOP,
+                parent=self,
+            )
+
+    def _on_open_published_link(self, link_or_id: str) -> None:
+        token = link_or_id.strip()
+        if not token:
+            return
+        if token.startswith("http://") or token.startswith("https://"):
+            url = token
+        else:
+            url = f"https://www.tiktok.com/@user/video/{token}"
+        QDesktopServices.openUrl(QUrl(url))
 
     def _on_start_upload_queue(self) -> None:
         selected_profiles = self.profile_table.get_selected_profile_ids()
@@ -986,38 +1171,56 @@ class TikTokManagerMainWindow(QMainWindow):
     def _on_profile_updated(self, profile_id: int, fields: dict) -> None:
         self.refresh_profiles()
 
-    def _on_upload_single_video(self, row_index: int) -> None:
+    def _on_upload_single_video(self, video_id_or_ids: list[int] | int) -> None:
         selected_profiles = self.profile_table.get_selected_profile_ids()
         if not selected_profiles:
             InfoBar.warning(
                 title="Chưa chọn tài khoản",
-                content="Vui lòng chọn 1 tài khoản ở bảng trên để đăng video này.",
+                content="Vui lòng chọn ít nhất 1 tài khoản ở bảng trên để đăng video.",
                 position=InfoBarPosition.TOP,
                 parent=self,
             )
             return
 
-        available_videos = self.video_repo.list_available()
-        if row_index < len(available_videos):
-            video = available_videos[row_index]
+        ids = video_id_or_ids if isinstance(video_id_or_ids, list) else [video_id_or_ids]
+        dispatched = 0
+        for idx, target in enumerate(ids):
+            v = self.video_repo.get_by_id(target)
+            if not v:
+                avail = self.video_repo.list_available()
+                if target < len(avail):
+                    v = avail[target]
+            if not v:
+                continue
+
+            target_profile = selected_profiles[idx % len(selected_profiles)]
             worker = UploadWorker(
-                video_id=video["id"],
-                profile_id=selected_profiles[0],
+                video_id=v["id"],
+                profile_id=target_profile,
                 upload_service=self.upload_service,
                 signal_bus=self.signal_bus,
             )
             self.thread_pool.dispatch(worker)
-            InfoBar.info(
-                title="Bắt Đầu Đăng",
-                content=f"Đang đăng video '{video.get('file_name')}'...",
-                position=InfoBarPosition.TOP,
-                parent=self,
-            )
+            dispatched += 1
 
-    def _on_delete_selected_videos(self, rows: list[int]) -> None:
-        for r in sorted(rows, reverse=True):
-            self.video_table.removeRow(r)
-        self.lbl_video_header.setText(f"Bảng video Đã chọn 0 / {self.video_table.rowCount()}")
+        InfoBar.info(
+            title="Bắt Đầu Đăng",
+            content=f"Đã phát lệnh tải lên {dispatched} video trên QThreadPool.",
+            position=InfoBarPosition.TOP,
+            parent=self,
+        )
+
+    def _on_delete_selected_videos(self, video_ids_or_rows: list[int]) -> None:
+        if not video_ids_or_rows:
+            return
+        self.video_repo.delete_many(video_ids_or_rows)
+        self.refresh_videos()
+        InfoBar.info(
+            title="Xóa Video",
+            content=f"Đã xóa {len(video_ids_or_rows)} video khỏi hàng đợi.",
+            position=InfoBarPosition.TOP,
+            parent=self,
+        )
 
     def _on_clear_video_table(self) -> None:
         self.video_table.setRowCount(0)

@@ -5,6 +5,7 @@ Proxy Manager Dialog for bulk import, async health checks, and leak protection.
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
+    QApplication,
     QDialog,
     QHBoxLayout,
     QHeaderView,
@@ -13,11 +14,14 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
 )
 from qfluentwidgets import (
+    Action,
+    FluentIcon,
     InfoBar,
     InfoBarPosition,
     PlainTextEdit,
     PrimaryPushButton,
     PushButton,
+    RoundMenu,
     TableWidget,
 )
 
@@ -106,6 +110,8 @@ class ProxyManagerDialog(QDialog):
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.verticalHeader().setVisible(False)
         self.table.setSelectionBehavior(TableWidget.SelectionBehavior.SelectRows)
+        self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self._on_table_context_menu)
         layout.addWidget(self.table)
 
         # Bottom Close
@@ -206,6 +212,130 @@ class ProxyManagerDialog(QDialog):
         InfoBar.info(
             title="Dọn Dẹp Proxy",
             content=f"Đã xóa {deleted} proxy chết khỏi hệ thống.",
+            position=InfoBarPosition.TOP,
+            parent=self,
+        )
+
+    def _on_table_context_menu(self, pos) -> None:
+        item = self.table.itemAt(pos)
+        if not item:
+            return
+
+        clicked_row = item.row()
+        selected_rows = {idx.row() for idx in self.table.selectedIndexes()}
+        if clicked_row not in selected_rows:
+            self.table.clearSelection()
+            self.table.selectRow(clicked_row)
+
+        selected_rows = sorted({idx.row() for idx in self.table.selectedIndexes()})
+        if not selected_rows:
+            return
+
+        selected_ids: list[int] = []
+        selected_proxies = []
+        for r in selected_rows:
+            id_item = self.table.item(r, 0)
+            if id_item and id_item.text().isdigit():
+                pid = int(id_item.text())
+                selected_ids.append(pid)
+                p = self.proxy_repo.get_by_id(pid)
+                if p:
+                    selected_proxies.append(p)
+
+        if not selected_ids:
+            return
+
+        count = len(selected_ids)
+        first_proxy = selected_proxies[0] if selected_proxies else {}
+
+        menu = RoundMenu(parent=self.table)
+
+        # 1. Health check
+        check_text = f"Kiểm Tra Sức Khỏe ({count} proxy đã chọn)" if count > 1 else "Kiểm Tra Sức Khỏe Proxy Này"
+        act_check = Action(FluentIcon.SYNC, check_text, self)
+        act_check.triggered.connect(lambda: self._check_specific_proxies(selected_ids))
+        menu.addAction(act_check)
+
+        menu.addSeparator()
+
+        # 2. Copy proxy
+        copy_menu = RoundMenu("Sao Chép Proxy", self)
+        copy_menu.setIcon(FluentIcon.COPY)
+
+        def copy_text(val: str) -> None:
+            cb = QApplication.clipboard()
+            if cb:
+                cb.setText(val)
+
+        host_port = f"{first_proxy.get('host')}:{first_proxy.get('port')}"
+        act_cp_hp = Action(FluentIcon.COPY, f"Sao chép {host_port}", self)
+        act_cp_hp.triggered.connect(lambda: copy_text(host_port))
+        copy_menu.addAction(act_cp_hp)
+
+        if first_proxy.get("username"):
+            full_str = f"{host_port}:{first_proxy.get('username')}:{first_proxy.get('password') or ''}"
+            act_cp_full = Action(FluentIcon.COPY, "Sao chép Host:Port:User:Pass", self)
+            act_cp_full.triggered.connect(lambda: copy_text(full_str))
+            copy_menu.addAction(act_cp_full)
+
+        menu.addMenu(copy_menu)
+
+        # 3. Rotate link
+        change_ip_url = first_proxy.get("change_ip_url")
+        if change_ip_url:
+            act_rotate = Action(FluentIcon.GLOBE, "Kích Hoạt Xoay IP (Change IP URL)", self)
+            act_rotate.triggered.connect(lambda: self._trigger_rotate_ip(str(change_ip_url)))
+            menu.addAction(act_rotate)
+
+        menu.addSeparator()
+
+        # 4. Delete
+        del_text = f"Xóa {count} Proxy Đã Chọn" if count > 1 else "Xóa Proxy Khỏi Hệ Thống"
+        act_del = Action(FluentIcon.DELETE, del_text, self)
+        act_del.triggered.connect(lambda: self._delete_specific_proxies(selected_ids))
+        menu.addAction(act_del)
+
+        menu.exec(self.table.mapToGlobal(pos))
+
+    def _check_specific_proxies(self, proxy_ids: list[int]) -> None:
+        if not proxy_ids:
+            return
+        self.lbl_status.setText(f"Đang kiểm tra {len(proxy_ids)} proxy trong luồng nền...")
+        worker = ProxyCheckWorker(
+            proxy_ids=proxy_ids,
+            proxy_service=self.proxy_service,
+            signal_bus=self.signal_bus,
+        )
+        worker.signals.finished.connect(lambda: self.lbl_status.setText("Kiểm tra hoàn tất."))
+        ThreadPoolManager.instance().dispatch(worker)
+
+    def _delete_specific_proxies(self, proxy_ids: list[int]) -> None:
+        deleted = self.proxy_repo.delete_many(proxy_ids)
+        self.refresh_proxies()
+        InfoBar.info(
+            title="Đã Xóa Proxy",
+            content=f"Đã xóa {deleted} proxy khỏi cơ sở dữ liệu.",
+            position=InfoBarPosition.TOP,
+            parent=self,
+        )
+
+    def _trigger_rotate_ip(self, url: str) -> None:
+        import urllib.request
+
+        from PyQt6.QtCore import QRunnable
+
+        class RotateRunnable(QRunnable):
+            def run(self_inner):
+                try:
+                    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+                    urllib.request.urlopen(req, timeout=10)
+                except Exception:
+                    pass
+
+        ThreadPoolManager.instance().dispatch(RotateRunnable())
+        InfoBar.info(
+            title="Kích Hoạt Xoay IP",
+            content="Đã phát lệnh đổi IP tới endpoint nhà cung cấp.",
             position=InfoBarPosition.TOP,
             parent=self,
         )

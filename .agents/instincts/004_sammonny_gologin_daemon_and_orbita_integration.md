@@ -25,3 +25,4 @@ Hệ thống TikTok Account & Video Manager (`TAVM-2026-WIN`) kết nối với 
 4. **Bi-Directional Profile Syncing**:
    * Cơ sở dữ liệu `gologin.db` tại `D:\SamMonnygocLiengXiPoker\SamMonnygocLiengXiPoker\gologin.db` lưu trữ các profile thực tế.
    * `GoLoginSyncService` cho phép đồng bộ toàn bộ profile thực tế kèm theo cấu hình fingerprint đầy đủ vào bảng `profiles` của ứng dụng qua cơ chế upsert an toàn.
+
