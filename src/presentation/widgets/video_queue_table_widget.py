@@ -66,19 +66,20 @@ class VideoQueueTableWidget(TableWidget):
 
         # Set column widths matching UI snapshot
         self.setColumnWidth(0, 45)  # STT
-        self.setColumnWidth(1, 220)  # Tiêu đề
-        self.setColumnWidth(2, 80)  # Lượt view
-        self.setColumnWidth(3, 80)  # Lượt like
-        self.setColumnWidth(4, 75)  # Duration
-        self.setColumnWidth(5, 75)  # Hiển thị
-        self.setColumnWidth(6, 110)  # Lên lịch
-        self.setColumnWidth(7, 120)  # Upload To
-        self.setColumnWidth(8, 90)  # Tình trạng
-        self.setColumnWidth(9, 130)  # Source (Progress bar)
-        self.setColumnWidth(10, 150)  # Link gốc
-        self.setColumnWidth(11, 120)  # ID Video
-        self.setColumnWidth(12, 100)  # PVF URL
-        self.setColumnWidth(13, 100)  # PAF URL
+        self.setColumnWidth(1, 200)  # Tiêu đề
+        self.setColumnWidth(2, 110)  # Dự Án
+        self.setColumnWidth(3, 80)  # Lượt view
+        self.setColumnWidth(4, 80)  # Lượt like
+        self.setColumnWidth(5, 75)  # Duration
+        self.setColumnWidth(6, 75)  # Hiển thị
+        self.setColumnWidth(7, 110)  # Lên lịch
+        self.setColumnWidth(8, 120)  # Upload To
+        self.setColumnWidth(9, 90)  # Tình trạng
+        self.setColumnWidth(10, 130)  # Source (Progress bar)
+        self.setColumnWidth(11, 150)  # Link gốc
+        self.setColumnWidth(12, 120)  # ID Video
+        self.setColumnWidth(13, 100)  # PVF URL
+        self.setColumnWidth(14, 100)  # PAF URL
 
     def load_videos(self, videos: list[dict[str, Any]]) -> None:
         """Populates the table with video records."""
@@ -116,10 +117,21 @@ class VideoQueueTableWidget(TableWidget):
             # Col 1: Tiêu đề
             self.setItem(row_idx, 1, make_item(v.get("file_name") or v.get("title", f"Tiêu đề {row_idx + 1}")))
 
-            # Col 2: Lượt view
+            # Col 2: Dự Án
+            proj_name = v.get("project_name")
+            if not proj_name and v.get("file_path"):
+                try:
+                    proj_name = Path(v["file_path"]).parent.name
+                except Exception:
+                    proj_name = ""
+            if not proj_name:
+                proj_name = "Chung"
+            self.setItem(row_idx, 2, make_item(proj_name, Qt.AlignmentFlag.AlignCenter))
+
+            # Col 3: Lượt view
             self.setItem(
                 row_idx,
-                2,
+                3,
                 make_num_item(
                     v.get("views", 0),
                     format_mmo_metric(v.get("views", 0)),
@@ -127,10 +139,10 @@ class VideoQueueTableWidget(TableWidget):
                 ),
             )
 
-            # Col 3: Lượt like
+            # Col 4: Lượt like
             self.setItem(
                 row_idx,
-                3,
+                4,
                 make_num_item(
                     v.get("likes", 0),
                     format_mmo_metric(v.get("likes", 0)),
@@ -138,11 +150,11 @@ class VideoQueueTableWidget(TableWidget):
                 ),
             )
 
-            # Col 4: Duration
+            # Col 5: Duration
             duration = v.get("duration", 7.0)
             self.setItem(
                 row_idx,
-                4,
+                5,
                 make_num_item(
                     duration,
                     format_duration_string(duration),
@@ -150,22 +162,22 @@ class VideoQueueTableWidget(TableWidget):
                 ),
             )
 
-            # Col 5: Hiển thị
+            # Col 6: Hiển thị
             privacy_item = make_item("Public", Qt.AlignmentFlag.AlignCenter)
             privacy_item.setBackground(QColor("#E1DFDD"))
-            self.setItem(row_idx, 5, privacy_item)
+            self.setItem(row_idx, 6, privacy_item)
 
-            # Col 6: Lên lịch
+            # Col 7: Lên lịch
             sched_val = str(v.get("schedule_time") or v.get("schedule") or "")
-            self.setItem(row_idx, 6, make_item(sched_val, Qt.AlignmentFlag.AlignCenter))
+            self.setItem(row_idx, 7, make_item(sched_val, Qt.AlignmentFlag.AlignCenter))
 
-            # Col 7: Upload To
+            # Col 8: Upload To
             target_profile_name = v.get("assigned_profile_name") or (
                 f"Hồ sơ #{v['assigned_profile_id']}" if v.get("assigned_profile_id") else ""
             )
-            self.setItem(row_idx, 7, make_item(target_profile_name, Qt.AlignmentFlag.AlignCenter))
+            self.setItem(row_idx, 8, make_item(target_profile_name, Qt.AlignmentFlag.AlignCenter))
 
-            # Col 8: Tình trạng
+            # Col 9: Tình trạng
             status_item = make_item(status.capitalize(), Qt.AlignmentFlag.AlignCenter)
             if status in ("published", "completed"):
                 status_item.setForeground(QColor("#107C41"))
@@ -173,9 +185,9 @@ class VideoQueueTableWidget(TableWidget):
                 status_item.setForeground(QColor("#D83B01"))
             elif status in ("uploading", "reserved"):
                 status_item.setForeground(QColor("#0078D4"))
-            self.setItem(row_idx, 8, status_item)
+            self.setItem(row_idx, 9, status_item)
 
-            # Col 9: Source (Fluent Progress Bar)
+            # Col 10: Source (Fluent Progress Bar)
             progress_pct = int(v.get("download_progress", 100))
             container = QWidget()
             layout = QHBoxLayout(container)
@@ -183,20 +195,20 @@ class VideoQueueTableWidget(TableWidget):
             pbar = ProgressBar(container)
             pbar.setValue(progress_pct)
             layout.addWidget(pbar)
-            self.setCellWidget(row_idx, 9, container)
+            self.setCellWidget(row_idx, 10, container)
             self._progress_bars[video_id] = pbar
 
-            # Col 10: Link gốc
-            self.setItem(row_idx, 10, make_item(v.get("source_url", "")))
+            # Col 11: Link gốc
+            self.setItem(row_idx, 11, make_item(v.get("source_url", "")))
 
-            # Col 11: ID Video
-            self.setItem(row_idx, 11, make_item(v.get("tiktok_video_id", "")))
+            # Col 12: ID Video
+            self.setItem(row_idx, 12, make_item(v.get("tiktok_video_id", "")))
 
-            # Col 12: PVF URL
-            self.setItem(row_idx, 12, make_item(v.get("pvf_url", "")))
+            # Col 13: PVF URL
+            self.setItem(row_idx, 13, make_item(v.get("pvf_url", "")))
 
-            # Col 13: PAF URL
-            self.setItem(row_idx, 13, make_item(v.get("paf_url", "")))
+            # Col 14: PAF URL
+            self.setItem(row_idx, 14, make_item(v.get("paf_url", "")))
 
         self.setSortingEnabled(True)
 
@@ -218,7 +230,7 @@ class VideoQueueTableWidget(TableWidget):
                 if isinstance(data, dict):
                     videos.append(data)
                     continue
-            id_item = self.item(row, 11)
+            id_item = self.item(row, 12)
             vid = int(id_item.text()) if id_item and id_item.text().isdigit() else row
             videos.append({"id": vid, "row_index": row})
         return videos
@@ -236,7 +248,7 @@ class VideoQueueTableWidget(TableWidget):
             if isinstance(data, dict) and "id" in data:
                 self.edit_metadata_requested.emit(data["id"])
                 return
-        id_item = self.item(row, 11)
+        id_item = self.item(row, 12)
         if id_item and id_item.text().isdigit():
             self.edit_metadata_requested.emit(int(id_item.text()))
 

@@ -258,9 +258,10 @@ class VideoRepository:
         with db_session(self.db_path, write=False) as conn:
             if project_id is not None:
                 query = """
-                SELECT v.*, p.name AS assigned_profile_name
+                SELECT v.*, p.name AS assigned_profile_name, pr.name AS project_name
                 FROM video_registry v
                 LEFT JOIN profiles p ON v.assigned_profile_id = p.id
+                LEFT JOIN projects pr ON p.project_id = pr.id
                 WHERE v.status = 'available'
                   AND (v.assigned_profile_id IS NULL OR p.project_id = ?)
                 ORDER BY v.id ASC;
@@ -268,9 +269,10 @@ class VideoRepository:
                 rows = conn.execute(query, (project_id,)).fetchall()
             else:
                 query = """
-                SELECT v.*, p.name AS assigned_profile_name
+                SELECT v.*, p.name AS assigned_profile_name, pr.name AS project_name
                 FROM video_registry v
                 LEFT JOIN profiles p ON v.assigned_profile_id = p.id
+                LEFT JOIN projects pr ON p.project_id = pr.id
                 WHERE v.status = 'available'
                 ORDER BY v.id ASC;
                 """

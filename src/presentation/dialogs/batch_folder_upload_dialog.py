@@ -50,6 +50,7 @@ class BatchFolderUploadDialog(QDialog):
         upload_service: UploadService,
         initial_folder: str | None = None,
         project_id: int | None = None,
+        project_name: str | None = None,
         parent=None,
     ) -> None:
         super().__init__(parent)
@@ -57,14 +58,16 @@ class BatchFolderUploadDialog(QDialog):
         self.upload_service = upload_service
         self.initial_folder = initial_folder
         self.project_id = project_id
+        self.project_name = project_name
         self.distributed_videos: list[dict[str, Any]] = []
         self.auto_start_upload: bool = False
 
         self.setWindowTitle("Nạp Thư Mục _Phân Bổ (Batch Upload)")
-        self.resize(760, 680)
+        self.resize(780, 700)
         self._init_ui()
         if self.initial_folder:
             self.txt_folder.setText(self.initial_folder)
+            self._update_scanned_files_count(self.initial_folder)
         self._load_profiles()
 
     def _init_ui(self) -> None:
@@ -72,15 +75,33 @@ class BatchFolderUploadDialog(QDialog):
         main_layout.setSpacing(10)
         main_layout.setContentsMargins(16, 16, 16, 16)
 
+        # 0. Active Project Indicator Banner
+        p_name = self.project_name or "Tất cả dự án (Toàn hệ thống)"
+        self.lbl_project_badge = QLabel(f"🏷️ Chiến Dịch / Dự Án Mục Tiêu: <b>{p_name}</b>", self)
+        self.lbl_project_badge.setStyleSheet(
+            "background-color: #F3F2F1; border: 1px solid #D2D0CE; border-radius: 6px; padding: 8px 12px; font-size: 13px; color: #0078D4;"
+        )
+        main_layout.addWidget(self.lbl_project_badge)
+
         # 1. Folder Selection Group
         grp_folder = QGroupBox("1. Thư Mục Chứa Video Gốc (Source Folder)", self)
-        layout_folder = QHBoxLayout(grp_folder)
+        layout_folder_v = QVBoxLayout(grp_folder)
+        layout_folder_v.setSpacing(6)
+
+        layout_folder_h = QHBoxLayout()
         self.txt_folder = LineEdit(self)
         self.txt_folder.setPlaceholderText("Chọn hoặc dán đường dẫn thư mục chứa video...")
+        self.txt_folder.textChanged.connect(self._on_folder_text_changed)
         self.btn_browse = PushButton("Chọn Thư Mục...", self)
         self.btn_browse.clicked.connect(self._on_browse_folder)
-        layout_folder.addWidget(self.txt_folder, 1)
-        layout_folder.addWidget(self.btn_browse)
+        layout_folder_h.addWidget(self.txt_folder, 1)
+        layout_folder_h.addWidget(self.btn_browse)
+        layout_folder_v.addLayout(layout_folder_h)
+
+        self.lbl_scan_info = QLabel("Chưa quét thư mục", self)
+        self.lbl_scan_info.setStyleSheet("font-size: 12px; color: #605E5C; font-weight: 600;")
+        layout_folder_v.addWidget(self.lbl_scan_info)
+
         main_layout.addWidget(grp_folder)
 
         # 2. Target Profiles Selection Group
@@ -255,6 +276,40 @@ class BatchFolderUploadDialog(QDialog):
         folder = QFileDialog.getExistingDirectory(self, "Chọn Thư Mục Chứa Video", "")
         if folder:
             self.txt_folder.setText(folder)
+            self._update_scanned_files_count(folder)
+
+    def _on_folder_text_changed(self, text: str) -> None:
+        self._update_scanned_files_count(text.strip())
+
+    def _update_scanned_files_count(self, folder_str: str) -> None:
+        if not folder_str:
+            self.lbl_scan_info.setText("Chưa quét thư mục")
+            self.lbl_scan_info.setStyleSheet("font-size: 12px; color: #605E5C; font-weight: 600;")
+            return
+        p = Path(folder_str)
+        if not p.is_dir():
+            self.lbl_scan_info.setText("⚠️ Thư mục không tồn tại trên máy tính.")
+            self.lbl_scan_info.setStyleSheet("font-size: 12px; color: #D83B01; font-weight: 600;")
+            return
+
+        valid_exts = {".mp4", ".mov", ".mkv", ".webm", ".avi"}
+        try:
+            count = sum(
+                1
+                for f in p.rglob("*")
+                if f.is_file()
+                and f.suffix.lower() in valid_exts
+                and not any(part in ("_posted", ".posted") for part in f.parts)
+            )
+            if count > 0:
+                self.lbl_scan_info.setText(f"📁 Đã tìm thấy: {count} video hợp lệ (quét đệ quy toàn bộ thư mục con)")
+                self.lbl_scan_info.setStyleSheet("font-size: 12px; color: #107C41; font-weight: 600;")
+            else:
+                self.lbl_scan_info.setText("⚠️ Thư mục này chưa có file video hợp lệ (.mp4, .mov, .mkv, .webm, .avi)")
+                self.lbl_scan_info.setStyleSheet("font-size: 12px; color: #D83B01; font-weight: 600;")
+        except Exception as e:
+            self.lbl_scan_info.setText(f"Lỗi khi quét thư mục: {e}")
+            self.lbl_scan_info.setStyleSheet("font-size: 12px; color: #D83B01; font-weight: 600;")
 
     def _execute_distribution(self) -> bool:
         folder_str = self.txt_folder.text().strip()

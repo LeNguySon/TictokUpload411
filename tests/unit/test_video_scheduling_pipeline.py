@@ -155,10 +155,10 @@ def test_video_queue_table_widget_renders_schedule_and_profile(qapp):
 
     # Col 1: Title
     assert table.item(0, 1).text() == "Test Viral Dance"
-    # Col 6: Schedule time
-    assert table.item(0, 6).text() == "2026-11-04 16:45:00"
-    # Col 7: Upload To
-    assert table.item(0, 7).text() == "Profile VIP 1"
+    # Col 7: Schedule time
+    assert table.item(0, 7).text() == "2026-11-04 16:45:00"
+    # Col 8: Upload To
+    assert table.item(0, 8).text() == "Profile VIP 1"
 
 
 def test_auto_dispatch_scheduler_dispatches_worker(test_db: Path):

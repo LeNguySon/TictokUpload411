@@ -58,6 +58,7 @@ def test_profile_table_numeric_column_sorting(qapp):
     table.sortByColumn(28, Qt.SortOrder.AscendingOrder)
     sorted_ids = [int(table.item(r, 28).text()) for r in range(table.rowCount())]
     assert sorted_ids == [2, 3, 10], f"Expected numeric sort [2, 3, 10], got {sorted_ids}"
+    qapp.processEvents()
 
 
 def test_video_queue_table_numeric_column_sorting(qapp):
@@ -70,12 +71,13 @@ def test_video_queue_table_numeric_column_sorting(qapp):
     ]
     table.load_videos(mock_videos)
 
-    # Sort by Views column (Col 2)
-    table.sortByColumn(2, Qt.SortOrder.AscendingOrder)
+    # Sort by Views column (Col 3)
+    table.sortByColumn(3, Qt.SortOrder.AscendingOrder)
     sorted_views = [
-        table.item(r, 2).raw_value for r in range(table.rowCount()) if hasattr(table.item(r, 2), "raw_value")
+        table.item(r, 3).raw_value for r in range(table.rowCount()) if hasattr(table.item(r, 3), "raw_value")
     ]
     assert sorted_views == [5, 20, 100], f"Expected numeric sort [5, 20, 100], got {sorted_views}"
+    qapp.processEvents()
 
 
 def test_video_queue_table_mouse_drag_and_delete_key(qapp):

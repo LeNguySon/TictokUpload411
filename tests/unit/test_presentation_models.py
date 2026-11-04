@@ -26,14 +26,15 @@ def test_table_headers_match_specification():
     assert profile_headers[28] == "ID"
 
     video_headers = get_video_table_headers()
-    assert len(video_headers) == 14
+    assert len(video_headers) == 15
     assert video_headers[0] == "STT"
     assert video_headers[1] == "Tiêu đề"
-    assert video_headers[4] == "Duration"
-    assert video_headers[5] == "Hiển thị"
-    assert video_headers[7] == "Upload To"
-    assert video_headers[8] == "Tình trạng"
-    assert video_headers[9] == "Source"
+    assert video_headers[2] == "Dự Án"
+    assert video_headers[5] == "Duration"
+    assert video_headers[6] == "Hiển thị"
+    assert video_headers[8] == "Upload To"
+    assert video_headers[9] == "Tình trạng"
+    assert video_headers[10] == "Source"
 
 
 def test_formatting_helpers():

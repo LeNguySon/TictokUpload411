@@ -23,6 +23,7 @@ from PyQt6.QtWidgets import (
 )
 from qfluentwidgets import (
     Action,
+    CheckBox,
     ComboBox,
     FluentIcon,
     InfoBar,
@@ -239,6 +240,13 @@ class TikTokManagerMainWindow(QMainWindow):
         self.btn_schedule.setIconSize(QSize(16, 16))
         self.btn_schedule.clicked.connect(self._on_schedule_videos)
         bottom_toolbar.addWidget(self.btn_schedule)
+
+        self.chk_toolbar_studio_schedule = CheckBox("Lên lịch TikTok Studio (Cloud)", self)
+        self.chk_toolbar_studio_schedule.setFixedHeight(34)
+        self.chk_toolbar_studio_schedule.setToolTip(
+            "Khi bật: Lệnh lên lịch sẽ được nạp trực tiếp vào TikTok Studio của tài khoản ngay trong phiên tải lên."
+        )
+        bottom_toolbar.addWidget(self.chk_toolbar_studio_schedule)
 
         self.btn_pick_pc = PrimaryPushButton(FluentIcon.VIDEO, "Thêm Video", self)
         self.btn_pick_pc.setFixedHeight(34)
@@ -1326,11 +1334,14 @@ class TikTokManagerMainWindow(QMainWindow):
         )
 
     def _on_open_batch_folder_upload(self) -> None:
+        proj_id = self.project_combo.currentData()
+        proj_name = self.project_combo.currentText() if proj_id is not None else None
         dlg = BatchFolderUploadDialog(
             profile_repo=self.profile_repo,
             upload_service=self.upload_service,
             initial_folder=self._get_initial_video_pick_folder(),
-            project_id=self.project_combo.currentData(),
+            project_id=proj_id,
+            project_name=proj_name,
             parent=self,
         )
         if dlg.exec():
@@ -1357,6 +1368,8 @@ class TikTokManagerMainWindow(QMainWindow):
 
         selected_profiles = self.profile_table.get_selected_profile_ids()
         dlg = ScheduleVideoDialog(video_count=len(available_videos), parent=self)
+        if self.chk_toolbar_studio_schedule.isChecked():
+            dlg.chk_studio_schedule.setChecked(True)
         if dlg.exec() and dlg.generated_schedules:
             updated_count = 0
             is_studio = getattr(dlg, "is_studio_schedule", False)
@@ -1405,6 +1418,8 @@ class TikTokManagerMainWindow(QMainWindow):
         available = self.video_repo.list_available()
         selected_profiles = self.profile_table.get_selected_profile_ids()
         dlg = ScheduleVideoDialog(video_count=len(selected_ids_or_rows), parent=self)
+        if self.chk_toolbar_studio_schedule.isChecked():
+            dlg.chk_studio_schedule.setChecked(True)
         if dlg.exec() and dlg.generated_schedules:
             updated_count = 0
             is_studio = getattr(dlg, "is_studio_schedule", False)
