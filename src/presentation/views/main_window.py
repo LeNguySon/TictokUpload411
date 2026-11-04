@@ -246,7 +246,7 @@ class TikTokManagerMainWindow(QMainWindow):
         self.btn_pick_pc.clicked.connect(self._on_pick_video_files)
         bottom_toolbar.addWidget(self.btn_pick_pc)
 
-        self.btn_batch_upload = PushButton(FluentIcon.FOLDER, "Nạp Thư Mục & Phân Bổ", self)
+        self.btn_batch_upload = PushButton(FluentIcon.FOLDER, "Nạp Thư Mục _Phân Bổ", self)
         self.btn_batch_upload.setFixedHeight(34)
         self.btn_batch_upload.setIconSize(QSize(16, 16))
         self.btn_batch_upload.clicked.connect(self._on_open_batch_folder_upload)
@@ -376,12 +376,14 @@ class TikTokManagerMainWindow(QMainWindow):
         self.profile_table.load_profiles(profiles)
 
     def refresh_videos(self) -> None:
-        available = self.video_repo.list_available()
+        project_id = self.project_combo.currentData()
+        available = self.video_repo.list_available(project_id=project_id)
         self.video_table.load_videos(available)
         self.lbl_video_header.setText(f"Bảng video Đã chọn 0 / {len(available)}")
 
     def _on_project_changed(self) -> None:
         self.refresh_profiles()
+        self.refresh_videos()
 
     def _on_search_profile(self, text: str) -> None:
         filter_text = text.strip().lower()
@@ -1327,6 +1329,8 @@ class TikTokManagerMainWindow(QMainWindow):
         dlg = BatchFolderUploadDialog(
             profile_repo=self.profile_repo,
             upload_service=self.upload_service,
+            initial_folder=self._get_initial_video_pick_folder(),
+            project_id=self.project_combo.currentData(),
             parent=self,
         )
         if dlg.exec():

@@ -48,17 +48,23 @@ class BatchFolderUploadDialog(QDialog):
         self,
         profile_repo: ProfileRepository,
         upload_service: UploadService,
+        initial_folder: str | None = None,
+        project_id: int | None = None,
         parent=None,
     ) -> None:
         super().__init__(parent)
         self.profile_repo = profile_repo
         self.upload_service = upload_service
+        self.initial_folder = initial_folder
+        self.project_id = project_id
         self.distributed_videos: list[dict[str, Any]] = []
         self.auto_start_upload: bool = False
 
-        self.setWindowTitle("Nạp Thư Mục & Phân Bổ Lịch Đăng Hàng Loạt (Batch Upload)")
+        self.setWindowTitle("Nạp Thư Mục _Phân Bổ (Batch Upload)")
         self.resize(760, 680)
         self._init_ui()
+        if self.initial_folder:
+            self.txt_folder.setText(self.initial_folder)
         self._load_profiles()
 
     def _init_ui(self) -> None:
@@ -182,7 +188,12 @@ class BatchFolderUploadDialog(QDialog):
         main_layout.addLayout(btn_layout)
 
     def _load_profiles(self) -> None:
-        profiles = self.profile_repo.list_all()
+        if self.project_id is not None:
+            profiles = self.profile_repo.list_active(project_id=self.project_id)
+            if not profiles:
+                profiles = self.profile_repo.list_all()
+        else:
+            profiles = self.profile_repo.list_all()
         self.profile_table.setRowCount(len(profiles))
         for row, p in enumerate(profiles):
             chk_item = QTableWidgetItem()

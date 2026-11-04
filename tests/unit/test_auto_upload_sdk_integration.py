@@ -195,7 +195,7 @@ def test_batch_folder_upload_dialog_instantiation(qapp, temp_db: Path) -> None:
         upload_service=upload_service,
     )
 
-    assert dialog.windowTitle() == "Nạp Thư Mục & Phân Bổ Lịch Đăng Hàng Loạt (Batch Upload)"
+    assert "Nạp Thư Mục" in dialog.windowTitle() and "Batch Upload" in dialog.windowTitle()
     assert dialog.profile_table.rowCount() == 2
     assert dialog.chk_shuffle.isChecked() is True
     assert dialog.chk_deduplicate.isChecked() is True

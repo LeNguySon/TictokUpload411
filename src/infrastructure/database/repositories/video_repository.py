@@ -254,15 +254,25 @@ class VideoRepository:
             cur = conn.execute(f"DELETE FROM video_registry WHERE id IN ({placeholders});", tuple(video_ids))
             return cur.rowcount
 
-    def list_available(self) -> list[dict[str, Any]]:
+    def list_available(self, project_id: int | None = None) -> list[dict[str, Any]]:
         with db_session(self.db_path, write=False) as conn:
-            rows = conn.execute(
+            if project_id is not None:
+                query = """
+                SELECT v.*, p.name AS assigned_profile_name
+                FROM video_registry v
+                LEFT JOIN profiles p ON v.assigned_profile_id = p.id
+                WHERE v.status = 'available'
+                  AND (v.assigned_profile_id IS NULL OR p.project_id = ?)
+                ORDER BY v.id ASC;
                 """
+                rows = conn.execute(query, (project_id,)).fetchall()
+            else:
+                query = """
                 SELECT v.*, p.name AS assigned_profile_name
                 FROM video_registry v
                 LEFT JOIN profiles p ON v.assigned_profile_id = p.id
                 WHERE v.status = 'available'
                 ORDER BY v.id ASC;
                 """
-            ).fetchall()
+                rows = conn.execute(query).fetchall()
             return [dict(r) for r in rows]

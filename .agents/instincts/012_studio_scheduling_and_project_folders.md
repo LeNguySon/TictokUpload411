@@ -24,3 +24,4 @@ Creators running multiple TikTok campaigns (e.g., Japan, Korea, US) required two
 - 6 new dedicated tests in `tests/unit/test_project_folders_and_studio_schedule.py`.
 - 100% test suite pass rate: **129 passed in 16.50s**.
 - Zero linting errors with `ruff check` and `ruff format`.
+
