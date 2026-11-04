@@ -157,6 +157,8 @@ def test_main_window_refresh_profiles_auto_reconciliation(isolated_db, app_insta
 
     with patch("src.presentation.views.main_window.setTheme"):
         win = TikTokManagerMainWindow(db_path=db_file)
+        win.thread_pool.pool.waitForDone(2000)
+        app_instance.processEvents()
 
         # Mock launcher: p1 is actually RUNNING in OS, p2 is STOPPED in OS
         def mock_is_running(profile_dict_or_id):
@@ -169,6 +171,8 @@ def test_main_window_refresh_profiles_auto_reconciliation(isolated_db, app_insta
 
         with patch.object(win.orbita_launcher, "is_profile_running", side_effect=mock_is_running):
             win.refresh_profiles()
+            win.thread_pool.pool.waitForDone(2000)
+            app_instance.processEvents()
 
         # Reconciled status:
         assert prof_repo.get_by_id(p1)["status"] == "running"
@@ -261,6 +265,8 @@ def test_main_window_periodic_status_watcher_sync(isolated_db, app_instance):
 
     with patch("src.presentation.views.main_window.setTheme"):
         win = TikTokManagerMainWindow(db_path=db_file)
+        win.thread_pool.pool.waitForDone(2000)
+        app_instance.processEvents()
 
         # Profile is initially shown as running
         row = -1
@@ -274,6 +280,8 @@ def test_main_window_periodic_status_watcher_sync(isolated_db, app_instance):
         # Now simulate browser closing: is_profile_running becomes False
         with patch.object(win.orbita_launcher, "is_profile_running", return_value=False):
             win._sync_active_profile_statuses()
+            win.thread_pool.pool.waitForDone(2000)
+            app_instance.processEvents()
 
         # Cell 12 must be updated to stopped
         item = win.profile_table.item(row, 12)

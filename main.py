@@ -17,7 +17,7 @@ from src.infrastructure.database.migrations.runner import run_all_migrations
 from src.infrastructure.logging.redaction_logger import configure_app_logger
 from src.presentation.views.main_window import TikTokManagerMainWindow
 
-logger = logging.getLogger("TikTokManagerApp")
+logger = logging.getLogger("tavm")
 
 
 def global_exception_hook(exctype, value, tb):
@@ -30,6 +30,16 @@ sys.excepthook = global_exception_hook
 
 
 def main() -> None:
+    # 0. Windows Console UTF-8 Encoding Hook
+    if sys.platform == "win32":
+        try:
+            if hasattr(sys.stdout, "reconfigure"):
+                sys.stdout.reconfigure(encoding="utf-8")
+            if hasattr(sys.stderr, "reconfigure"):
+                sys.stderr.reconfigure(encoding="utf-8")
+        except Exception:
+            pass
+
     # 1. Initialize Structured Logging with Redaction Filter (AgentShield Tier-1)
     logs_dir = Path("logs")
     logs_dir.mkdir(exist_ok=True)

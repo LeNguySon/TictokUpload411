@@ -32,9 +32,9 @@ class RedactionFilter(logging.Filter):
             record.msg = self.redact(record.msg)
         if record.args:
             if isinstance(record.args, dict):
-                record.args = {k: self.redact(str(v)) for k, v in record.args.items()}
+                record.args = {k: (self.redact(v) if isinstance(v, str) else v) for k, v in record.args.items()}
             elif isinstance(record.args, tuple):
-                record.args = tuple(self.redact(str(arg)) for arg in record.args)
+                record.args = tuple(self.redact(arg) if isinstance(arg, str) else arg for arg in record.args)
         return True
 
     @staticmethod

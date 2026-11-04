@@ -26,3 +26,4 @@ Trong chu trình thực hiện kiểm thử thực tế toàn diện tính năng
 ## Quy Chuẩn Bắt Buộc (Mandatory Rules)
 - Luôn kiểm tra quyền riêng tư (Privacy) an toàn (ưu tiên `SELF_ONLY` khi chạy test) để tránh gửi spam ra công chúng trong lúc kiểm thử.
 - Mọi video tải lên thành công đều phải được di chuyển vật lý vào thư mục con `_posted/` và cập nhật đường dẫn mới vào CSDL `video_registry`.
+
