@@ -353,6 +353,7 @@ CREATE TABLE IF NOT EXISTS video_registry (
     file_size INTEGER NOT NULL,
     mtime REAL NOT NULL,
     status TEXT DEFAULT 'available' CHECK(status IN ('available', 'reserved', 'uploading', 'published', 'failed')),
+    schedule_time TEXT DEFAULT NULL,
     assigned_profile_id INTEGER REFERENCES profiles(id) ON DELETE SET NULL,
     published_profile_id INTEGER REFERENCES profiles(id) ON DELETE SET NULL,
     tiktok_video_id TEXT,
@@ -365,6 +366,7 @@ CREATE TABLE IF NOT EXISTS video_registry (
 CREATE INDEX IF NOT EXISTS idx_video_registry_hash ON video_registry(video_hash);
 CREATE INDEX IF NOT EXISTS idx_video_registry_status ON video_registry(status);
 CREATE INDEX IF NOT EXISTS idx_video_registry_assigned ON video_registry(assigned_profile_id);
+CREATE INDEX IF NOT EXISTS idx_video_registry_schedule ON video_registry(status, schedule_time);
 CREATE INDEX IF NOT EXISTS idx_report_observation_kind ON tiktok_report_observations(report_kind, status, observed_at);
 CREATE INDEX IF NOT EXISTS idx_queue_ready ON tiktok_queue(status, schedule_time, profile_id);
 CREATE INDEX IF NOT EXISTS idx_queue_profile ON tiktok_queue(profile_id, status);

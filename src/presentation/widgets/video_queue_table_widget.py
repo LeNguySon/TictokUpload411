@@ -156,10 +156,14 @@ class VideoQueueTableWidget(TableWidget):
             self.setItem(row_idx, 5, privacy_item)
 
             # Col 6: Lên lịch
-            self.setItem(row_idx, 6, make_item(v.get("schedule", ""), Qt.AlignmentFlag.AlignCenter))
+            sched_val = str(v.get("schedule_time") or v.get("schedule") or "")
+            self.setItem(row_idx, 6, make_item(sched_val, Qt.AlignmentFlag.AlignCenter))
 
             # Col 7: Upload To
-            self.setItem(row_idx, 7, make_item(v.get("assigned_profile_name", ""), Qt.AlignmentFlag.AlignCenter))
+            target_profile_name = v.get("assigned_profile_name") or (
+                f"Hồ sơ #{v['assigned_profile_id']}" if v.get("assigned_profile_id") else ""
+            )
+            self.setItem(row_idx, 7, make_item(target_profile_name, Qt.AlignmentFlag.AlignCenter))
 
             # Col 8: Tình trạng
             status_item = make_item(status.capitalize(), Qt.AlignmentFlag.AlignCenter)

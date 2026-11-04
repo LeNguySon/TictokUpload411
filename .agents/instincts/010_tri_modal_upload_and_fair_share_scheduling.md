@@ -12,3 +12,4 @@
 - **Giãn Cách An Toàn (Cooldown Scheduling)**: Đảm bảo khoảng cách giữa các video đăng trên cùng 1 kênh tối thiểu 12h (hoặc số giờ người dùng cấu hình) nhằm tránh thuật toán phát hiện spam của TikTok.
 - **Khóa An Toàn Đa Luồng (Profile Mutex Lock)**: Hàm `get_profile_upload_lock(profile_id)` đảm bảo mỗi tài khoản chỉ được tải lên bởi đúng 1 worker tại một thời điểm.
 - **Cắt Caption An Toàn Giữ Hashtag (`clamp_caption`)**: Đảm bảo tổng độ dài không vượt quá 2200 ký tự của TikTok Studio, ưu tiên giữ nguyên toàn bộ chùm hashtag đuôi bài.
+

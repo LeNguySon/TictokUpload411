@@ -83,6 +83,7 @@ class UploadService:
             file_name=file_name,
             file_size=file_size,
             mtime=mtime,
+            schedule_time=schedule_time,
         )
 
     def distribute_folder_videos_to_queue(
@@ -188,6 +189,7 @@ class UploadService:
                 file_size=item["size"],
                 mtime=item["mtime"],
                 assigned_profile_id=target_profile_id,
+                schedule_time=sched_time,
             )
 
             created_items.append(

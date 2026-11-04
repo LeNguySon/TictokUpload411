@@ -12,3 +12,4 @@
 - `_on_remove_proxy_selected`: 1-click gỡ bỏ cả `proxy_id` lẫn `vpn_config` trên hàng loạt hồ sơ đã chọn.
 - `_on_rotate_proxy_selected`: 1-click gọi API đổi IP cho các proxy xoay.
 - `_on_check_proxy_selected`: Kiểm tra trực tiếp trạng thái Live/Die và độ trễ ping của proxy và tự động làm mới giao diện.
+

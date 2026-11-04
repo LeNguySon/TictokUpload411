@@ -5,10 +5,11 @@ Main Application Window: Windows 11 Fluent Design Dual-Table Layout matching SSM
 import logging
 import os
 import subprocess
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from PyQt6.QtCore import QPoint, QSettings, QSize, Qt, QUrl
+from PyQt6.QtCore import QPoint, QSettings, QSize, Qt, QTimer, QUrl
 from PyQt6.QtGui import QDesktopServices, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QCheckBox,
@@ -17,7 +18,6 @@ from PyQt6.QtWidgets import (
     QLabel,
     QMainWindow,
     QSplitter,
-    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -156,6 +156,12 @@ class TikTokManagerMainWindow(QMainWindow):
             self.profile_table.setColumnHidden(col_idx, col_idx in self.hidden_columns)
         self._connect_signals()
         self.refresh_all_data()
+
+        # Real-time Video Schedule Auto-Dispatch Timer (Every 15s)
+        self.scheduler_timer = QTimer(self)
+        self.scheduler_timer.setInterval(15000)
+        self.scheduler_timer.timeout.connect(self._check_scheduled_queue)
+        self.scheduler_timer.start()
 
     def _init_ui(self) -> None:
         central_widget = QWidget(self)
@@ -1330,35 +1336,96 @@ class TikTokManagerMainWindow(QMainWindow):
             )
             return
 
+        selected_profiles = self.profile_table.get_selected_profile_ids()
         dlg = ScheduleVideoDialog(video_count=len(available_videos), parent=self)
         if dlg.exec() and dlg.generated_schedules:
+            updated_count = 0
             for idx, sched_time in enumerate(dlg.generated_schedules):
                 if idx < len(available_videos):
-                    self.video_table.setItem(idx, 6, QTableWidgetItem(sched_time))
+                    v = available_videos[idx]
+                    target_profile = (
+                        selected_profiles[idx % len(selected_profiles)]
+                        if selected_profiles
+                        else v.get("assigned_profile_id")
+                    )
+                    self.video_repo.update_schedule(
+                        video_id=v["id"],
+                        schedule_time=sched_time,
+                        assigned_profile_id=target_profile,
+                    )
+                    updated_count += 1
+            self.refresh_videos()
             InfoBar.success(
                 title="Đã Lên Lịch Tự Động",
-                content=f"Đã phân bổ thời gian đăng cho {min(len(available_videos), len(dlg.generated_schedules))} video.",
+                content=f"Đã lưu lịch đăng cho {updated_count} video vào CSDL.",
                 position=InfoBarPosition.TOP,
                 parent=self,
             )
 
-    def _on_schedule_videos_from_table(self, selected_rows: list[int]) -> None:
-        if not selected_rows:
+    def _on_schedule_videos_from_table(self, selected_ids_or_rows: list[int]) -> None:
+        if not selected_ids_or_rows:
             return
 
-        dlg = ScheduleVideoDialog(video_count=len(selected_rows), parent=self)
+        available = self.video_repo.list_available()
+        selected_profiles = self.profile_table.get_selected_profile_ids()
+        dlg = ScheduleVideoDialog(video_count=len(selected_ids_or_rows), parent=self)
         if dlg.exec() and dlg.generated_schedules:
-            for idx, target in enumerate(selected_rows):
+            updated_count = 0
+            for idx, target in enumerate(selected_ids_or_rows):
                 if idx < len(dlg.generated_schedules):
-                    if isinstance(target, int):
-                        self.video_repo.update_metadata(target, file_name=None)
+                    sched_time = dlg.generated_schedules[idx]
+                    target_prof = selected_profiles[idx % len(selected_profiles)] if selected_profiles else None
+                    # Resolve whether target is an ID or row index
+                    v = self.video_repo.get_by_id(target)
+                    vid = v["id"] if v else (available[target]["id"] if target < len(available) else target)
+                    self.video_repo.update_schedule(vid, schedule_time=sched_time, assigned_profile_id=target_prof)
+                    updated_count += 1
             self.refresh_videos()
             InfoBar.success(
                 title="Đã Lên Lịch Đăng",
-                content=f"Đã phân bổ lịch đăng cho {len(selected_rows)} video đã chọn.",
+                content=f"Đã lưu lịch đăng cho {updated_count} video được chọn vào CSDL.",
                 position=InfoBarPosition.TOP,
                 parent=self,
             )
+
+    def _check_scheduled_queue(self) -> None:
+        """Periodically scans for scheduled videos that have reached their upload time."""
+        now_iso = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        due_videos = self.video_repo.list_scheduled_due(max_time_iso=now_iso)
+        if not due_videos:
+            return
+
+        selected_profiles = self.profile_table.get_selected_profile_ids()
+        dispatched = 0
+
+        for v in due_videos:
+            vid_id = v["id"]
+            # Target profile: assigned profile first, or fallback to selected profiles
+            target_profile = v.get("assigned_profile_id")
+            if not target_profile and selected_profiles:
+                target_profile = selected_profiles[dispatched % len(selected_profiles)]
+
+            if not target_profile:
+                # Cannot dispatch without an assigned or selected profile
+                continue
+
+            # Atomically reserve to prevent duplicate triggering
+            reserved = self.video_repo.try_reserve(video_id=vid_id, assigned_profile_id=target_profile)
+            if not reserved:
+                continue
+
+            worker = UploadWorker(
+                video_id=vid_id,
+                profile_id=target_profile,
+                upload_service=self.upload_service,
+                signal_bus=self.signal_bus,
+            )
+            self.thread_pool.dispatch(worker)
+            dispatched += 1
+
+        if dispatched > 0:
+            logger.info("Auto-dispatch scheduler launched %d due videos", dispatched)
+            self.refresh_videos()
 
     def _on_edit_video_metadata(self, video_id_or_row: int) -> None:
         v = self.video_repo.get_by_id(video_id_or_row)
@@ -1626,3 +1693,7 @@ class TikTokManagerMainWindow(QMainWindow):
         except Exception:
             pass
         event.accept()
+
+
+# Parity Alias
+MainWindow = TikTokManagerMainWindow
