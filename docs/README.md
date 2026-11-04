@@ -13,10 +13,12 @@ docs/
 │       ├── 0004-async-worker-thread-model.md
 │       └── 0005-official-sdk-mode.md
 ├── 02_specifications/            # Đặc tả kỹ thuật, schemas, hợp đồng (Reference)
-│   ├── ui_ux_specification.md    # Đặc tả giao diện Windows 11 Fluent UI
+│   ├── ui_ux_specification.md    # Đặc tả giao diện Windows 11 Fluent UI (Dual-Table & 28 cột MMO)
 │   ├── database_schema.md        # Danh mục 24 bảng CSDL SQLite kế thừa
+│   ├── profile_grouping_and_projects.md # Đặc tả phân nhóm Profile & Chiến dịch Dự án
+│   ├── bulk_proxy_management.md  # Đặc tả quản lý hàng loạt Proxy, Async Health Check & GeoIP
 │   ├── api_and_signal_contracts.md # Hợp đồng tín hiệu đa luồng Qt
-│   └── sdk_integration_protocol.md # Hợp đồng tích hợp SamMonny SDK
+│   └── sdk_integration_protocol.md # Hợp đồng tích hợp SamMonny Tri-Modal SDK
 ├── 03_work_breakdown/            # Kế hoạch thực thi, WBS & Tasks (Applied)
 │   ├── wbs_and_roadmap.md        # Đồ thị DAG & Tổng quan 5 Epics
 │   ├── sprint_01_core_infrastructure.md
@@ -35,18 +37,20 @@ docs/
 
 ## 🧭 Hướng Dẫn Điều Hướng Nhanh Theo Vai Trò (Navigation Guide)
 
-- **Dành cho Lập Trình Viên Backend / CSDL**:
+- **Dành cho Lập Trình Viên Backend & Quản Trị Proxy/Nhóm**:
   1. Đọc [docs/01_architecture/system_overview.md](file:///d:/TictokUpload411/docs/01_architecture/system_overview.md) để nắm cấu trúc phân tầng.
-  2. Tra cứu [docs/02_specifications/database_schema.md](file:///d:/TictokUpload411/docs/02_specifications/database_schema.md) để xem chi tiết 24 bảng CSDL và ràng buộc khóa ngoại.
-  3. Bắt đầu thực thi các tasks trong [docs/03_work_breakdown/sprint_01_core_infrastructure.md](file:///d:/TictokUpload411/docs/03_work_breakdown/sprint_01_core_infrastructure.md).
+  2. Tra cứu [docs/02_specifications/database_schema.md](file:///d:/TictokUpload411/docs/02_specifications/database_schema.md) để xem chi tiết 24 bảng CSDL.
+  3. Đọc đặc tả phân nhóm: [docs/02_specifications/profile_grouping_and_projects.md](file:///d:/TictokUpload411/docs/02_specifications/profile_grouping_and_projects.md).
+  4. Đọc đặc tả kho proxy: [docs/02_specifications/bulk_proxy_management.md](file:///d:/TictokUpload411/docs/02_specifications/bulk_proxy_management.md).
+  5. Bắt đầu thực thi các tasks trong [docs/03_work_breakdown/sprint_01_core_infrastructure.md](file:///d:/TictokUpload411/docs/03_work_breakdown/sprint_01_core_infrastructure.md).
 
 - **Dành cho Kỹ Sư UI / Frontend PyQt6**:
-  1. Đọc [docs/02_specifications/ui_ux_specification.md](file:///d:/TictokUpload411/docs/02_specifications/ui_ux_specification.md) để nắm bố cục bảng kép và delegates.
+  1. Đọc [docs/02_specifications/ui_ux_specification.md](file:///d:/TictokUpload411/docs/02_specifications/ui_ux_specification.md) để nắm bố cục bảng kép và 28 cột MMO.
   2. Xem kỹ [docs/02_specifications/api_and_signal_contracts.md](file:///d:/TictokUpload411/docs/02_specifications/api_and_signal_contracts.md) để kết nối Slots với Signal Bus.
   3. Triển khai các tasks trong [docs/03_work_breakdown/sprint_04_fluent_ui_presentation.md](file:///d:/TictokUpload411/docs/03_work_breakdown/sprint_04_fluent_ui_presentation.md).
 
 - **Dành cho Kỹ Sư Tích Hợp SDK & Đa Luồng**:
-  1. Đọc [docs/02_specifications/sdk_integration_protocol.md](file:///d:/TictokUpload411/docs/02_specifications/sdk_integration_protocol.md) về SamMonny SDK official direct post.
+  1. Đọc [docs/02_specifications/sdk_integration_protocol.md](file:///d:/TictokUpload411/docs/02_specifications/sdk_integration_protocol.md) về SamMonny Tri-Modal SDK pipeline.
   2. Nắm vững mô hình worker thread tại [docs/01_architecture/adr/0004-async-worker-thread-model.md](file:///d:/TictokUpload411/docs/01_architecture/adr/0004-async-worker-thread-model.md).
   3. Thực thi [docs/03_work_breakdown/sprint_03_concurrency_workers.md](file:///d:/TictokUpload411/docs/03_work_breakdown/sprint_03_concurrency_workers.md).
 
@@ -54,4 +58,3 @@ docs/
   1. Theo dõi lộ trình và tiến độ tại [docs/03_work_breakdown/wbs_and_roadmap.md](file:///d:/TictokUpload411/docs/03_work_breakdown/wbs_and_roadmap.md).
   2. Thực thi kiểm định chất lượng theo [docs/04_guides/verification_and_qa_loop.md](file:///d:/TictokUpload411/docs/04_guides/verification_and_qa_loop.md).
   3. Giám sát an ninh thông tin theo [docs/05_security/security_and_compliance.md](file:///d:/TictokUpload411/docs/05_security/security_and_compliance.md).
-

@@ -18,7 +18,7 @@ Hệ thống tài liệu được thiết kế theo chuẩn **Diátaxis Framewor
 | :--- | :--- | :--- |
 | **00. Tổng quan & Cốt lõi** | [PROJECT_SPEC.md](file:///d:/TictokUpload411/PROJECT_SPEC.md) | Bản đặc tả tổng thể hợp nhất và định hướng kỹ thuật toàn dự án |
 | **01. Kiến trúc Hệ thống** | [docs/01_architecture/](file:///d:/TictokUpload411/docs/01_architecture/system_overview.md) | Clean Architecture 4 tầng, C4 diagrams, Thread Boundaries, ADRs |
-| **02. Đặc tả Kỹ thuật** | [docs/02_specifications/](file:///d:/TictokUpload411/docs/02_specifications/) | Schema 24 bảng CSDL, UI/UX Fluent, Hợp đồng Signals/Slots, SDK Protocol |
+| **02. Đặc tả Kỹ thuật** | [docs/02_specifications/](file:///d:/TictokUpload411/docs/02_specifications/) | Schema 24 bảng CSDL, UI/UX 28 cột Fluent, Phân nhóm Profile, Kho Proxy hàng loạt, SDK Tri-Modal |
 | **03. Kế hoạch & Phân rã Tác vụ**| [docs/03_work_breakdown/](file:///d:/TictokUpload411/docs/03_work_breakdown/wbs_and_roadmap.md)| WBS, DAG, 20 Tasks chi tiết chia 5 Sprint với DoD và TDD specs |
 | **04. Hướng dẫn & Vận hành** | [docs/04_guides/](file:///d:/TictokUpload411/docs/04_guides/development_setup.md) | Cài đặt môi trường phát triển, Quy trình kiểm định 6 Pha tự động |
 | **05. An ninh & Bảo mật** | [docs/05_security/](file:///d:/TictokUpload411/docs/05_security/security_and_compliance.md) | Chuẩn AgentShield, Windows Credential Manager (DPAPI), Redaction Logging |
