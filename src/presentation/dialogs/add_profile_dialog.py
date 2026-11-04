@@ -115,20 +115,39 @@ class AddProfileDialog(QDialog):
         cookie = self.cookie_input.toPlainText().strip()
         token = self.token_input.text().strip()
 
-        profile_data = {
-            "name": name,
-            "project_id": project_id,
-            "proxy_id": proxy_id,
-            "storage_dir": f"profiles/{name}",
-            "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/130.0.0.0",
-            "status": "LIVE" if cookie or token else "stopped",
-            "cookie": cookie if cookie else None,
-        }
+        # 1. Create real GoLogin profile with Bayesian Antidetect Fingerprint
+        try:
+            from src.application.services.gologin_sync_service import GoLoginSyncService
 
-        profile_id = self.profile_repo.create(profile_data)
+            sync_svc = GoLoginSyncService(
+                profile_repo=self.profile_repo,
+                project_repo=self.project_repo,
+                proxy_repo=self.proxy_repo,
+            )
+            profile_id = sync_svc.create_real_gologin_profile(
+                name=name,
+                project_id=project_id,
+                proxy_id=proxy_id,
+                cookie=cookie if cookie else None,
+            )
+        except Exception:
+            # Resilient fallback if daemon is unreachable
+            import uuid
+
+            profile_data = {
+                "uuid": str(uuid.uuid4()),
+                "name": name,
+                "project_id": project_id,
+                "proxy_id": proxy_id,
+                "storage_dir": f"profiles/{name}",
+                "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/152.0.0.0",
+                "status": "LIVE" if cookie or token else "stopped",
+                "cookie": cookie if cookie else None,
+            }
+            profile_id = self.profile_repo.create(profile_data)
 
         # AgentShield: Save access token to Windows Vault DPAPI
-        if token:
+        if token and profile_id:
             self.vault.save_oauth_tokens(profile_id=profile_id, access_token=token)
 
         self.accept()

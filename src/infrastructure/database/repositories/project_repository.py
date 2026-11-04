@@ -35,6 +35,10 @@ class ProjectRepository:
             rows = conn.execute("SELECT * FROM projects ORDER BY id ASC;").fetchall()
             return [dict(r) for r in rows]
 
+    def get_default_project(self) -> dict[str, Any] | None:
+        projects = self.list_all()
+        return projects[0] if projects else None
+
     def update(
         self,
         project_id: int,

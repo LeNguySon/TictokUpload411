@@ -55,6 +55,24 @@ class ThreadPoolManager(QObject):
         self.track_worker(worker)
         self.pool.start(worker)
 
+    def submit(self, fn, *args, **kwargs) -> None:
+        """Submits an arbitrary callable to the QThreadPool."""
+        from PyQt6.QtCore import QRunnable
+
+        class _CallableRunnable(QRunnable):
+            def run(self_inner):
+                try:
+                    fn(*args, **kwargs)
+                except Exception as e:
+                    logger.warning("CallableRunnable exception: %s", e)
+
+        self.pool.start(_CallableRunnable())
+
+    @property
+    def executor(self) -> "ThreadPoolManager":
+        """Provides an executor-compatible submit interface."""
+        return self
+
     def cancel_all(self) -> None:
         """Cooperatively signals all active workers to abort."""
         logger.info("Cancelling %d active background workers", len(self._tracked_workers))

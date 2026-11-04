@@ -6,8 +6,8 @@ from typing import Any
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QColor
-from PyQt6.QtWidgets import QHeaderView, QTableWidgetItem
-from qfluentwidgets import Action, RoundMenu, TableWidget
+from PyQt6.QtWidgets import QApplication, QHeaderView, QTableWidgetItem
+from qfluentwidgets import Action, FluentIcon, RoundMenu, TableWidget
 
 from src.presentation.widgets.table_helpers import (
     format_mmo_metric,
@@ -19,11 +19,18 @@ from src.presentation.widgets.table_helpers import (
 class ProfileTableWidget(TableWidget):
     """
     Fluent UI Table for managing TikTok profiles with 28 columns matching SSMATool parity.
+    Supports multi-row context actions, crisp vector icons, and robust data persistence.
     """
 
-    open_orbita_requested = pyqtSignal(int)
-    check_cookie_requested = pyqtSignal(int)
-    change_status_requested = pyqtSignal(int, str)
+    open_orbita_requested = pyqtSignal(list)
+    check_cookie_requested = pyqtSignal(list)
+    sync_metrics_requested = pyqtSignal(list)
+    add_video_requested = pyqtSignal(list)
+    update_proxy_requested = pyqtSignal(list)
+    change_project_requested = pyqtSignal(list)
+    open_web_profile_requested = pyqtSignal(str)
+    open_folder_requested = pyqtSignal(str)
+    change_status_requested = pyqtSignal(list, str)
     soft_delete_requested = pyqtSignal(list)
 
     def __init__(self, parent=None) -> None:
@@ -91,8 +98,10 @@ class ProfileTableWidget(TableWidget):
                 item.setTextAlignment(align)
                 return item
 
-            # Col 0: STT
-            self.setItem(row_idx, 0, make_item(str(row_idx + 1), Qt.AlignmentFlag.AlignCenter))
+            # Col 0: STT (holds profile record in UserRole)
+            stt_item = make_item(str(row_idx + 1), Qt.AlignmentFlag.AlignCenter)
+            stt_item.setData(Qt.ItemDataRole.UserRole, p)
+            self.setItem(row_idx, 0, stt_item)
 
             # Col 1: Avt
             self.setItem(row_idx, 1, make_item("👤", Qt.AlignmentFlag.AlignCenter))
@@ -236,48 +245,157 @@ class ProfileTableWidget(TableWidget):
 
         self.setSortingEnabled(True)
 
-    def get_selected_profile_ids(self) -> list[int]:
-        """Returns list of selected database profile IDs."""
-        selected_rows = {index.row() for index in self.selectedIndexes()}
-        ids = []
+    def get_selected_profiles(self) -> list[dict[str, Any]]:
+        """Returns list of selected profile dicts stored in ItemDataRole.UserRole."""
+        selected_rows = sorted({index.row() for index in self.selectedIndexes()})
+        profiles = []
         for row in selected_rows:
+            item = self.item(row, 0)
+            if item:
+                data = item.data(Qt.ItemDataRole.UserRole)
+                if isinstance(data, dict):
+                    profiles.append(data)
+                    continue
             id_item = self.item(row, 28)
             if id_item and id_item.text().isdigit():
-                ids.append(int(id_item.text()))
-        return ids
+                profiles.append({"id": int(id_item.text())})
+        return profiles
+
+    def get_selected_profile_ids(self) -> list[int]:
+        """Returns list of selected database profile IDs."""
+        profiles = self.get_selected_profiles()
+        return [p["id"] for p in profiles if "id" in p]
 
     def contextMenuEvent(self, event) -> None:
-        selected_ids = self.get_selected_profile_ids()
-        if not selected_ids:
+        pos = event.pos()
+        item = self.itemAt(pos)
+        if not item:
             return
 
-        menu = RoundMenu(parent=self)
-        first_id = selected_ids[0]
+        clicked_row = item.row()
+        selected_rows = {index.row() for index in self.selectedIndexes()}
+        if clicked_row not in selected_rows:
+            self.clearSelection()
+            self.selectRow(clicked_row)
 
-        # Action: Open Orbita Browser
-        act_orbita = Action("🌐 Mở Browser (Orbita Antidetect)", self)
-        act_orbita.triggered.connect(lambda: self.open_orbita_requested.emit(first_id))
+        selected_profiles = self.get_selected_profiles()
+        if not selected_profiles:
+            return
+
+        selected_ids = [p["id"] for p in selected_profiles if "id" in p]
+        count = len(selected_profiles)
+        first_profile = selected_profiles[0]
+        first_id = first_profile.get("id")
+
+        menu = RoundMenu(parent=self)
+
+        # --- Section 1: Browser & Sync Operations ---
+        orbita_title = (
+            f"Mở Browser ({count} hồ sơ Orbita Antidetect)" if count > 1 else "Mở Browser (Orbita Antidetect)"
+        )
+        act_orbita = Action(FluentIcon.GLOBE, orbita_title, self)
+        act_orbita.triggered.connect(lambda: self.open_orbita_requested.emit(selected_ids))
         menu.addAction(act_orbita)
 
-        # Action: Check Cookie
-        act_cookie = Action("🍪 Kiểm Tra Cookie LIVE / DIE", self)
-        act_cookie.triggered.connect(lambda: self.check_cookie_requested.emit(first_id))
+        cookie_title = f"Kiểm Tra Cookie LIVE / DIE ({count} hồ sơ)" if count > 1 else "Kiểm Tra Cookie LIVE / DIE"
+        act_cookie = Action(FluentIcon.CERTIFICATE, cookie_title, self)
+        act_cookie.triggered.connect(lambda: self.check_cookie_requested.emit(selected_ids))
         menu.addAction(act_cookie)
+
+        sync_title = f"Đồng Bộ Số Liệu TikTok ({count} hồ sơ)" if count > 1 else "Đồng Bộ Số Liệu TikTok"
+        act_sync = Action(FluentIcon.SYNC, sync_title, self)
+        act_sync.triggered.connect(lambda: self.sync_metrics_requested.emit(selected_ids))
+        menu.addAction(act_sync)
+
+        act_add_video = Action(FluentIcon.VIDEO, "Nạp Video Vào Hàng Đợi Cho Hồ Sơ Này...", self)
+        act_add_video.triggered.connect(lambda: self.add_video_requested.emit(selected_ids))
+        menu.addAction(act_add_video)
 
         menu.addSeparator()
 
-        # Submenu: Change Status
+        # --- Section 2: Network & Project Categorization ---
+        proxy_title = f"Cập Nhật / Gán Proxy ({count} hồ sơ)..." if count > 1 else "Cập Nhật / Gán Proxy..."
+        act_proxy = Action(FluentIcon.WIFI, proxy_title, self)
+        act_proxy.triggered.connect(lambda: self.update_proxy_requested.emit(selected_ids))
+        menu.addAction(act_proxy)
+
+        project_title = f"Chuyển Vào Dự Án / Chiến Dịch ({count} hồ sơ)..." if count > 1 else "Chuyển Vào Dự Án..."
+        act_project = Action(FluentIcon.FOLDER, project_title, self)
+        act_project.triggered.connect(lambda: self.change_project_requested.emit(selected_ids))
+        menu.addAction(act_project)
+
+        menu.addSeparator()
+
+        # --- Section 3: Navigation & Clipboard Utilities ---
+        tiktok_user = first_profile.get("username_on_tiktok")
+        act_web = Action(FluentIcon.LINK, f"Mở Trang TikTok (@{tiktok_user or 'profile'})", self)
+        act_web.setEnabled(bool(tiktok_user))
+        act_web.triggered.connect(lambda: self.open_web_profile_requested.emit(str(tiktok_user or "")))
+        menu.addAction(act_web)
+
+        profile_path = first_profile.get("storage_path") or first_profile.get("name", "")
+        act_folder = Action(FluentIcon.FOLDER_ADD, "Mở Thư Mục Hồ Sơ (Local Profile)", self)
+        act_folder.triggered.connect(lambda: self.open_folder_requested.emit(str(profile_path)))
+        menu.addAction(act_folder)
+
+        # Submenu: Copy Information (Vector FluentIcon)
+        copy_menu = RoundMenu("Sao Chép Thông Tin", self)
+        copy_menu.setIcon(FluentIcon.COPY)
+
+        def copy_text(val: str) -> None:
+            cb = QApplication.clipboard()
+            if cb:
+                cb.setText(val)
+
+        act_cp_id = Action(FluentIcon.COPY, f"Sao chép ID: {first_id}", self)
+        act_cp_id.triggered.connect(lambda: copy_text(str(first_id)))
+        copy_menu.addAction(act_cp_id)
+
+        if tiktok_user:
+            act_cp_user = Action(FluentIcon.COPY, f"Sao chép TikTok ID: {tiktok_user}", self)
+            act_cp_user.triggered.connect(lambda: copy_text(str(tiktok_user)))
+            copy_menu.addAction(act_cp_user)
+
+        proxy_str = first_profile.get("proxy_host", "")
+        if proxy_str:
+            if first_profile.get("proxy_port"):
+                proxy_str = f"{proxy_str}:{first_profile.get('proxy_port')}"
+            act_cp_px = Action(FluentIcon.COPY, f"Sao chép Proxy: {proxy_str}", self)
+            act_cp_px.triggered.connect(lambda: copy_text(str(proxy_str)))
+            copy_menu.addAction(act_cp_px)
+
+        raw_cookie = first_profile.get("cookie", "")
+        if raw_cookie:
+            act_cp_ck = Action(FluentIcon.COPY, "Sao chép Cookie", self)
+            act_cp_ck.triggered.connect(lambda: copy_text(str(raw_cookie)))
+            copy_menu.addAction(act_cp_ck)
+
+        menu.addMenu(copy_menu)
+
+        menu.addSeparator()
+
+        # --- Section 4: Change Status ---
         status_menu = RoundMenu("Đổi Trạng Thái", self)
+        status_menu.setIcon(FluentIcon.TAG)
+
+        stat_icons = {
+            "LIVE": FluentIcon.ACCEPT,
+            "DIE": FluentIcon.CANCEL,
+            "CHECKPOINT": FluentIcon.INFO,
+            "stopped": FluentIcon.PAUSE,
+        }
         for stat in ("LIVE", "DIE", "CHECKPOINT", "stopped"):
-            act_stat = Action(stat, self)
-            act_stat.triggered.connect(lambda checked, s=stat: self.change_status_requested.emit(first_id, s))
+            icon = stat_icons.get(stat, FluentIcon.TAG)
+            act_stat = Action(icon, stat, self)
+            act_stat.triggered.connect(lambda checked, s=stat: self.change_status_requested.emit(selected_ids, s))
             status_menu.addAction(act_stat)
         menu.addMenu(status_menu)
 
         menu.addSeparator()
 
-        # Action: Soft Delete
-        act_delete = Action("🗑 Chuyển Vào Thùng Rác", self)
+        # --- Section 5: Soft Delete ---
+        delete_title = f"Chuyển Vào Thùng Rác ({count})" if count > 1 else "Chuyển Vào Thùng Rác"
+        act_delete = Action(FluentIcon.DELETE, delete_title, self)
         act_delete.triggered.connect(lambda: self.soft_delete_requested.emit(selected_ids))
         menu.addAction(act_delete)
 

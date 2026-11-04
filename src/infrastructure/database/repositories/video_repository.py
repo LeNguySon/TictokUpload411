@@ -129,6 +129,21 @@ class VideoRepository:
                 return cur.rowcount > 0
             return False
 
+    def delete(self, video_id: int) -> bool:
+        """Deletes a single video record by ID."""
+        with db_session(self.db_path) as conn:
+            cur = conn.execute("DELETE FROM video_registry WHERE id = ?;", (video_id,))
+            return cur.rowcount > 0
+
+    def delete_many(self, video_ids: list[int]) -> int:
+        """Deletes multiple video records by their IDs."""
+        if not video_ids:
+            return 0
+        placeholders = ", ".join("?" for _ in video_ids)
+        with db_session(self.db_path) as conn:
+            cur = conn.execute(f"DELETE FROM video_registry WHERE id IN ({placeholders});", tuple(video_ids))
+            return cur.rowcount
+
     def list_available(self) -> list[dict[str, Any]]:
         with db_session(self.db_path, write=False) as conn:
             rows = conn.execute("SELECT * FROM video_registry WHERE status = 'available' ORDER BY id ASC;").fetchall()

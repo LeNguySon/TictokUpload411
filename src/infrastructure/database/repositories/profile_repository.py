@@ -99,6 +99,32 @@ class ProfileRepository:
             cur = conn.execute(sql, tuple(params))
             return cur.rowcount
 
+    def bulk_assign_proxy(self, profile_ids: list[int], proxy_id: int | None) -> int:
+        """Atomically assigns a proxy to a list of profiles in a single transaction."""
+        if not profile_ids:
+            return 0
+
+        placeholders = ", ".join("?" for _ in profile_ids)
+        sql = f"UPDATE profiles SET proxy_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id IN ({placeholders});"
+        params = [proxy_id] + profile_ids
+
+        with db_session(self.db_path) as conn:
+            cur = conn.execute(sql, tuple(params))
+            return cur.rowcount
+
+    def bulk_update_status(self, profile_ids: list[int], status: str) -> int:
+        """Atomically updates status for a list of profiles."""
+        if not profile_ids:
+            return 0
+
+        placeholders = ", ".join("?" for _ in profile_ids)
+        sql = f"UPDATE profiles SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id IN ({placeholders});"
+        params = [status] + profile_ids
+
+        with db_session(self.db_path) as conn:
+            cur = conn.execute(sql, tuple(params))
+            return cur.rowcount
+
     def soft_delete(self, profile_id: int) -> bool:
         """Soft-deletes a profile by marking is_trashed = 1."""
         with db_session(self.db_path) as conn:

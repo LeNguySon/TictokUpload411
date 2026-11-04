@@ -192,28 +192,47 @@ class BulkAddProfileDialog(QDialog):
         target_project_id = self.combo_project.currentData()
         created_count = 0
 
+        from src.application.services.gologin_sync_service import GoLoginSyncService
+
+        sync_svc = GoLoginSyncService(
+            profile_repo=self.profile_repo,
+            project_repo=self.project_repo,
+            proxy_repo=self.proxy_repo,
+        )
+
         for r in rows:
             # If proxy_raw provided, register or match proxy
             proxy_id = None
             if r["proxy_raw"]:
                 self.proxy_repo.bulk_import([r["proxy_raw"]])
-                # Look up proxy
                 all_px = self.proxy_repo.list_all()
                 if all_px:
                     proxy_id = all_px[-1]["id"]
 
-            profile_data = {
-                "name": r["name"],
-                "project_id": target_project_id,
-                "proxy_id": proxy_id,
-                "storage_dir": f"profiles/{r['name']}",
-                "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/130.0.0.0",
-                "status": "LIVE" if r["cookie"] else "stopped",
-                "cookie": r["cookie"],
-                "email": r["email"],
-                "note": r["note"],
-            }
-            self.profile_repo.create(profile_data)
+            try:
+                sync_svc.create_real_gologin_profile(
+                    name=r["name"],
+                    project_id=target_project_id,
+                    proxy_id=proxy_id,
+                    cookie=r["cookie"],
+                )
+            except Exception:
+                import uuid
+
+                profile_data = {
+                    "uuid": str(uuid.uuid4()),
+                    "name": r["name"],
+                    "project_id": target_project_id,
+                    "proxy_id": proxy_id,
+                    "storage_dir": f"profiles/{r['name']}",
+                    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/152.0.0.0",
+                    "status": "LIVE" if r["cookie"] else "stopped",
+                    "cookie": r["cookie"],
+                    "email": r["email"],
+                    "note": r["note"],
+                }
+                self.profile_repo.create(profile_data)
+
             created_count += 1
 
         InfoBar.success(

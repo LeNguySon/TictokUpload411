@@ -18,6 +18,9 @@ class OrbitaLauncher:
     """
 
     DEFAULT_ORBITA_PATHS = [
+        Path(r"C:\Users\sonson\Desktop\Gloglin2609\resources\engines\orbita-152\chrome.exe"),
+        Path(r"C:\Users\sonson\Desktop\Gloglin2609\resources\engines\orbita-139\chrome.exe"),
+        Path(r"C:\Users\sonson\Desktop\Gloglin2609\resources\engines\orbita-123\chrome.exe"),
         Path(os.environ.get("USERPROFILE", "C:/Users/sonson")) / ".gologin/browser/orbita-browser-130/chrome.exe",
         Path(os.environ.get("USERPROFILE", "C:/Users/sonson")) / ".gologin/browser/orbita-browser-128/chrome.exe",
         Path("C:/Program Files/Google/Chrome/Application/chrome.exe"),
@@ -108,3 +111,28 @@ class OrbitaLauncher:
 
         logger.info("Launching Orbita browser for profile: %s with args: %s", profile_data.get("name"), args)
         return subprocess.Popen(args, shell=False)
+
+    def launch_via_gologin_sdk(
+        self,
+        profile_id: str,
+        headless: bool = False,
+        sync: bool = False,
+        port: int = 36912,
+    ) -> str:
+        """
+        Launches profile through SamMonny GoLogin SDK compatibility layer.
+        Returns debugger address (e.g. '127.0.0.1:port').
+        """
+        from sammonny.gologin.gologin import GoLogin
+
+        gl = GoLogin({"profile_id": profile_id, "port": port, "sync": sync, "headless": headless})
+        debugger_address = gl.start()
+        logger.info("GoLogin SDK launched profile %s at debugger address %s", profile_id, debugger_address)
+        return debugger_address
+
+    def stop_via_gologin_sdk(self, profile_id: str, port: int = 36912) -> bool:
+        """Stops profile session through SamMonny GoLogin SDK."""
+        from sammonny.gologin.gologin import GoLogin
+
+        gl = GoLogin({"profile_id": profile_id, "port": port})
+        return gl.stop()

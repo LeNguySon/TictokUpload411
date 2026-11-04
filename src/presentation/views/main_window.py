@@ -34,6 +34,7 @@ from qfluentwidgets import (
     setTheme,
 )
 
+from src.application.services.gologin_sync_service import GoLoginSyncService
 from src.application.services.profile_service import ProfileService
 from src.application.services.proxy_service import ProxyService
 from src.application.services.upload_service import UploadService
@@ -42,6 +43,7 @@ from src.application.workers.metrics_sync_worker import MetricsSyncWorker
 from src.application.workers.thread_pool_manager import ThreadPoolManager
 from src.application.workers.upload_worker import UploadWorker
 from src.infrastructure.browser.orbita_launcher import OrbitaLauncher
+from src.infrastructure.browser.sammonny_daemon_manager import SamMonnyDaemonSupervisor
 from src.infrastructure.credentials.windows_vault import WindowsCredentialVault
 from src.infrastructure.database.repositories.profile_repository import ProfileRepository
 from src.infrastructure.database.repositories.project_repository import ProjectRepository
@@ -105,9 +107,19 @@ class TikTokManagerMainWindow(QMainWindow):
             tiktok_adapter=self.tiktok_adapter,
         )
 
+        # SamMonny Native Daemon & GoLogin Sync Service
+        self.daemon_supervisor = SamMonnyDaemonSupervisor()
+        self.gologin_sync_service = GoLoginSyncService(
+            profile_repo=self.profile_repo,
+            project_repo=self.project_repo,
+            proxy_repo=self.proxy_repo,
+            daemon_supervisor=self.daemon_supervisor,
+        )
+
         # Signal Bus & Concurrency Manager
         self.signal_bus = AppSignalBus.instance()
         self.thread_pool = ThreadPoolManager.instance()
+        self.thread_pool.executor.submit(self.daemon_supervisor.ensure_daemon_running)
 
         # UI Preferences
         self.hidden_columns: set[int] = set()
@@ -274,6 +286,7 @@ class TikTokManagerMainWindow(QMainWindow):
         # Context Menu Events on Profile Table
         self.profile_table.open_orbita_requested.connect(self._on_launch_orbita)
         self.profile_table.check_cookie_requested.connect(self._on_check_single_cookie)
+        self.profile_table.update_proxy_requested.connect(self._on_update_profiles_proxy)
         self.profile_table.change_status_requested.connect(self._on_change_profile_status)
         self.profile_table.soft_delete_requested.connect(self._on_soft_delete_profiles)
 
@@ -358,6 +371,10 @@ class TikTokManagerMainWindow(QMainWindow):
         act_orbita = Action(FluentIcon.GLOBE, "Mở Trình duyệt Orbita Antidetect", self)
         act_orbita.triggered.connect(self._on_launch_orbita_selected)
         self.settings_menu.addAction(act_orbita)
+
+        act_gologin_sync = Action(FluentIcon.CLOUD_DOWNLOAD, "Đồng bộ Profile GoLogin SDK (22+ có sẵn)", self)
+        act_gologin_sync.triggered.connect(self._on_sync_gologin_profiles)
+        self.settings_menu.addAction(act_gologin_sync)
 
         self.settings_menu.addSeparator()
 
@@ -543,18 +560,63 @@ class TikTokManagerMainWindow(QMainWindow):
             return
         proxy = self.proxy_repo.get_by_id(p["proxy_id"]) if p.get("proxy_id") else None
         try:
-            proc = self.orbita_launcher.launch_profile(p, proxy)
-            InfoBar.success(
-                title="Khởi Chạy Orbita",
-                content=f"Đã mở trình duyệt cho hồ sơ '{p.get('name')}' (PID: {proc.pid}).",
-                position=InfoBarPosition.TOP,
-                parent=self,
-            )
+            # 1. Ensure SamMonny Daemon is active
+            self.daemon_supervisor.ensure_daemon_running()
+
+            # 2. Check if profile has GoLogin UUID
+            uuid_val = p.get("uuid")
+            debugger_addr = None
+            if uuid_val:
+                try:
+                    debugger_addr = self.orbita_launcher.launch_via_gologin_sdk(
+                        profile_id=uuid_val,
+                        headless=False,
+                        sync=False,
+                    )
+                except Exception as sdk_err:
+                    logger.warning(
+                        "GoLogin SDK launch failed for %s, falling back to direct binary: %s", uuid_val, sdk_err
+                    )
+
+            if debugger_addr:
+                InfoBar.success(
+                    title="Khởi Chạy Orbita (GoLogin SDK)",
+                    content=f"Đã mở trình duyệt Orbita cho hồ sơ '{p.get('name')}' (CDP: {debugger_addr}).",
+                    position=InfoBarPosition.TOP,
+                    parent=self,
+                )
+            else:
+                proc = self.orbita_launcher.launch_profile(p, proxy)
+                InfoBar.success(
+                    title="Khởi Chạy Orbita Antidetect",
+                    content=f"Đã mở trình duyệt Orbita cho hồ sơ '{p.get('name')}' (PID: {proc.pid}).",
+                    position=InfoBarPosition.TOP,
+                    parent=self,
+                )
         except Exception as e:
             logger.error("Launch orbita failed: %s", e)
             InfoBar.error(
                 title="Khởi Chạy Thất Bại",
                 content=f"Không thể mở Orbita: {e}",
+                position=InfoBarPosition.TOP,
+                parent=self,
+            )
+
+    def _on_sync_gologin_profiles(self) -> None:
+        try:
+            count = self.gologin_sync_service.sync_from_local_gologin()
+            self.refresh_profiles()
+            InfoBar.success(
+                title="Đồng Bộ GoLogin Thành Công",
+                content=f"Đã đồng bộ {count} hồ sơ thực tế từ SDK GoLogin vào hệ thống.",
+                position=InfoBarPosition.TOP,
+                parent=self,
+            )
+        except Exception as e:
+            logger.error("Sync GoLogin profiles error: %s", e)
+            InfoBar.error(
+                title="Lỗi Đồng Bộ GoLogin",
+                content=str(e),
                 position=InfoBarPosition.TOP,
                 parent=self,
             )
@@ -710,6 +772,35 @@ class TikTokManagerMainWindow(QMainWindow):
             position=InfoBarPosition.TOP,
             parent=self,
         )
+
+    def _on_update_profiles_proxy(self, profile_ids: list[int]) -> None:
+        if not profile_ids:
+            return
+        try:
+            from src.presentation.dialogs.assign_proxy_dialog import AssignProxyDialog
+
+            dlg = AssignProxyDialog(
+                profile_ids=profile_ids,
+                profile_repo=self.profile_repo,
+                proxy_repo=self.proxy_repo,
+                parent=self,
+            )
+            if dlg.exec():
+                self.refresh_profiles()
+                InfoBar.success(
+                    title="Thành Công",
+                    content=f"Đã cập nhật proxy cho {len(profile_ids)} hồ sơ.",
+                    position=InfoBarPosition.TOP,
+                    parent=self,
+                )
+        except Exception as e:
+            logger.error("AssignProxyDialog error: %s", e)
+            InfoBar.error(
+                title="Lỗi Cập Nhật Proxy",
+                content=str(e),
+                position=InfoBarPosition.TOP,
+                parent=self,
+            )
 
     def _on_change_profile_status(self, profile_id: int, status: str) -> None:
         self.profile_repo.update(profile_id, status=status)
@@ -933,12 +1024,18 @@ class TikTokManagerMainWindow(QMainWindow):
         self.lbl_video_header.setText("Bảng video Đã chọn 0 / 0")
 
     def closeEvent(self, event) -> None:
-        """Cleanup Chromium RAM working set before closing application."""
+        """Cleanup Chromium RAM working set and shutdown daemon before closing application."""
         if self.chk_clean_exit.isChecked():
             try:
+                import os
+
                 import sammonny
 
-                sammonny.MemoryManager.trim_working_set()
+                sammonny.MemoryManager.trim_process_tree_memory(os.getpid())
             except Exception:
                 pass
+        try:
+            self.daemon_supervisor.shutdown()
+        except Exception:
+            pass
         event.accept()

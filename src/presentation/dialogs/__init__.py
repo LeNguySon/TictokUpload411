@@ -4,6 +4,8 @@ Presentation dialogs package exports.
 
 from src.presentation.dialogs.add_profile_dialog import AddProfileDialog
 from src.presentation.dialogs.api_cookie_dialog import ApiCookieDialog
+from src.presentation.dialogs.assign_project_dialog import AssignProjectDialog
+from src.presentation.dialogs.assign_proxy_dialog import AssignProxyDialog
 from src.presentation.dialogs.bulk_add_profile_dialog import (
     BulkAddProfileDialog,
     parse_bulk_profile_line,
@@ -28,6 +30,8 @@ from src.presentation.dialogs.video_metadata_dialog import VideoMetadataDialog
 __all__ = [
     "ProjectManagerDialog",
     "ProxyManagerDialog",
+    "AssignProxyDialog",
+    "AssignProjectDialog",
     "AddProfileDialog",
     "BulkAddProfileDialog",
     "TrashDialog",

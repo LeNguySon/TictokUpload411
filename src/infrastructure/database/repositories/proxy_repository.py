@@ -187,6 +187,21 @@ class ProxyRepository:
             )
             return cur.rowcount > 0
 
+    def delete(self, proxy_id: int) -> bool:
+        """Deletes a single proxy record by ID."""
+        with db_session(self.db_path) as conn:
+            cur = conn.execute("DELETE FROM proxies WHERE id = ?;", (proxy_id,))
+            return cur.rowcount > 0
+
+    def delete_many(self, proxy_ids: list[int]) -> int:
+        """Deletes multiple proxy records by their IDs."""
+        if not proxy_ids:
+            return 0
+        placeholders = ", ".join("?" for _ in proxy_ids)
+        with db_session(self.db_path) as conn:
+            cur = conn.execute(f"DELETE FROM proxies WHERE id IN ({placeholders});", tuple(proxy_ids))
+            return cur.rowcount
+
     def delete_dead(self) -> int:
         with db_session(self.db_path) as conn:
             cur = conn.execute("DELETE FROM proxies WHERE status IN ('dead', 'leak_detected');")

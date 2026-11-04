@@ -6,8 +6,14 @@ from typing import Any
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QColor
-from PyQt6.QtWidgets import QHBoxLayout, QHeaderView, QTableWidgetItem, QWidget
-from qfluentwidgets import Action, ProgressBar, RoundMenu, TableWidget
+from PyQt6.QtWidgets import (
+    QApplication,
+    QHBoxLayout,
+    QHeaderView,
+    QTableWidgetItem,
+    QWidget,
+)
+from qfluentwidgets import Action, FluentIcon, ProgressBar, RoundMenu, TableWidget
 
 from src.presentation.widgets.table_helpers import (
     format_duration_string,
@@ -19,12 +25,16 @@ from src.presentation.widgets.table_helpers import (
 class VideoQueueTableWidget(TableWidget):
     """
     Fluent UI Table for managing video upload pipeline matching SSMATool parity.
+    Supports multi-selection context operations, vector icons, and robust data persistence.
     """
 
-    upload_now_requested = pyqtSignal(int)
-    delete_video_requested = pyqtSignal(list)
-    edit_metadata_requested = pyqtSignal(int)
+    upload_now_requested = pyqtSignal(list)
     schedule_video_requested = pyqtSignal(list)
+    edit_metadata_requested = pyqtSignal(int)
+    preview_video_requested = pyqtSignal(str)
+    open_folder_requested = pyqtSignal(str)
+    open_published_link_requested = pyqtSignal(str)
+    delete_video_requested = pyqtSignal(list)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -78,8 +88,10 @@ class VideoQueueTableWidget(TableWidget):
                 item.setTextAlignment(align)
                 return item
 
-            # Col 0: STT
-            self.setItem(row_idx, 0, make_item(str(row_idx + 1), Qt.AlignmentFlag.AlignCenter))
+            # Col 0: STT (holds video dict in UserRole)
+            stt_item = make_item(str(row_idx + 1), Qt.AlignmentFlag.AlignCenter)
+            stt_item.setData(Qt.ItemDataRole.UserRole, v)
+            self.setItem(row_idx, 0, stt_item)
 
             # Col 1: Tiêu đề
             self.setItem(row_idx, 1, make_item(v.get("file_name") or v.get("title", f"Tiêu đề {row_idx + 1}")))
@@ -175,23 +187,23 @@ class VideoQueueTableWidget(TableWidget):
         menu = RoundMenu(parent=self)
         first_row = selected_rows[0]
 
-        act_edit = Action("📝 Chỉnh Sửa Thông Tin Video", self)
+        act_edit = Action(FluentIcon.EDIT, "Chỉnh Sửa Thông Tin Video", self)
         act_edit.triggered.connect(lambda: self.edit_metadata_requested.emit(first_row))
         menu.addAction(act_edit)
 
-        act_schedule = Action("📅 Lên Lịch Đăng Video Đã Chọn...", self)
+        act_schedule = Action(FluentIcon.CALENDAR, "Lên Lịch Đăng Video Đã Chọn...", self)
         act_schedule.triggered.connect(lambda: self.schedule_video_requested.emit(selected_rows))
         menu.addAction(act_schedule)
 
         menu.addSeparator()
 
-        act_upload = Action("🚀 Đăng Ngay Video Này", self)
+        act_upload = Action(FluentIcon.SEND, "Đăng Ngay Video Này", self)
         act_upload.triggered.connect(lambda: self.upload_now_requested.emit(first_row))
         menu.addAction(act_upload)
 
         menu.addSeparator()
 
-        act_delete = Action("🗑 Xóa Khỏi Bảng", self)
+        act_delete = Action(FluentIcon.DELETE, "Xóa Khỏi Bảng", self)
         act_delete.triggered.connect(lambda: self.delete_video_requested.emit(selected_rows))
         menu.addAction(act_delete)
 
