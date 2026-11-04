@@ -24,22 +24,24 @@ class VideoRepository:
         file_name: str,
         file_size: int,
         mtime: float,
+        assigned_profile_id: int | None = None,
     ) -> int:
         """Registers a new video file or updates metadata if already tracked."""
         with db_session(self.db_path) as conn:
             conn.execute(
                 """
                 INSERT INTO video_registry (
-                    video_hash, file_path, file_name, file_size, mtime, status
-                ) VALUES (?, ?, ?, ?, ?, 'available')
+                    video_hash, file_path, file_name, file_size, mtime, assigned_profile_id, status
+                ) VALUES (?, ?, ?, ?, ?, ?, 'available')
                 ON CONFLICT(video_hash) DO UPDATE SET
                     file_path = excluded.file_path,
                     file_name = excluded.file_name,
                     file_size = excluded.file_size,
                     mtime = excluded.mtime,
+                    assigned_profile_id = COALESCE(excluded.assigned_profile_id, video_registry.assigned_profile_id),
                     updated_at = CURRENT_TIMESTAMP;
                 """,
-                (video_hash, file_path, file_name, file_size, mtime),
+                (video_hash, file_path, file_name, file_size, mtime, assigned_profile_id),
             )
             # Retrieve row id
             row = conn.execute("SELECT id FROM video_registry WHERE video_hash = ?;", (video_hash,)).fetchone()

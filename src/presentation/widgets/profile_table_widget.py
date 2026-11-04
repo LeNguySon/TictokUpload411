@@ -36,6 +36,9 @@ class ProfileTableWidget(TableWidget):
     open_folder_requested = pyqtSignal(str)
     change_status_requested = pyqtSignal(list, str)
     soft_delete_requested = pyqtSignal(list)
+    remove_proxy_requested = pyqtSignal(list)
+    rotate_proxy_requested = pyqtSignal(list)
+    check_proxy_requested = pyqtSignal(list)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -133,16 +136,26 @@ class ProfileTableWidget(TableWidget):
             logged_item.setForeground(QColor("#107C41") if logged_in else QColor("#8A8886"))
             self.setItem(row_idx, 3, logged_item)
 
-            # Col 4: Proxy
-            proxy_display = p.get("proxy_host", "")
-            if proxy_display and p.get("proxy_port"):
-                proxy_display = f"{proxy_display}:{p.get('proxy_port')}"
-            elif not proxy_display and p.get("proxy_id"):
+            # Col 4: Proxy & Col 5: Type
+            if p.get("vpn_config"):
+                proxy_display = "🛡️ WireGuard VPN"
+                proxy_type = "WireGuard"
+            elif p.get("proxy_host"):
+                is_rotating = p.get("proxy_type") == "rotating" or bool(p.get("change_ip_url"))
+                prefix = "🔄 " if is_rotating else ""
+                proxy_display = f"{prefix}{p.get('proxy_host')}"
+                if p.get("proxy_port"):
+                    proxy_display = f"{proxy_display}:{p.get('proxy_port')}"
+                proxy_type = "rotating" if is_rotating else p.get("proxy_protocol", "http")
+            elif p.get("proxy_id"):
                 proxy_display = f"Proxy #{p.get('proxy_id')}"
-            self.setItem(row_idx, 4, make_item(proxy_display))
+                proxy_type = p.get("proxy_protocol", "http")
+            else:
+                proxy_display = ""
+                proxy_type = ""
 
-            # Col 5: Type
-            self.setItem(row_idx, 5, make_item(p.get("proxy_protocol", "http"), Qt.AlignmentFlag.AlignCenter))
+            self.setItem(row_idx, 4, make_item(proxy_display))
+            self.setItem(row_idx, 5, make_item(proxy_type, Qt.AlignmentFlag.AlignCenter))
 
             # Col 6: ID Tiktok
             self.setItem(row_idx, 6, make_item(p.get("username_on_tiktok", "")))
@@ -380,6 +393,18 @@ class ProfileTableWidget(TableWidget):
         act_proxy = Action(FluentIcon.WIFI, proxy_title, self)
         act_proxy.triggered.connect(lambda: self.update_proxy_requested.emit(selected_ids))
         menu.addAction(act_proxy)
+
+        act_rotate_proxy = Action(FluentIcon.SYNC, "Xoay IP Proxy (Rotate IP)", self)
+        act_rotate_proxy.triggered.connect(lambda: self.rotate_proxy_requested.emit(selected_ids))
+        menu.addAction(act_rotate_proxy)
+
+        act_check_proxy = Action(FluentIcon.SPEED_HIGH, "Kiểm Tra Ping / Live Proxy", self)
+        act_check_proxy.triggered.connect(lambda: self.check_proxy_requested.emit(selected_ids))
+        menu.addAction(act_check_proxy)
+
+        act_remove_proxy = Action(FluentIcon.REMOVE, "Gỡ Bỏ Proxy / WireGuard VPN", self)
+        act_remove_proxy.triggered.connect(lambda: self.remove_proxy_requested.emit(selected_ids))
+        menu.addAction(act_remove_proxy)
 
         bulk_title = f"Cập Nhật Thông Tin Hàng Loạt ({count} hồ sơ)..." if count > 1 else "Chỉnh Sửa Thông Tin Hồ Sơ..."
         act_bulk = Action(FluentIcon.EDIT, bulk_title, self)

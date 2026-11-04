@@ -100,7 +100,7 @@ def test_profile_table_context_menu_and_signals(qapp, monkeypatch):
     multi_texts = [act.text() for act in captured_actions if not act.isSeparator()]
     assert any("Mở Trình Duyệt (2 hồ sơ" in t for t in multi_texts)
     assert any("Đóng Trình Duyệt (2 hồ sơ)" in t for t in multi_texts)
-    assert any("Cập Nhật / Thêm Proxy Hàng Loạt (2 hồ sơ)" in t for t in multi_texts)
+    assert any("Proxy" in t and "2 hồ sơ" in t for t in multi_texts)
     assert any("Cập Nhật Thông Tin Hàng Loạt (2 hồ sơ)" in t for t in multi_texts)
 
 

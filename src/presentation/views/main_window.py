@@ -6,6 +6,7 @@ import logging
 import os
 import subprocess
 from pathlib import Path
+from typing import Any
 
 from PyQt6.QtCore import QPoint, QSettings, QSize, Qt, QUrl
 from PyQt6.QtGui import QDesktopServices, QKeySequence, QShortcut
@@ -59,6 +60,7 @@ from src.presentation.dialogs.add_profile_dialog import AddProfileDialog
 from src.presentation.dialogs.api_cookie_dialog import ApiCookieDialog
 from src.presentation.dialogs.assign_project_dialog import AssignProjectDialog
 from src.presentation.dialogs.assign_proxy_dialog import AssignProxyDialog
+from src.presentation.dialogs.batch_folder_upload_dialog import BatchFolderUploadDialog
 from src.presentation.dialogs.bulk_add_profile_dialog import BulkAddProfileDialog
 from src.presentation.dialogs.bulk_edit_profile_dialog import BulkEditProfileDialog
 from src.presentation.dialogs.permissions_dialog import PermissionsDialog
@@ -238,6 +240,12 @@ class TikTokManagerMainWindow(QMainWindow):
         self.btn_pick_pc.clicked.connect(self._on_pick_video_files)
         bottom_toolbar.addWidget(self.btn_pick_pc)
 
+        self.btn_batch_upload = PushButton(FluentIcon.FOLDER, "Nạp Thư Mục & Phân Bổ", self)
+        self.btn_batch_upload.setFixedHeight(34)
+        self.btn_batch_upload.setIconSize(QSize(16, 16))
+        self.btn_batch_upload.clicked.connect(self._on_open_batch_folder_upload)
+        bottom_toolbar.addWidget(self.btn_batch_upload)
+
         self.btn_start_upload = PrimaryPushButton(FluentIcon.UP, "Bắt đầu Upload", self)
         self.btn_start_upload.setFixedHeight(34)
         self.btn_start_upload.setIconSize(QSize(16, 16))
@@ -327,6 +335,9 @@ class TikTokManagerMainWindow(QMainWindow):
         self.profile_table.open_folder_requested.connect(self._on_open_profile_folder)
         self.profile_table.change_status_requested.connect(self._on_change_profile_status)
         self.profile_table.soft_delete_requested.connect(self._on_soft_delete_profiles)
+        self.profile_table.remove_proxy_requested.connect(self._on_remove_proxy_selected)
+        self.profile_table.rotate_proxy_requested.connect(self._on_rotate_proxy_selected)
+        self.profile_table.check_proxy_requested.connect(self._on_check_proxy_selected)
 
         # Context Menu & Selection Events on Video Table
         self.video_table.upload_now_requested.connect(self._on_upload_single_video)
@@ -619,6 +630,22 @@ class TikTokManagerMainWindow(QMainWindow):
 
             last_name = p.get("name", "")
             proxy = self.proxy_repo.get_by_id(p["proxy_id"]) if p.get("proxy_id") else None
+
+            # Auto-rotate proxy if rotating proxy has change_ip_url
+            if proxy and (proxy.get("proxy_type") == "rotating" or proxy.get("change_ip_url")):
+                try:
+                    self.proxy_service.change_rotating_ip(proxy["id"])
+                except Exception as re_err:
+                    logger.debug("Auto rotate proxy notice: %s", re_err)
+
+            # Pre-launch Proxy Guard
+            if proxy and not self._check_proxy_alive(proxy):
+                logger.warning(
+                    "Proxy for profile '%s' is unreachable (%s:%s)",
+                    last_name,
+                    proxy.get("host"),
+                    proxy.get("port"),
+                )
             try:
                 uuid_val = p.get("uuid")
                 debugger_addr = None
@@ -953,6 +980,107 @@ class TikTokManagerMainWindow(QMainWindow):
                 parent=self,
             )
 
+    def _check_proxy_alive(self, proxy_data: dict[str, Any], timeout: float = 1.5) -> bool:
+        """Non-blocking TCP socket check to verify proxy host and port responsiveness."""
+        host = proxy_data.get("host")
+        port = proxy_data.get("port")
+        if not host or not port:
+            return False
+        import socket
+
+        try:
+            with socket.create_connection((str(host), int(port)), timeout=timeout):
+                return True
+        except (OSError, TimeoutError):
+            return False
+
+    def _on_remove_proxy_selected(self, profile_ids: list[int]) -> None:
+        """1-click removal of both assigned proxy and WireGuard VPN configurations."""
+        if not profile_ids:
+            return
+        self.profile_repo.bulk_update_fields(profile_ids, {"proxy_id": None, "vpn_config": None})
+        self.refresh_profiles()
+        count = len(profile_ids)
+        msg = (
+            f"Đã gỡ bỏ Proxy & WireGuard VPN cho {count} hồ sơ."
+            if count > 1
+            else f"Đã gỡ bỏ Proxy & WireGuard VPN cho hồ sơ #{profile_ids[0]}."
+        )
+        InfoBar.success(
+            title="Gỡ Bỏ Cấu Hình Mạng",
+            content=msg,
+            position=InfoBarPosition.TOP,
+            parent=self,
+        )
+
+    def _on_rotate_proxy_selected(self, profile_ids: list[int]) -> None:
+        """Triggers IP rotation URL for all rotating proxies associated with selected profiles."""
+        if not profile_ids:
+            return
+        rotated_count = 0
+        for p_id in profile_ids:
+            p = self.profile_repo.get_by_id(p_id)
+            if not p or not p.get("proxy_id"):
+                continue
+            px = self.proxy_repo.get_by_id(p["proxy_id"])
+            if px and (px.get("proxy_type") == "rotating" or px.get("change_ip_url")):
+                try:
+                    if self.proxy_service.change_rotating_ip(px["id"]):
+                        rotated_count += 1
+                except Exception as e:
+                    logger.warning("Error rotating proxy for profile %s: %s", p_id, e)
+
+        if rotated_count > 0:
+            self.refresh_profiles()
+            InfoBar.success(
+                title="Xoay IP Thành Công",
+                content=f"Đã xoay IP mới thành công cho {rotated_count} proxy xoay.",
+                position=InfoBarPosition.TOP,
+                parent=self,
+            )
+        else:
+            InfoBar.warning(
+                title="Không Có Proxy Xoay",
+                content="Các hồ sơ đã chọn không sử dụng proxy xoay hoặc thiếu link đổi IP.",
+                position=InfoBarPosition.TOP,
+                parent=self,
+            )
+
+    def _on_check_proxy_selected(self, profile_ids: list[int]) -> None:
+        """Dispatches non-blocking proxy health check for selected profiles."""
+        if not profile_ids:
+            return
+        proxy_ids: set[int] = set()
+        for p_id in profile_ids:
+            p = self.profile_repo.get_by_id(p_id)
+            if p and p.get("proxy_id"):
+                proxy_ids.add(p["proxy_id"])
+
+        if not proxy_ids:
+            InfoBar.warning(
+                title="Không Có Proxy",
+                content="Các hồ sơ đã chọn chưa được gán proxy nào.",
+                position=InfoBarPosition.TOP,
+                parent=self,
+            )
+            return
+
+        from src.application.workers.proxy_check_worker import ProxyCheckWorker
+
+        worker = ProxyCheckWorker(
+            proxy_ids=list(proxy_ids),
+            proxy_service=self.proxy_service,
+            signal_bus=self.signal_bus,
+        )
+        worker.finished.connect(self.refresh_profiles)
+        self.thread_pool.dispatch(worker)
+        InfoBar.info(
+            title="Đang Kiểm Tra Proxy",
+            content=f"Đang kiểm tra kết nối cho {len(proxy_ids)} proxy...",
+            position=InfoBarPosition.TOP,
+            parent=self,
+        )
+
     def _on_change_profiles_project(self, profile_ids: list[int]) -> None:
         if not profile_ids:
             return
@@ -1173,6 +1301,23 @@ class TikTokManagerMainWindow(QMainWindow):
             position=InfoBarPosition.TOP,
             parent=self,
         )
+
+    def _on_open_batch_folder_upload(self) -> None:
+        dlg = BatchFolderUploadDialog(
+            profile_repo=self.profile_repo,
+            upload_service=self.upload_service,
+            parent=self,
+        )
+        if dlg.exec():
+            self.refresh_videos()
+            InfoBar.success(
+                title="Phân Bổ Hoàn Tất",
+                content=f"Đã nạp và phân bổ {len(dlg.distributed_videos)} video vào hàng đợi.",
+                position=InfoBarPosition.TOP,
+                parent=self,
+            )
+            if dlg.auto_start_upload:
+                self._on_start_upload_queue()
 
     def _on_schedule_videos(self) -> None:
         available_videos = self.video_repo.list_available()

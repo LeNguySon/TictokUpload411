@@ -13,6 +13,7 @@ Tests:
 
 import json
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 from src.infrastructure.browser.cache_cleaner import (
@@ -175,9 +176,11 @@ def test_orphan_browser_scanner_detects_unmanaged_process(tmp_path: Path, monkey
         DummyProc(303, "explorer.exe", ["explorer.exe"]),
     ]
 
-    import psutil
-
-    monkeypatch.setattr(psutil, "process_iter", lambda _attrs: fake_processes)
+    mock_psutil = MagicMock()
+    mock_psutil.process_iter.return_value = fake_processes
+    mock_psutil.NoSuchProcess = type("NoSuchProcess", (Exception,), {})
+    mock_psutil.AccessDenied = type("AccessDenied", (Exception,), {})
+    monkeypatch.setattr("src.infrastructure.browser.process_supervisor.psutil", mock_psutil)
 
     # Active legitimate pid is 101
     orphans = supervisor.scan_orphan_browsers(legitimate_pids={101})

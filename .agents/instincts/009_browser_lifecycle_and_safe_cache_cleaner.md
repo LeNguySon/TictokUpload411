@@ -10,3 +10,4 @@
   - **Bảo Vệ Nghiêm Ngặt (PROTECTED_ITEMS)**: Tuyệt đối không xóa `Cookies`, `Preferences`, `Local State`, `Local Storage`, `IndexedDB`, `Extensions`, `Login Data` dưới bất kỳ trường hợp nào, đảm bảo 100% phiên đăng nhập TikTok và dữ liệu tài khoản được giữ nguyên vẹn.
 - **Tối Ưu Working Set RAM**:
   - Gọi Win32 `EmptyWorkingSet` thu hồi các trang bộ nhớ vật lý unreferenced của toàn bộ cây tiến trình Chromium mà không ngắt socket mạng hay crash tab.
+
