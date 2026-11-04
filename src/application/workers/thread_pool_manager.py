@@ -3,6 +3,7 @@ Thread Pool Manager managing QThreadPool dispatch, worker concurrency limits, an
 """
 
 import logging
+from typing import Any
 
 from PyQt6.QtCore import QObject, QThreadPool
 
