@@ -41,3 +41,4 @@
 - Giao diện tự động cập nhật nhãn động:
   - Nếu chọn 1 hàng: `Cập Nhật / Gán Proxy...`
   - Nếu chọn nhiều hàng: `Cập Nhật / Gán Proxy (5 hồ sơ)...`
+

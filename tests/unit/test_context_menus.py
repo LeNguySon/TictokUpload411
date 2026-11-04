@@ -9,6 +9,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QContextMenuEvent
 from PyQt6.QtWidgets import QApplication
 from src.infrastructure.database.migrations.runner import run_all_migrations
@@ -204,3 +205,27 @@ def test_proxy_manager_dialog_context_menu(qapp, monkeypatch):
         assert any("Xóa Proxy" in t for t in action_texts)
 
         dlg.close()
+
+
+def test_tables_prevent_arbitrary_in_place_editing(qapp):
+    # 1. ProfileTableWidget
+    pw = ProfileTableWidget()
+    assert pw.editTriggers() == ProfileTableWidget.EditTrigger.NoEditTriggers
+    pw.load_profiles([{"id": 1, "name": "Test Profile"}])
+    item_p = pw.item(0, 2)
+    assert item_p is not None
+    assert not bool(item_p.flags() & Qt.ItemFlag.ItemIsEditable)
+
+    # 2. VideoQueueTableWidget
+    vw = VideoQueueTableWidget()
+    assert vw.editTriggers() == VideoQueueTableWidget.EditTrigger.NoEditTriggers
+    vw.load_videos([{"id": 1, "file_name": "Test Video.mp4"}])
+    item_v = vw.item(0, 1)
+    assert item_v is not None
+    assert not bool(item_v.flags() & Qt.ItemFlag.ItemIsEditable)
+
+    # 3. Double click on profile emits open_orbita_requested
+    mock_orbita = MagicMock()
+    pw.open_orbita_requested.connect(mock_orbita)
+    pw._on_cell_double_clicked(0, 0)
+    mock_orbita.assert_called_once_with([1])

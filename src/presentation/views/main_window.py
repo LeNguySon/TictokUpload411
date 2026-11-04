@@ -295,6 +295,7 @@ class TikTokManagerMainWindow(QMainWindow):
         self.profile_table.add_video_requested.connect(self._on_add_video_for_profiles)
         self.profile_table.update_proxy_requested.connect(self._on_update_profiles_proxy)
         self.profile_table.change_project_requested.connect(self._on_change_profiles_project)
+        self.profile_table.edit_profile_requested.connect(self._on_edit_profile)
         self.profile_table.open_web_profile_requested.connect(self._on_open_tiktok_web)
         self.profile_table.open_folder_requested.connect(self._on_open_profile_folder)
         self.profile_table.change_status_requested.connect(self._on_change_profile_status)
@@ -309,6 +310,7 @@ class TikTokManagerMainWindow(QMainWindow):
         self.video_table.open_published_link_requested.connect(self._on_open_published_link)
         self.video_table.delete_video_requested.connect(self._on_delete_selected_videos)
         self.video_table.itemSelectionChanged.connect(self._on_video_selection_changed)
+        self.video_table.files_dropped.connect(self._on_videos_dropped)
 
     def refresh_all_data(self) -> None:
         self._refresh_project_dropdown()
@@ -877,6 +879,36 @@ class TikTokManagerMainWindow(QMainWindow):
                 parent=self,
             )
 
+    def _on_edit_profile(self, profile_id: int) -> None:
+        p = self.profile_repo.get_by_id(profile_id)
+        if not p:
+            return
+        try:
+            dlg = AddProfileDialog(
+                profile_repo=self.profile_repo,
+                project_repo=self.project_repo,
+                proxy_repo=self.proxy_repo,
+                vault=self.vault,
+                profile_data=p,
+                parent=self,
+            )
+            if dlg.exec():
+                self.refresh_profiles()
+                InfoBar.success(
+                    title="Cập Nhật Hồ Sơ",
+                    content=f"Đã cập nhật thông tin hồ sơ '{p.get('name')}'.",
+                    position=InfoBarPosition.TOP,
+                    parent=self,
+                )
+        except Exception as e:
+            logger.error("EditProfileDialog error: %s", e)
+            InfoBar.error(
+                title="Lỗi Chỉnh Sửa Hồ Sơ",
+                content=str(e),
+                position=InfoBarPosition.TOP,
+                parent=self,
+            )
+
     def _on_add_video_for_profiles(self, profile_ids: list[int]) -> None:
         if not profile_ids:
             return
@@ -1128,9 +1160,11 @@ class TikTokManagerMainWindow(QMainWindow):
             )
             return
 
+        jump_step = max(1, self.spin_jump.value() + 1)
         dispatched = 0
         for idx, video in enumerate(available_videos):
-            profile_id = selected_profiles[idx % len(selected_profiles)]
+            prof_idx = (idx * jump_step) % len(selected_profiles)
+            profile_id = selected_profiles[prof_idx]
             worker = UploadWorker(
                 video_id=video["id"],
                 profile_id=profile_id,
@@ -1147,6 +1181,25 @@ class TikTokManagerMainWindow(QMainWindow):
             parent=self,
         )
 
+    def _on_videos_dropped(self, file_paths: list[str]) -> None:
+        added_count = 0
+        for f in file_paths:
+            try:
+                p = Path(f)
+                self.upload_service.enqueue_video(file_path=p, title=p.stem)
+                added_count += 1
+            except Exception as e:
+                logger.error("Error enqueuing dropped video %s: %s", f, e)
+
+        self.refresh_videos()
+        if added_count > 0:
+            InfoBar.success(
+                title="Đã Kéo Thả Video",
+                content=f"Đã nạp thành công {added_count} video từ Explorer vào hàng đợi.",
+                position=InfoBarPosition.TOP,
+                parent=self,
+            )
+
     def _on_upload_progress(self, video_id: int, uploaded: int, total: int, pct: float) -> None:
         self.video_table.update_progress(video_id, pct)
 
@@ -1158,6 +1211,22 @@ class TikTokManagerMainWindow(QMainWindow):
             position=InfoBarPosition.TOP,
             parent=self,
         )
+
+        # Auto-advance queue if switch is enabled
+        if self.switch_auto.isChecked():
+            avail = self.video_repo.list_available()
+            selected = self.profile_table.get_selected_profile_ids()
+            if avail and selected:
+                next_video = avail[0]
+                jump_step = max(1, self.spin_jump.value() + 1)
+                next_profile = selected[jump_step % len(selected)]
+                worker = UploadWorker(
+                    video_id=next_video["id"],
+                    profile_id=next_profile,
+                    upload_service=self.upload_service,
+                    signal_bus=self.signal_bus,
+                )
+                self.thread_pool.dispatch(worker)
 
     def _on_upload_failed(self, video_id: int, error: str) -> None:
         self.refresh_videos()

@@ -110,6 +110,7 @@ class ProxyManagerDialog(QDialog):
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.verticalHeader().setVisible(False)
         self.table.setSelectionBehavior(TableWidget.SelectionBehavior.SelectRows)
+        self.table.setEditTriggers(TableWidget.EditTrigger.NoEditTriggers)
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self._on_table_context_menu)
         layout.addWidget(self.table)
@@ -138,6 +139,7 @@ class ProxyManagerDialog(QDialog):
             def make_item(text: str, align=Qt.AlignmentFlag.AlignCenter):
                 item = QTableWidgetItem(str(text))
                 item.setTextAlignment(align)
+                item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
                 return item
 
             self.table.setItem(row_idx, 0, make_item(p["id"]))
@@ -195,16 +197,44 @@ class ProxyManagerDialog(QDialog):
         ThreadPoolManager.instance().dispatch(worker)
 
     def _on_proxy_checked(self, proxy_id: int, is_alive: bool, latency: float, status: str) -> None:
-        self.refresh_proxies()
+        try:
+            self.refresh_proxies()
+        except Exception:
+            pass
 
     def _on_proxy_leak_alert(self, proxy_id: int, reason: str) -> None:
-        InfoBar.error(
-            title="CẢNH BÁO: RÒ RỈ IP HOST!",
-            content=f"Proxy #{proxy_id} bị rò rỉ IP thực của máy: {reason}",
-            position=InfoBarPosition.TOP,
-            duration=8000,
-            parent=self,
-        )
+        try:
+            InfoBar.error(
+                title="CẢNH BÁO: RÒ RỈ IP HOST!",
+                content=f"Proxy #{proxy_id} bị rò rỉ IP thực của máy: {reason}",
+                position=InfoBarPosition.TOP,
+                duration=8000,
+                parent=self,
+            )
+        except Exception:
+            pass
+
+    def _disconnect_signals(self) -> None:
+        try:
+            self.signal_bus.proxy_checked.disconnect(self._on_proxy_checked)
+        except Exception:
+            pass
+        try:
+            self.signal_bus.proxy_leak_detected.disconnect(self._on_proxy_leak_alert)
+        except Exception:
+            pass
+
+    def closeEvent(self, event) -> None:
+        self._disconnect_signals()
+        super().closeEvent(event)
+
+    def reject(self) -> None:
+        self._disconnect_signals()
+        super().reject()
+
+    def accept(self) -> None:
+        self._disconnect_signals()
+        super().accept()
 
     def _on_delete_dead(self) -> None:
         deleted = self.proxy_repo.delete_dead()

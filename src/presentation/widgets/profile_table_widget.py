@@ -28,6 +28,7 @@ class ProfileTableWidget(TableWidget):
     add_video_requested = pyqtSignal(list)
     update_proxy_requested = pyqtSignal(list)
     change_project_requested = pyqtSignal(list)
+    edit_profile_requested = pyqtSignal(int)
     open_web_profile_requested = pyqtSignal(str)
     open_folder_requested = pyqtSignal(str)
     change_status_requested = pyqtSignal(list, str)
@@ -47,8 +48,10 @@ class ProfileTableWidget(TableWidget):
         self.verticalHeader().setDefaultSectionSize(34)
         self.setSelectionBehavior(TableWidget.SelectionBehavior.SelectRows)
         self.setSelectionMode(TableWidget.SelectionMode.ExtendedSelection)
+        self.setEditTriggers(TableWidget.EditTrigger.NoEditTriggers)
         self.setWordWrap(False)
         self.setSortingEnabled(True)
+        self.cellDoubleClicked.connect(self._on_cell_double_clicked)
 
         # Optimize default column widths
         self.setColumnWidth(0, 45)  # STT
@@ -90,12 +93,13 @@ class ProfileTableWidget(TableWidget):
             status = p.get("status", "stopped")
             logged_in = bool(p.get("cookie") or p.get("logged", False))
 
-            # Helper to create items
+            # Helper to create non-editable items
             def make_item(
                 text: str, align=Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft
             ) -> QTableWidgetItem:
                 item = QTableWidgetItem(str(text))
                 item.setTextAlignment(align)
+                item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
                 return item
 
             # Col 0: STT (holds profile record in UserRole)
@@ -266,6 +270,18 @@ class ProfileTableWidget(TableWidget):
         profiles = self.get_selected_profiles()
         return [p["id"] for p in profiles if "id" in p]
 
+    def _on_cell_double_clicked(self, row: int, column: int) -> None:
+        """Double clicking a profile row launches Orbita Browser for that profile."""
+        item = self.item(row, 0)
+        if item:
+            data = item.data(Qt.ItemDataRole.UserRole)
+            if isinstance(data, dict) and "id" in data:
+                self.open_orbita_requested.emit([data["id"]])
+                return
+        id_item = self.item(row, 28)
+        if id_item and id_item.text().isdigit():
+            self.open_orbita_requested.emit([int(id_item.text())])
+
     def contextMenuEvent(self, event) -> None:
         pos = event.pos()
         item = self.itemAt(pos)
@@ -323,6 +339,10 @@ class ProfileTableWidget(TableWidget):
         act_project = Action(FluentIcon.FOLDER, project_title, self)
         act_project.triggered.connect(lambda: self.change_project_requested.emit(selected_ids))
         menu.addAction(act_project)
+
+        act_edit = Action(FluentIcon.EDIT, "Chỉnh Sửa Thông Tin Hồ Sơ...", self)
+        act_edit.triggered.connect(lambda: self.edit_profile_requested.emit(int(first_id or 0)))
+        menu.addAction(act_edit)
 
         menu.addSeparator()
 

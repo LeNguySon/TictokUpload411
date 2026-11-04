@@ -2,6 +2,8 @@
 Add Profile Dialog for creating individual or bulk TikTok MMO profiles.
 """
 
+from typing import Any
+
 from PyQt6.QtWidgets import (
     QDialog,
     QFormLayout,
@@ -30,7 +32,7 @@ from src.infrastructure.database.repositories.proxy_repository import (
 
 class AddProfileDialog(QDialog):
     """
-    Dialog for adding managed TikTok profiles with project and proxy associations.
+    Dialog for adding or editing managed TikTok profiles with project and proxy associations.
     """
 
     def __init__(
@@ -39,6 +41,7 @@ class AddProfileDialog(QDialog):
         project_repo: ProjectRepository,
         proxy_repo: ProxyRepository,
         vault: WindowsCredentialVault | None = None,
+        profile_data: dict[str, Any] | None = None,
         parent=None,
     ) -> None:
         super().__init__(parent)
@@ -46,10 +49,14 @@ class AddProfileDialog(QDialog):
         self.project_repo = project_repo
         self.proxy_repo = proxy_repo
         self.vault = vault or WindowsCredentialVault()
+        self.profile_data = profile_data
 
-        self.setWindowTitle("Thêm Hồ Sơ TikTok Mới")
+        is_edit = bool(self.profile_data and self.profile_data.get("id"))
+        self.setWindowTitle("Chỉnh Sửa Hồ Sơ TikTok" if is_edit else "Thêm Hồ Sơ TikTok Mới")
         self.resize(520, 420)
         self._init_ui()
+        if is_edit:
+            self._prefill_data()
 
     def _init_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -105,6 +112,27 @@ class AddProfileDialog(QDialog):
         btn_layout.addWidget(self.btn_save)
         layout.addLayout(btn_layout)
 
+    def _prefill_data(self) -> None:
+        """Prefills form inputs with existing profile data for editing."""
+        if not self.profile_data:
+            return
+        self.btn_save.setText("Lưu Thay Đổi")
+        self.name_input.setText(self.profile_data.get("name", ""))
+
+        target_proj_id = self.profile_data.get("project_id")
+        for i in range(self.project_combo.count()):
+            if self.project_combo.itemData(i) == target_proj_id:
+                self.project_combo.setCurrentIndex(i)
+                break
+
+        target_proxy_id = self.profile_data.get("proxy_id")
+        for i in range(self.proxy_combo.count()):
+            if self.proxy_combo.itemData(i) == target_proxy_id:
+                self.proxy_combo.setCurrentIndex(i)
+                break
+
+        self.cookie_input.setPlainText(self.profile_data.get("cookie", "") or "")
+
     def _on_save(self) -> None:
         name = self.name_input.text().strip()
         if not name:
@@ -114,6 +142,25 @@ class AddProfileDialog(QDialog):
         proxy_id = self.proxy_combo.currentData()
         cookie = self.cookie_input.toPlainText().strip()
         token = self.token_input.text().strip()
+
+        # If editing an existing profile, update database directly
+        if self.profile_data and self.profile_data.get("id"):
+            profile_id = self.profile_data["id"]
+            update_payload: dict[str, Any] = {
+                "name": name,
+                "project_id": project_id,
+                "proxy_id": proxy_id,
+                "cookie": cookie if cookie else None,
+            }
+            if cookie or token:
+                update_payload["status"] = "LIVE"
+            self.profile_repo.update(profile_id, update_payload)
+
+            if token:
+                self.vault.save_oauth_tokens(profile_id=profile_id, access_token=token)
+
+            self.accept()
+            return
 
         # 1. Create real GoLogin profile with Bayesian Antidetect Fingerprint
         try:

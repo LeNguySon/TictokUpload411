@@ -2,10 +2,11 @@
 Video Queue Table Widget displaying video queue items with progress bars and Fluent styling.
 """
 
+from pathlib import Path
 from typing import Any
 
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QColor
+from PyQt6.QtGui import QColor, QDragEnterEvent, QDropEvent
 from PyQt6.QtWidgets import (
     QApplication,
     QHBoxLayout,
@@ -35,6 +36,7 @@ class VideoQueueTableWidget(TableWidget):
     open_folder_requested = pyqtSignal(str)
     open_published_link_requested = pyqtSignal(str)
     delete_video_requested = pyqtSignal(list)
+    files_dropped = pyqtSignal(list)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -50,8 +52,12 @@ class VideoQueueTableWidget(TableWidget):
         self.verticalHeader().setDefaultSectionSize(34)
         self.setSelectionBehavior(TableWidget.SelectionBehavior.SelectRows)
         self.setSelectionMode(TableWidget.SelectionMode.ExtendedSelection)
+        self.setEditTriggers(TableWidget.EditTrigger.NoEditTriggers)
         self.setWordWrap(False)
         self.setSortingEnabled(True)
+        self.setAcceptDrops(True)
+        self.setDragDropMode(TableWidget.DragDropMode.DropOnly)
+        self.cellDoubleClicked.connect(self._on_cell_double_clicked)
 
         self._progress_bars: dict[int, ProgressBar] = {}
 
@@ -86,6 +92,7 @@ class VideoQueueTableWidget(TableWidget):
             ) -> QTableWidgetItem:
                 item = QTableWidgetItem(str(text))
                 item.setTextAlignment(align)
+                item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
                 return item
 
             # Col 0: STT (holds video dict in UserRole)
@@ -192,6 +199,18 @@ class VideoQueueTableWidget(TableWidget):
         videos = self.get_selected_videos()
         return [v["id"] for v in videos if "id" in v]
 
+    def _on_cell_double_clicked(self, row: int, column: int) -> None:
+        """Double clicking a video row opens the metadata edit dialog."""
+        item = self.item(row, 0)
+        if item:
+            data = item.data(Qt.ItemDataRole.UserRole)
+            if isinstance(data, dict) and "id" in data:
+                self.edit_metadata_requested.emit(data["id"])
+                return
+        id_item = self.item(row, 11)
+        if id_item and id_item.text().isdigit():
+            self.edit_metadata_requested.emit(int(id_item.text()))
+
     def contextMenuEvent(self, event) -> None:
         pos = event.pos()
         item = self.itemAt(pos)
@@ -296,3 +315,34 @@ class VideoQueueTableWidget(TableWidget):
         menu.addAction(act_delete)
 
         menu.exec(event.globalPos())
+
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event) -> None:
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event: QDropEvent) -> None:
+        urls = event.mimeData().urls()
+        valid_extensions = {".mp4", ".mov", ".mkv", ".webm", ".avi"}
+        file_paths = []
+        for url in urls:
+            fpath = Path(url.toLocalFile())
+            if fpath.is_file() and fpath.suffix.lower() in valid_extensions:
+                file_paths.append(str(fpath))
+            elif fpath.is_dir():
+                for vf in fpath.rglob("*"):
+                    if vf.is_file() and vf.suffix.lower() in valid_extensions:
+                        file_paths.append(str(vf))
+
+        if file_paths:
+            self.files_dropped.emit(file_paths)
+            event.acceptProposedAction()
+        else:
+            event.ignore()
