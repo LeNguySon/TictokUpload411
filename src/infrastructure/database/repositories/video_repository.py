@@ -262,7 +262,7 @@ class VideoRepository:
                 FROM video_registry v
                 LEFT JOIN profiles p ON v.assigned_profile_id = p.id
                 LEFT JOIN projects pr ON p.project_id = pr.id
-                WHERE v.status = 'available'
+                WHERE v.status IN ('available', 'reserved', 'uploading')
                   AND (v.assigned_profile_id IS NULL OR p.project_id = ?)
                 ORDER BY v.id ASC;
                 """
@@ -273,7 +273,7 @@ class VideoRepository:
                 FROM video_registry v
                 LEFT JOIN profiles p ON v.assigned_profile_id = p.id
                 LEFT JOIN projects pr ON p.project_id = pr.id
-                WHERE v.status = 'available'
+                WHERE v.status IN ('available', 'reserved', 'uploading')
                 ORDER BY v.id ASC;
                 """
                 rows = conn.execute(query).fetchall()

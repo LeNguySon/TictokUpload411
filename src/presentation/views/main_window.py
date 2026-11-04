@@ -1142,33 +1142,74 @@ class TikTokManagerMainWindow(QMainWindow):
     def _on_add_video_for_profiles(self, profile_ids: list[int]) -> None:
         if not profile_ids:
             return
-        target_profile_id = profile_ids[0]
+
+        count = len(profile_ids)
+        first_prof = self.profile_repo.get_by_id(profile_ids[0])
+        prof_name = first_prof.get("name", f"#{profile_ids[0]}") if first_prof else f"#{profile_ids[0]}"
+        dlg_title = (
+            f"Chọn video phân bổ cho {count} hồ sơ đã chọn" if count > 1 else f"Chọn video nạp cho hồ sơ '{prof_name}'"
+        )
+
+        start_dir = self._get_initial_video_pick_folder()
+        if first_prof and first_prof.get("project_id"):
+            proj = self.project_repo.get_by_id(first_prof["project_id"])
+            if proj and proj.get("video_folder"):
+                pvf = Path(proj["video_folder"])
+                if pvf.is_dir():
+                    start_dir = str(pvf)
+
         files, _ = QFileDialog.getOpenFileNames(
             self,
-            f"Chọn video nạp cho hồ sơ #{target_profile_id}",
-            "",
+            dlg_title,
+            start_dir,
             "Video Files (*.mp4 *.mov *.webm *.mkv)",
         )
         if not files:
             return
 
-        added_count = 0
-        for f in files:
-            try:
-                p = Path(f)
-                vid_id = self.upload_service.enqueue_video(file_path=p, title=p.stem)
-                self.video_repo.try_reserve(vid_id, target_profile_id)
-                added_count += 1
-            except Exception as e:
-                logger.error("Error adding video for profile %s: %s", target_profile_id, e)
-
-        self.refresh_videos()
-        InfoBar.success(
-            title="Đã Nạp Video Cho Hồ Sơ",
-            content=f"Đã nạp {added_count} video gán cho hồ sơ #{target_profile_id}.",
+        InfoBar.info(
+            title="Đang Nạp Video",
+            content=f"Đang băm SHA-256 và nạp {len(files)} video cho {count} hồ sơ trong nền...",
             position=InfoBarPosition.TOP,
             parent=self,
         )
+
+        if count == 1:
+            worker = VideoImportWorker(
+                file_paths=files,
+                upload_service=self.upload_service,
+                assigned_profile_id=profile_ids[0],
+            )
+        else:
+            worker = VideoImportWorker(
+                file_paths=files,
+                upload_service=self.upload_service,
+                target_profile_ids=profile_ids,
+            )
+
+        def _on_completed(added_count: int) -> None:
+            self.refresh_videos()
+            if added_count > 0:
+                InfoBar.success(
+                    title="Đã Nạp Video Cho Hồ Sơ",
+                    content=(
+                        f"Đã nạp thành công {added_count} video phân bổ cho {count} hồ sơ."
+                        if count > 1
+                        else f"Đã nạp thành công {added_count} video gán cho hồ sơ '{prof_name}'."
+                    ),
+                    position=InfoBarPosition.TOP,
+                    parent=self,
+                )
+            else:
+                InfoBar.warning(
+                    title="Không Thể Nạp Video",
+                    content="Không có video nào được nạp (vui lòng kiểm tra định dạng hoặc trùng lặp).",
+                    position=InfoBarPosition.TOP,
+                    parent=self,
+                )
+
+        worker.signals.completed.connect(_on_completed)
+        self.thread_pool.dispatch(worker)
 
     def _on_open_tiktok_web(self, username: str) -> None:
         clean_user = username.strip().lstrip("@")

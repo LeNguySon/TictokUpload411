@@ -382,7 +382,13 @@ class ProfileTableWidget(TableWidget):
         act_sync.triggered.connect(lambda: self.sync_metrics_requested.emit(selected_ids))
         menu.addAction(act_sync)
 
-        act_add_video = Action(FluentIcon.VIDEO, "Nạp Video Vào Hàng Đợi Cho Hồ Sơ Này...", self)
+        prof_label = first_profile.get("name") or f"#{first_id}"
+        add_video_title = (
+            f"Nạp Video Phân Bổ Cho ({count} hồ sơ)..."
+            if count > 1
+            else f"Nạp Video Vào Hàng Đợi Cho Hồ Sơ ({prof_label})..."
+        )
+        act_add_video = Action(FluentIcon.VIDEO, add_video_title, self)
         act_add_video.triggered.connect(lambda: self.add_video_requested.emit(selected_ids))
         menu.addAction(act_add_video)
 

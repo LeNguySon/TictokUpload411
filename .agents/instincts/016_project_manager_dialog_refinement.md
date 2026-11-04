@@ -18,3 +18,4 @@ Người dùng yêu cầu điều chỉnh hộp thoại Quản Lý Dự Án & Ch
    - Thêm nút `[ ✏️ Sửa Tên Dự Án ]` (`self.btn_edit`) tại thanh công cụ dưới.
    - Hỗ trợ đổi tên bằng cách chọn hàng và bấm nút hoặc double-click vào hàng.
    - Mở `QInputDialog.getText` để người dùng nhập tên mới, gọi `project_repo.update(proj_id, name=new_name)` và làm mới bảng dữ liệu.
+

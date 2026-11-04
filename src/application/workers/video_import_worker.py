@@ -37,12 +37,14 @@ class VideoImportWorker(QRunnable):
         file_paths: list[str],
         upload_service: UploadService,
         assigned_profile_id: int | None = None,
+        target_profile_ids: list[int] | None = None,
         schedule_time: str | None = None,
     ) -> None:
         super().__init__()
         self.file_paths = file_paths
         self.upload_service = upload_service
         self.assigned_profile_id = assigned_profile_id
+        self.target_profile_ids = [int(pid) for pid in target_profile_ids] if target_profile_ids else []
         self.schedule_time = schedule_time
 
         self.signals = VideoImportSignals()
@@ -69,11 +71,17 @@ class VideoImportWorker(QRunnable):
                     break
                 p = Path(f)
                 self.signals.progress.emit(idx, total, p.name)
+
+                # Determine assigned profile (fair-share round-robin or single)
+                assigned_id = self.assigned_profile_id
+                if self.target_profile_ids:
+                    assigned_id = self.target_profile_ids[(idx - 1) % len(self.target_profile_ids)]
+
                 try:
                     self.upload_service.enqueue_video(
                         file_path=p,
                         title=p.stem,
-                        assigned_profile_id=self.assigned_profile_id,
+                        assigned_profile_id=assigned_id,
                         schedule_time=self.schedule_time,
                     )
                     added_count += 1
