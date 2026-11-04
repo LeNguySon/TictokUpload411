@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS projects (
     name TEXT NOT NULL UNIQUE,
     description TEXT,
     color TEXT DEFAULT '#0078D4',
+    video_folder TEXT DEFAULT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 

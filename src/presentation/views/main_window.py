@@ -1281,11 +1281,26 @@ class TikTokManagerMainWindow(QMainWindow):
                 parent=self,
             )
 
+    def _get_initial_video_pick_folder(self) -> str:
+        """Resolves default video folder from active project group if configured and exists."""
+        try:
+            proj_id = self.project_combo.currentData()
+            if proj_id is not None:
+                p = self.project_repo.get_by_id(proj_id)
+                if p and p.get("video_folder"):
+                    folder_path = Path(p["video_folder"])
+                    if folder_path.is_dir():
+                        return str(folder_path)
+        except Exception as e:
+            logger.debug("Failed resolving project video folder: %s", e)
+        return ""
+
     def _on_pick_video_files(self) -> None:
+        start_dir = self._get_initial_video_pick_folder()
         files, _ = QFileDialog.getOpenFileNames(
             self,
             "Chọn file video",
-            "",
+            start_dir,
             "Video Files (*.mp4 *.mov *.webm *.mkv)",
         )
         if not files:
@@ -1340,6 +1355,7 @@ class TikTokManagerMainWindow(QMainWindow):
         dlg = ScheduleVideoDialog(video_count=len(available_videos), parent=self)
         if dlg.exec() and dlg.generated_schedules:
             updated_count = 0
+            is_studio = getattr(dlg, "is_studio_schedule", False)
             for idx, sched_time in enumerate(dlg.generated_schedules):
                 if idx < len(available_videos):
                     v = available_videos[idx]
@@ -1353,11 +1369,27 @@ class TikTokManagerMainWindow(QMainWindow):
                         schedule_time=sched_time,
                         assigned_profile_id=target_profile,
                     )
+                    if is_studio and target_profile:
+                        # Direct TikTok Studio Native Cloud dispatch
+                        worker = UploadWorker(
+                            video_id=v["id"],
+                            profile_id=target_profile,
+                            upload_service=self.upload_service,
+                            signal_bus=self.signal_bus,
+                            schedule_time=sched_time,
+                        )
+                        self.thread_pool.dispatch(worker)
                     updated_count += 1
             self.refresh_videos()
+            title_msg = "Đã Lên Lịch TikTok Studio" if is_studio else "Đã Lên Lịch Tự Động"
+            content_msg = (
+                f"Đã phát lệnh tải lên & lên lịch Cloud Studio cho {updated_count} video."
+                if is_studio
+                else f"Đã lưu lịch đăng cho {updated_count} video vào CSDL local."
+            )
             InfoBar.success(
-                title="Đã Lên Lịch Tự Động",
-                content=f"Đã lưu lịch đăng cho {updated_count} video vào CSDL.",
+                title=title_msg,
+                content=content_msg,
                 position=InfoBarPosition.TOP,
                 parent=self,
             )
@@ -1371,6 +1403,7 @@ class TikTokManagerMainWindow(QMainWindow):
         dlg = ScheduleVideoDialog(video_count=len(selected_ids_or_rows), parent=self)
         if dlg.exec() and dlg.generated_schedules:
             updated_count = 0
+            is_studio = getattr(dlg, "is_studio_schedule", False)
             for idx, target in enumerate(selected_ids_or_rows):
                 if idx < len(dlg.generated_schedules):
                     sched_time = dlg.generated_schedules[idx]
@@ -1379,11 +1412,27 @@ class TikTokManagerMainWindow(QMainWindow):
                     v = self.video_repo.get_by_id(target)
                     vid = v["id"] if v else (available[target]["id"] if target < len(available) else target)
                     self.video_repo.update_schedule(vid, schedule_time=sched_time, assigned_profile_id=target_prof)
+                    if is_studio and target_prof:
+                        # Direct TikTok Studio Native Cloud dispatch
+                        worker = UploadWorker(
+                            video_id=vid,
+                            profile_id=target_prof,
+                            upload_service=self.upload_service,
+                            signal_bus=self.signal_bus,
+                            schedule_time=sched_time,
+                        )
+                        self.thread_pool.dispatch(worker)
                     updated_count += 1
             self.refresh_videos()
+            title_msg = "Đã Lên Lịch TikTok Studio" if is_studio else "Đã Lên Lịch Đăng"
+            content_msg = (
+                f"Đã phát lệnh tải lên & hẹn giờ trên Cloud Studio cho {updated_count} video đã chọn."
+                if is_studio
+                else f"Đã lưu lịch đăng cho {updated_count} video được chọn vào CSDL."
+            )
             InfoBar.success(
-                title="Đã Lên Lịch Đăng",
-                content=f"Đã lưu lịch đăng cho {updated_count} video được chọn vào CSDL.",
+                title=title_msg,
+                content=content_msg,
                 position=InfoBarPosition.TOP,
                 parent=self,
             )

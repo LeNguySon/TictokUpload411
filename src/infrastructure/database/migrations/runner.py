@@ -23,6 +23,12 @@ def run_all_migrations(db_path: Path | str | None = None) -> list[str]:
         if vr_cols and "schedule_time" not in vr_cols:
             conn.execute("ALTER TABLE video_registry ADD COLUMN schedule_time TEXT DEFAULT NULL;")
 
+        # Pre-migration: check if projects exists and needs video_folder
+        proj_info = conn.execute("PRAGMA table_info(projects);").fetchall()
+        proj_cols = [r[1] for r in proj_info]
+        if proj_cols and "video_folder" not in proj_cols:
+            conn.execute("ALTER TABLE projects ADD COLUMN video_folder TEXT DEFAULT NULL;")
+
         conn.executescript(DDL_BASE_SCHEMAS)
 
         # Ensure default project exists

@@ -17,11 +17,17 @@ class ProjectRepository:
     def __init__(self, db_path: Path | str | None = None) -> None:
         self.db_path = db_path or DEFAULT_DB_PATH
 
-    def create(self, name: str, description: str | None = None, color: str = "#0078D4") -> int:
+    def create(
+        self,
+        name: str,
+        description: str | None = None,
+        color: str = "#0078D4",
+        video_folder: str | None = None,
+    ) -> int:
         with db_session(self.db_path) as conn:
             cur = conn.execute(
-                "INSERT INTO projects (name, description, color) VALUES (?, ?, ?);",
-                (name, description, color),
+                "INSERT INTO projects (name, description, color, video_folder) VALUES (?, ?, ?, ?);",
+                (name, description, color, video_folder),
             )
             return int(cur.lastrowid)
 
@@ -45,6 +51,7 @@ class ProjectRepository:
         name: str | None = None,
         description: str | None = None,
         color: str | None = None,
+        video_folder: str | None = None,
     ) -> bool:
         updates = []
         params = []
@@ -57,6 +64,9 @@ class ProjectRepository:
         if color is not None:
             updates.append("color = ?")
             params.append(color)
+        if video_folder is not None:
+            updates.append("video_folder = ?")
+            params.append(video_folder)
 
         if not updates:
             return False
@@ -79,6 +89,7 @@ class ProjectRepository:
             p.id AS project_id,
             p.name AS project_name,
             p.color AS project_color,
+            p.video_folder AS video_folder,
             COUNT(pr.id) AS total_profiles,
             SUM(CASE WHEN pr.status = 'LIVE' THEN 1 ELSE 0 END) AS live_profiles,
             SUM(CASE WHEN pr.status = 'LIVE' THEN 1 ELSE 0 END) AS live_count,

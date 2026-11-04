@@ -220,12 +220,15 @@ class UploadService:
         self,
         video_id: int,
         profile_id: int,
+        schedule_time: str | None = None,
         progress_callback: Callable[[int, int, float], None] | None = None,
         cancel_token: Callable[[], bool] | None = None,
     ) -> UploadResult:
         """
         Atomically locks video draft for given profile, validates account readiness,
         and executes publication through the SamMonny adapter under a profile mutex.
+        If schedule_time is provided (or preset on video), it passes it to the adapter
+        for native TikTok Studio Cloud scheduling.
         """
         lock = get_profile_upload_lock(profile_id)
         with lock:
@@ -251,6 +254,7 @@ class UploadService:
                 raw_caption = video_row["file_name"]
                 clamped_title = clamp_caption(raw_caption, max_chars=2200)
                 tags = [w for w in clamped_title.split() if w.startswith("#")]
+                effective_schedule = schedule_time if schedule_time is not None else video_row.get("schedule_time")
 
                 result = self.tiktok_adapter.upload_video(
                     profile_id=profile_id,
@@ -262,6 +266,7 @@ class UploadService:
                     allow_duet=True,
                     allow_stitch=True,
                     allow_hd=True,
+                    schedule_time=effective_schedule,
                     progress_callback=progress_callback,
                     cancel_token=cancel_token,
                 )

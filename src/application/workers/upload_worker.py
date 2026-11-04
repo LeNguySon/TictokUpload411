@@ -22,12 +22,14 @@ class UploadWorker(BaseWorker):
         profile_id: int,
         upload_service: UploadService,
         signal_bus: AppSignalBus | None = None,
+        schedule_time: str | None = None,
     ) -> None:
         super().__init__()
         self.video_id = video_id
         self.profile_id = profile_id
         self.upload_service = upload_service
         self.signal_bus = signal_bus or AppSignalBus.instance()
+        self.schedule_time = schedule_time
 
     def _on_progress(self, uploaded_bytes: int, total_bytes: int, percentage: float) -> None:
         """Relays progress updates to both local worker signals and the global event bus."""
@@ -48,6 +50,7 @@ class UploadWorker(BaseWorker):
             result = self.upload_service.execute_upload(
                 video_id=self.video_id,
                 profile_id=self.profile_id,
+                schedule_time=self.schedule_time,
                 progress_callback=self._on_progress,
                 cancel_token=cancel_token,
             )

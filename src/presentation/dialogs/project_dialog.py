@@ -5,6 +5,7 @@ Project / Campaign Manager Dialog for grouping profiles with Fluent styling.
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QDialog,
+    QFileDialog,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -13,6 +14,7 @@ from PyQt6.QtWidgets import (
 )
 from qfluentwidgets import (
     ColorPickerButton,
+    FluentIcon,
     LineEdit,
     PrimaryPushButton,
     PushButton,
@@ -43,35 +45,51 @@ class ProjectManagerDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.setSpacing(12)
 
-        # Top Form: Add new project
-        form_layout = QHBoxLayout()
+        # Top Form: Add new project with video folder
+        form_layout = QVBoxLayout()
+        row1 = QHBoxLayout()
         self.name_input = LineEdit(self)
-        self.name_input.setPlaceholderText("Tên dự án mới (ví dụ: Beta US Quý 4)...")
+        self.name_input.setPlaceholderText("Tên dự án mới (ví dụ: Nhóm Japan, Nhóm Hàn Quốc)...")
         self.color_picker = ColorPickerButton(Qt.GlobalColor.blue, "Màu thẻ", self)
+
+        row1.addWidget(QLabel("Tên dự án:"))
+        row1.addWidget(self.name_input, 1)
+        row1.addWidget(self.color_picker)
+        form_layout.addLayout(row1)
+
+        row2 = QHBoxLayout()
+        self.folder_input = LineEdit(self)
+        self.folder_input.setPlaceholderText("Thư mục chứa video của nhóm (ví dụ: D:\\videos\\Japan)...")
+        self.btn_browse = PushButton(FluentIcon.FOLDER, "Chọn Thư Mục...", self)
+        self.btn_browse.clicked.connect(self._on_browse_folder)
 
         self.btn_create = PrimaryPushButton("Tạo Dự Án", self)
         self.btn_create.clicked.connect(self._on_create_project)
 
-        form_layout.addWidget(QLabel("Tên dự án:"))
-        form_layout.addWidget(self.name_input, 1)
-        form_layout.addWidget(self.color_picker)
-        form_layout.addWidget(self.btn_create)
+        row2.addWidget(QLabel("Kho video:"))
+        row2.addWidget(self.folder_input, 1)
+        row2.addWidget(self.btn_browse)
+        row2.addWidget(self.btn_create)
+        form_layout.addLayout(row2)
+
         layout.addLayout(form_layout)
 
         # Table of existing projects with aggregates
         self.table = TableWidget(self)
-        self.table.setColumnCount(6)
+        self.table.setColumnCount(7)
         self.table.setHorizontalHeaderLabels(
             [
                 "ID",
                 "Tên Dự Án",
+                "Thư Mục Video",
                 "Tổng Profiles",
                 "Số Acc LIVE",
                 "Tổng Lượt View",
                 "Tổng $ Earned",
             ]
         )
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        self.table.horizontalHeader().setStretchLastSection(True)
         self.table.verticalHeader().setVisible(False)
         self.table.setSelectionBehavior(TableWidget.SelectionBehavior.SelectRows)
         layout.addWidget(self.table)
@@ -87,6 +105,11 @@ class ProjectManagerDialog(QDialog):
         bottom_layout.addStretch()
         bottom_layout.addWidget(self.btn_close)
         layout.addLayout(bottom_layout)
+
+    def _on_browse_folder(self) -> None:
+        folder = QFileDialog.getExistingDirectory(self, "Chọn thư mục video cho nhóm/dự án")
+        if folder:
+            self.folder_input.setText(folder)
 
     def refresh_projects(self) -> None:
         """Fetches campaign aggregates and populates the table."""
@@ -109,11 +132,19 @@ class ProjectManagerDialog(QDialog):
                     Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
                 ),
             )
-            self.table.setItem(row_idx, 2, make_item(agg["total_profiles"]))
-            self.table.setItem(row_idx, 3, make_item(agg["live_profiles"]))
             self.table.setItem(
                 row_idx,
-                4,
+                2,
+                make_item(
+                    agg.get("video_folder") or "Mặc định",
+                    Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                ),
+            )
+            self.table.setItem(row_idx, 3, make_item(agg["total_profiles"]))
+            self.table.setItem(row_idx, 4, make_item(agg["live_profiles"]))
+            self.table.setItem(
+                row_idx,
+                5,
                 make_item(
                     format_mmo_metric(agg["total_views"]),
                     Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
@@ -121,7 +152,7 @@ class ProjectManagerDialog(QDialog):
             )
             self.table.setItem(
                 row_idx,
-                5,
+                6,
                 make_item(
                     format_money_string(agg["total_earned"]),
                     Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
@@ -132,9 +163,11 @@ class ProjectManagerDialog(QDialog):
         name = self.name_input.text().strip()
         if not name:
             return
+        folder = self.folder_input.text().strip() or None
         color_hex = self.color_picker.color.name()
-        self.project_repo.create(name=name, color=color_hex)
+        self.project_repo.create(name=name, color=color_hex, video_folder=folder)
         self.name_input.clear()
+        self.folder_input.clear()
         self.refresh_projects()
 
     def _on_delete_selected(self) -> None:
