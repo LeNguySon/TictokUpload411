@@ -2,6 +2,7 @@
 Presentation dialogs package exports.
 """
 
+from src.presentation.dialogs.account_health_dialog import AccountHealthDialog
 from src.presentation.dialogs.add_profile_dialog import AddProfileDialog
 from src.presentation.dialogs.api_cookie_dialog import ApiCookieDialog
 from src.presentation.dialogs.assign_project_dialog import AssignProjectDialog
@@ -12,6 +13,7 @@ from src.presentation.dialogs.bulk_add_profile_dialog import (
     parse_bulk_profile_line,
 )
 from src.presentation.dialogs.bulk_edit_profile_dialog import BulkEditProfileDialog
+from src.presentation.dialogs.channel_radar_dialog import ChannelRadarDialog
 from src.presentation.dialogs.permissions_dialog import PermissionsDialog
 from src.presentation.dialogs.project_dialog import ProjectManagerDialog
 from src.presentation.dialogs.proxy_dialog import ProxyManagerDialog
@@ -30,6 +32,8 @@ from src.presentation.dialogs.user_guide_dialog import UserGuideDialog
 from src.presentation.dialogs.video_metadata_dialog import VideoMetadataDialog
 
 __all__ = [
+    "AccountHealthDialog",
+    "ChannelRadarDialog",
     "ProjectManagerDialog",
     "ProxyManagerDialog",
     "AssignProxyDialog",

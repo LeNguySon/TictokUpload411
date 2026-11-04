@@ -32,3 +32,4 @@
 - Không bao giờ gán text thô tiếng Anh (`"stopped"`, `"launching"`) vào ô trạng thái mà không thông qua `UserRole` và `StatusBadgeDelegate`.
 - Luôn gọi `item.setData(Qt.ItemDataRole.UserRole, status)` khi cập nhật trạng thái trong `load_profiles` và `_update_profile_status_cell`.
 - Giữ chu kỳ `profile_status_timer` ở mức $1500\text{ms}$ (1.5 giây), không tăng lên quá 3 giây để đảm bảo trải nghiệm người dùng liền mạch.
+

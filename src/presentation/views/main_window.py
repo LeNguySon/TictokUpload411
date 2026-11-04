@@ -365,6 +365,7 @@ class TikTokManagerMainWindow(QMainWindow):
         self.profile_table.check_proxy_requested.connect(self._on_check_proxy_selected)
         self.profile_table.batch_channel_update_requested.connect(self._on_batch_channel_update)
         self.profile_table.channel_radar_requested.connect(self._on_open_channel_radar)
+        self.profile_table.account_health_requested.connect(self._on_open_account_health)
 
         # Context Menu & Selection Events on Video Table
         self.video_table.upload_now_requested.connect(self._on_upload_single_video)
@@ -580,6 +581,10 @@ class TikTokManagerMainWindow(QMainWindow):
         act_radar = Action(FluentIcon.SPEED_HIGH, "Radar Đánh Giá Kênh & Cảnh Báo...", self)
         act_radar.triggered.connect(lambda: self._on_open_channel_radar())
         self.settings_menu.addAction(act_radar)
+
+        act_health = Action(FluentIcon.HEART, "Kiểm Tra Sức Khỏe Kênh & Gậy Vi Phạm...", self)
+        act_health.triggered.connect(lambda: self._on_open_account_health())
+        self.settings_menu.addAction(act_health)
 
         self.settings_menu.addSeparator()
 
@@ -1296,6 +1301,31 @@ class TikTokManagerMainWindow(QMainWindow):
             parent=self,
         )
         dlg.exec()
+
+    def _on_open_account_health(self, profile_id: int | None = None) -> None:
+        target_id = profile_id
+        if target_id is None or target_id <= 0:
+            selected = self.profile_table.get_selected_profile_ids()
+            if selected:
+                target_id = selected[0]
+            else:
+                InfoBar.warning(
+                    title="Chưa Chọn Hồ Sơ",
+                    content="Vui lòng chọn ít nhất một hồ sơ TikTok để kiểm tra sức khỏe kênh và gậy vi phạm.",
+                    position=InfoBarPosition.TOP,
+                    parent=self,
+                )
+                return
+
+        from src.presentation.dialogs.account_health_dialog import AccountHealthDialog
+
+        dlg = AccountHealthDialog(
+            profile_id=target_id,
+            parent=self,
+            db_path=self.db_path,
+        )
+        dlg.exec()
+        self.refresh_profiles()
 
     def _on_edit_profile(self, profile_id: int) -> None:
         p = self.profile_repo.get_by_id(profile_id)

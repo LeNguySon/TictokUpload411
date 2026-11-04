@@ -43,6 +43,7 @@ class ProfileTableWidget(TableWidget):
     check_proxy_requested = pyqtSignal(list)
     batch_channel_update_requested = pyqtSignal(list)
     channel_radar_requested = pyqtSignal(int)
+    account_health_requested = pyqtSignal(int)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -244,8 +245,20 @@ class ProfileTableWidget(TableWidget):
                 ),
             )
 
-            # Col 16: CS
-            self.setItem(row_idx, 16, make_item(str(p.get("cs", "")), Qt.AlignmentFlag.AlignCenter))
+            # Col 16: CS (Chỉ số sức khỏe / Account Standing & Strikes)
+            strikes = int(p.get("strike_count") or 0)
+            standing = str(p.get("account_standing") or "").strip()
+            if strikes > 0:
+                cs_display = f"🔴 {strikes}/3 Gậy"
+            elif standing == "Good":
+                cs_display = "🟢 Tốt"
+            elif standing == "Warning":
+                cs_display = "🟡 Cảnh báo"
+            elif str(p.get("channel_verdict") or "").lower() == "enough":
+                cs_display = "💎 Đủ Quỹ"
+            else:
+                cs_display = str(p.get("cs") or "—")
+            self.setItem(row_idx, 16, make_item(cs_display, Qt.AlignmentFlag.AlignCenter))
 
             # Col 17: RPM
             self.setItem(
@@ -282,8 +295,9 @@ class ProfileTableWidget(TableWidget):
             # Col 25: STT (secondary)
             self.setItem(row_idx, 25, make_num_item(p.get("stt", row_idx + 1)))
 
-            # Col 26: VVP
-            self.setItem(row_idx, 26, make_num_item(p.get("vvp", 0)))
+            # Col 26: VVP (Số lượng Video Vi Phạm)
+            vvp_val = int(p.get("ttl_violations") or p.get("vvp") or 0)
+            self.setItem(row_idx, 26, make_num_item(vvp_val))
 
             # Col 27: MP
             self.setItem(row_idx, 27, make_num_item(p.get("mp", 0)))
@@ -445,6 +459,10 @@ class ProfileTableWidget(TableWidget):
         act_channel_radar = Action(FluentIcon.SPEED_HIGH, "Radar Đánh Giá Kênh & Cảnh Báo...", self)
         act_channel_radar.triggered.connect(lambda: self.channel_radar_requested.emit(int(first_id or 0)))
         menu.addAction(act_channel_radar)
+
+        act_account_health = Action(FluentIcon.HEART, "🛡️ Sức Khỏe Kênh & Gậy Vi Phạm...", self)
+        act_account_health.triggered.connect(lambda: self.account_health_requested.emit(int(first_id or 0)))
+        menu.addAction(act_account_health)
 
         menu.addSeparator()
 
