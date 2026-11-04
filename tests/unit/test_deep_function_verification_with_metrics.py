@@ -451,12 +451,12 @@ def test_metric_main_window_full_synchronization_pipeline(qapp, metric_db: Path,
     # Launch MainWindow
     window = TikTokManagerMainWindow(db_path=metric_db)
     try:
-        # Check toolbar Studio Schedule CheckBox
-        assert hasattr(window, "chk_toolbar_studio_schedule")
-        assert window.chk_toolbar_studio_schedule.text() == "Lên lịch TikTok Studio (Cloud)"
-
-        # Check toolbar Button label
+        # Check toolbar streamlined button labels
         assert window.btn_batch_upload.text() == "Nạp Thư Mục _Phân Bổ"
+        assert window.btn_pick_pc.text() == "Thêm Video"
+        assert window.btn_schedule.text() == "Lên lịch"
+        assert window.btn_start_upload.text() == "Bắt đầu Upload"
+        assert window.search_video.placeholderText() == "Tìm kiếm video trong bảng..."
 
         # Initially "Tất cả dự án": 3 profiles (2 JP + 1 KR), 4 videos (3 JP + 1 KR)
         assert window.profile_table.rowCount() == 3
@@ -497,9 +497,7 @@ def test_metric_main_window_full_synchronization_pipeline(qapp, metric_db: Path,
         assert window.profile_table.rowCount() == 3
         assert window.video_table.rowCount() == 4
 
-        # Verify studio schedule toggle on toolbar propagates to Schedule dialog
-        window.chk_toolbar_studio_schedule.setChecked(True)
-        assert window.chk_toolbar_studio_schedule.isChecked() is True
+        # Verify scheduling modal dialog triggers cleanly
         window._on_schedule_videos()
 
     finally:

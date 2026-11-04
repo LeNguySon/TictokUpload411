@@ -23,7 +23,6 @@ from PyQt6.QtWidgets import (
 )
 from qfluentwidgets import (
     Action,
-    CheckBox,
     ComboBox,
     FluentIcon,
     InfoBar,
@@ -235,30 +234,23 @@ class TikTokManagerMainWindow(QMainWindow):
         self.lbl_video_header.setFixedHeight(34)
         bottom_toolbar.addWidget(self.lbl_video_header)
 
-        self.btn_schedule = PushButton(FluentIcon.CALENDAR, "Lên lịch", self)
-        self.btn_schedule.setFixedHeight(34)
-        self.btn_schedule.setIconSize(QSize(16, 16))
-        self.btn_schedule.clicked.connect(self._on_schedule_videos)
-        bottom_toolbar.addWidget(self.btn_schedule)
-
-        self.chk_toolbar_studio_schedule = CheckBox("Lên lịch TikTok Studio (Cloud)", self)
-        self.chk_toolbar_studio_schedule.setFixedHeight(34)
-        self.chk_toolbar_studio_schedule.setToolTip(
-            "Khi bật: Lệnh lên lịch sẽ được nạp trực tiếp vào TikTok Studio của tài khoản ngay trong phiên tải lên."
-        )
-        bottom_toolbar.addWidget(self.chk_toolbar_studio_schedule)
-
-        self.btn_pick_pc = PrimaryPushButton(FluentIcon.VIDEO, "Thêm Video", self)
-        self.btn_pick_pc.setFixedHeight(34)
-        self.btn_pick_pc.setIconSize(QSize(16, 16))
-        self.btn_pick_pc.clicked.connect(self._on_pick_video_files)
-        bottom_toolbar.addWidget(self.btn_pick_pc)
-
         self.btn_batch_upload = PushButton(FluentIcon.FOLDER, "Nạp Thư Mục _Phân Bổ", self)
         self.btn_batch_upload.setFixedHeight(34)
         self.btn_batch_upload.setIconSize(QSize(16, 16))
         self.btn_batch_upload.clicked.connect(self._on_open_batch_folder_upload)
         bottom_toolbar.addWidget(self.btn_batch_upload)
+
+        self.btn_pick_pc = PushButton(FluentIcon.VIDEO, "Thêm Video", self)
+        self.btn_pick_pc.setFixedHeight(34)
+        self.btn_pick_pc.setIconSize(QSize(16, 16))
+        self.btn_pick_pc.clicked.connect(self._on_pick_video_files)
+        bottom_toolbar.addWidget(self.btn_pick_pc)
+
+        self.btn_schedule = PushButton(FluentIcon.CALENDAR, "Lên lịch", self)
+        self.btn_schedule.setFixedHeight(34)
+        self.btn_schedule.setIconSize(QSize(16, 16))
+        self.btn_schedule.clicked.connect(self._on_schedule_videos)
+        bottom_toolbar.addWidget(self.btn_schedule)
 
         self.btn_start_upload = PrimaryPushButton(FluentIcon.UP, "Bắt đầu Upload", self)
         self.btn_start_upload.setFixedHeight(34)
@@ -280,20 +272,23 @@ class TikTokManagerMainWindow(QMainWindow):
         self.search_video = SearchLineEdit(self)
         self.search_video.setFixedHeight(34)
         self.search_video.setClearButtonEnabled(True)
-        self.search_video.setPlaceholderText("Tìm video theo tiêu đề trong bảng...")
+        self.search_video.setPlaceholderText("Tìm kiếm video trong bảng...")
         self.search_video.textChanged.connect(self._on_search_video)
         bottom_toolbar.addWidget(self.search_video, 1)
 
-        self.btn_clear_videos = PushButton(FluentIcon.DELETE, "Xóa bảng", self)
-        self.btn_clear_videos.setFixedHeight(34)
+        self.btn_clear_videos = TransparentToolButton(FluentIcon.DELETE, self)
+        self.btn_clear_videos.setFixedSize(34, 34)
         self.btn_clear_videos.setIconSize(QSize(16, 16))
+        self.btn_clear_videos.setToolTip("Dọn sạch toàn bộ video trong bảng")
         self.btn_clear_videos.clicked.connect(self._on_clear_video_table)
         bottom_toolbar.addWidget(self.btn_clear_videos)
 
         self.switch_auto = SwitchButton(self)
         self.switch_auto.setFixedHeight(34)
+        self.switch_auto.setOnText("")
+        self.switch_auto.setOffText("")
         self.switch_auto.setChecked(True)
-        self.switch_auto.setToolTip("Tự động chuyển tiếp hàng đợi")
+        self.switch_auto.setToolTip("Tự động chuyển tiếp kênh khi upload xong")
         bottom_toolbar.addWidget(self.switch_auto)
 
         bottom_layout.addLayout(bottom_toolbar)
@@ -1368,8 +1363,6 @@ class TikTokManagerMainWindow(QMainWindow):
 
         selected_profiles = self.profile_table.get_selected_profile_ids()
         dlg = ScheduleVideoDialog(video_count=len(available_videos), parent=self)
-        if self.chk_toolbar_studio_schedule.isChecked():
-            dlg.chk_studio_schedule.setChecked(True)
         if dlg.exec() and dlg.generated_schedules:
             updated_count = 0
             is_studio = getattr(dlg, "is_studio_schedule", False)
@@ -1418,8 +1411,6 @@ class TikTokManagerMainWindow(QMainWindow):
         available = self.video_repo.list_available()
         selected_profiles = self.profile_table.get_selected_profile_ids()
         dlg = ScheduleVideoDialog(video_count=len(selected_ids_or_rows), parent=self)
-        if self.chk_toolbar_studio_schedule.isChecked():
-            dlg.chk_studio_schedule.setChecked(True)
         if dlg.exec() and dlg.generated_schedules:
             updated_count = 0
             is_studio = getattr(dlg, "is_studio_schedule", False)
