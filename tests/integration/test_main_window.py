@@ -49,6 +49,12 @@ def test_main_window_creation_and_layout(qapp):
         actions = window.settings_menu.actions()
         assert len(actions) >= 10
 
+        # Verify Settings Button has NO dropdown arrow (menu is None on ToolButton)
+        assert window.btn_settings.menu() is None
+        assert window.btn_settings.width() == 36
+        assert window.btn_settings.height() == 36
+        assert window.project_combo.width() == 220
+
         # Check searching video filters rows
         window.search_video.setText("non_existent_search_query")
         # Video table rows should be hidden

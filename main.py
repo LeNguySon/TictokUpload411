@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 import sammonny
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QApplication
 from src.infrastructure.database.connection import DEFAULT_DB_PATH
 from src.infrastructure.database.migrations.runner import run_all_migrations
@@ -29,10 +30,22 @@ def main() -> None:
     applied = run_all_migrations(DEFAULT_DB_PATH)
     logger.info("Database migrations successfully executed. Total tables: %d", len(applied))
 
-    # 3. Create Qt Application
+    # 3. Create Qt Application with Windows 11 High-DPI Crisp Rendering
+    if hasattr(Qt.ApplicationAttribute, "AA_EnableHighDpiScaling"):
+        QApplication.setAttribute(Qt.ApplicationAttribute.AA_EnableHighDpiScaling, True)
+    if hasattr(Qt.ApplicationAttribute, "AA_UseHighDpiPixmaps"):
+        QApplication.setAttribute(Qt.ApplicationAttribute.AA_UseHighDpiPixmaps, True)
+    QApplication.setHighDpiScaleFactorRoundingPolicy(Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
+
     app = QApplication(sys.argv)
     app.setApplicationName("SSMATool Reup Tiktok")
     app.setOrganizationName("Goepro")
+
+    # Set native Windows 11 Fluent font
+    font = app.font()
+    font.setFamily("Segoe UI")
+    font.setPointSize(9)
+    app.setFont(font)
 
     # 4. Instantiate and display Fluent Windows 11 Main Window
     window = TikTokManagerMainWindow(db_path=DEFAULT_DB_PATH)

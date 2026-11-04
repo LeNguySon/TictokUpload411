@@ -34,7 +34,10 @@ class VideoQueueTableWidget(TableWidget):
 
         self.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         self.horizontalHeader().setStretchLastSection(False)
+        self.horizontalHeader().setFixedHeight(36)
+        self.horizontalHeader().setDefaultAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
         self.verticalHeader().setVisible(False)
+        self.verticalHeader().setDefaultSectionSize(34)
         self.setSelectionBehavior(TableWidget.SelectionBehavior.SelectRows)
         self.setSelectionMode(TableWidget.SelectionMode.ExtendedSelection)
         self.setWordWrap(False)

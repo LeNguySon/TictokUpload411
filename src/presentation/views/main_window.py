@@ -5,7 +5,7 @@ Main Application Window: Windows 11 Fluent Design Dual-Table Layout matching SSM
 import logging
 from pathlib import Path
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QPoint, QSize, Qt
 from PyQt6.QtWidgets import (
     QCheckBox,
     QFileDialog,
@@ -138,20 +138,33 @@ class TikTokManagerMainWindow(QMainWindow):
 
         # Profiles Header Toolbar: Clean Minimalist Bar (Dự án + Tìm kiếm + Icon Cài Đặt)
         top_toolbar = QHBoxLayout()
-        top_toolbar.addWidget(QLabel("Dự án:", self))
+        top_toolbar.setContentsMargins(6, 4, 6, 6)
+        top_toolbar.setSpacing(10)
+
+        lbl_proj = QLabel("Dự án:", self)
+        lbl_proj.setStyleSheet("font-weight: 600; font-size: 13px; color: #201F1E;")
+        lbl_proj.setFixedHeight(34)
+        top_toolbar.addWidget(lbl_proj)
 
         self.project_combo = ComboBox(self)
+        self.project_combo.setFixedHeight(34)
+        self.project_combo.setFixedWidth(220)
         self.project_combo.currentIndexChanged.connect(self._on_project_changed)
-        top_toolbar.addWidget(self.project_combo, 2)
+        top_toolbar.addWidget(self.project_combo)
 
         self.search_profile = SearchLineEdit(self)
-        self.search_profile.setPlaceholderText("Tìm theo id|profile|email|proxy...")
+        self.search_profile.setFixedHeight(34)
+        self.search_profile.setClearButtonEnabled(True)
+        self.search_profile.setPlaceholderText("Tìm theo id | profile | email | proxy...")
         self.search_profile.textChanged.connect(self._on_search_profile)
-        top_toolbar.addWidget(self.search_profile, 5)
+        top_toolbar.addWidget(self.search_profile, 1)
 
-        # Unified Settings & Tools Menu Button
+        # Unified Settings & Tools Menu Button (Clean 36x36 with 20x20 Vector FluentIcon - Zero Dropdown Arrow)
         self.btn_settings = TransparentToolButton(FluentIcon.SETTING, self)
+        self.btn_settings.setFixedSize(36, 36)
+        self.btn_settings.setIconSize(QSize(20, 20))
         self.btn_settings.setToolTip("Cài đặt & Tất cả công cụ quản trị")
+        self.btn_settings.clicked.connect(self._show_settings_menu)
         self._init_settings_menu()
         top_toolbar.addWidget(self.btn_settings)
 
@@ -167,40 +180,62 @@ class TikTokManagerMainWindow(QMainWindow):
         bottom_layout.setContentsMargins(0, 4, 0, 0)
         bottom_layout.setSpacing(6)
 
-        # Video Header Toolbar
+        # Video Header Toolbar: Scientific sizing, uniform 34px height, crisp vector FluentIcons
         bottom_toolbar = QHBoxLayout()
-        self.lbl_video_header = QLabel("Bảng video Đã chọn 0 / 0", self)
-        self.lbl_video_header.setStyleSheet("font-weight: bold;")
+        bottom_toolbar.setContentsMargins(6, 4, 6, 4)
+        bottom_toolbar.setSpacing(8)
+
+        self.lbl_video_header = QLabel("Bảng video (Đã chọn 0 / 0)", self)
+        self.lbl_video_header.setStyleSheet("font-weight: 600; font-size: 13px; color: #201F1E;")
+        self.lbl_video_header.setFixedHeight(34)
         bottom_toolbar.addWidget(self.lbl_video_header)
 
-        self.btn_schedule = PushButton("📅 Lên lịch", self)
+        self.btn_schedule = PushButton(FluentIcon.CALENDAR, "Lên lịch", self)
+        self.btn_schedule.setFixedHeight(34)
+        self.btn_schedule.setIconSize(QSize(16, 16))
         self.btn_schedule.clicked.connect(self._on_schedule_videos)
         bottom_toolbar.addWidget(self.btn_schedule)
 
-        self.btn_pick_pc = PrimaryPushButton("💻 Thêm Video (Máy tính)", self)
+        self.btn_pick_pc = PrimaryPushButton(FluentIcon.VIDEO, "Thêm Video", self)
+        self.btn_pick_pc.setFixedHeight(34)
+        self.btn_pick_pc.setIconSize(QSize(16, 16))
         self.btn_pick_pc.clicked.connect(self._on_pick_video_files)
         bottom_toolbar.addWidget(self.btn_pick_pc)
 
-        self.btn_start_upload = PrimaryPushButton("🚀 Bắt đầu Upload", self)
+        self.btn_start_upload = PrimaryPushButton(FluentIcon.UP, "Bắt đầu Upload", self)
+        self.btn_start_upload.setFixedHeight(34)
+        self.btn_start_upload.setIconSize(QSize(16, 16))
         self.btn_start_upload.clicked.connect(self._on_start_upload_queue)
         bottom_toolbar.addWidget(self.btn_start_upload)
 
-        bottom_toolbar.addWidget(QLabel("Nhảy thêm dòng(Enter):", self))
+        lbl_jump = QLabel("Nhảy dòng:", self)
+        lbl_jump.setStyleSheet("font-size: 12px; color: #605E5C;")
+        lbl_jump.setFixedHeight(34)
+        bottom_toolbar.addWidget(lbl_jump)
+
         self.spin_jump = SpinBox(self)
+        self.spin_jump.setFixedHeight(34)
+        self.spin_jump.setFixedWidth(70)
         self.spin_jump.setValue(0)
         bottom_toolbar.addWidget(self.spin_jump)
 
         self.search_video = SearchLineEdit(self)
-        self.search_video.setPlaceholderText("Tìm video theo tiêu đề trong bảng..")
+        self.search_video.setFixedHeight(34)
+        self.search_video.setClearButtonEnabled(True)
+        self.search_video.setPlaceholderText("Tìm video theo tiêu đề trong bảng...")
         self.search_video.textChanged.connect(self._on_search_video)
-        bottom_toolbar.addWidget(self.search_video, 2)
+        bottom_toolbar.addWidget(self.search_video, 1)
 
-        self.btn_clear_videos = PushButton("Xóa bảng", self)
+        self.btn_clear_videos = PushButton(FluentIcon.DELETE, "Xóa bảng", self)
+        self.btn_clear_videos.setFixedHeight(34)
+        self.btn_clear_videos.setIconSize(QSize(16, 16))
         self.btn_clear_videos.clicked.connect(self._on_clear_video_table)
         bottom_toolbar.addWidget(self.btn_clear_videos)
 
         self.switch_auto = SwitchButton(self)
+        self.switch_auto.setFixedHeight(34)
         self.switch_auto.setChecked(True)
+        self.switch_auto.setToolTip("Tự động chuyển tiếp hàng đợi")
         bottom_toolbar.addWidget(self.switch_auto)
 
         bottom_layout.addLayout(bottom_toolbar)
@@ -374,7 +409,10 @@ class TikTokManagerMainWindow(QMainWindow):
         act_guide.triggered.connect(self._on_guide)
         self.settings_menu.addAction(act_guide)
 
-        self.btn_settings.setMenu(self.settings_menu)
+    def _show_settings_menu(self) -> None:
+        """Pops up the settings menu directly below the gear button without an arrow indicator."""
+        pos = self.btn_settings.mapToGlobal(QPoint(0, self.btn_settings.height() + 4))
+        self.settings_menu.exec(pos)
 
     def _on_open_project_manager(self) -> None:
         dlg = ProjectManagerDialog(self.project_repo, self)

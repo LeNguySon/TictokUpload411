@@ -26,3 +26,4 @@
    - Khởi chạy qua `subprocess.Popen` async, không block PyQt6 GUI thread.
 4. **An Toàn Khóa Ngoại SQLite Khi Nhập Dữ Liệu Ngoại Lai**:
    - Khi import profile từ file zip, luôn ánh xạ hoặc cho phép fallback `project_id=None`, `proxy_id=None` nếu bản ghi dự án hoặc proxy gốc không tồn tại ở CSDL mới, tránh lỗi `FOREIGN KEY constraint failed`.
+
