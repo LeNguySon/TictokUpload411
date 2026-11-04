@@ -298,4 +298,3 @@ def test_bulk_edit_profile_dialog(qapp, tmp_path: Path):
     assert prof2["project_id"] == proj_id
 
     dlg.close()
-

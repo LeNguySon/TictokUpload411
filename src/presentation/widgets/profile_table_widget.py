@@ -320,16 +320,12 @@ class ProfileTableWidget(TableWidget):
         menu = RoundMenu(parent=self)
 
         # --- Section 1: Browser Operations ---
-        orbita_title = (
-            f"Mở Trình Duyệt ({count} hồ sơ Orbita)" if count > 1 else "Mở Trình Duyệt (Orbita Antidetect)"
-        )
+        orbita_title = f"Mở Trình Duyệt ({count} hồ sơ Orbita)" if count > 1 else "Mở Trình Duyệt (Orbita Antidetect)"
         act_orbita = Action(FluentIcon.GLOBE, orbita_title, self)
         act_orbita.triggered.connect(lambda: self.open_orbita_requested.emit(selected_ids))
         menu.addAction(act_orbita)
 
-        close_title = (
-            f"Đóng Trình Duyệt ({count} hồ sơ)" if count > 1 else "Đóng Trình Duyệt"
-        )
+        close_title = f"Đóng Trình Duyệt ({count} hồ sơ)" if count > 1 else "Đóng Trình Duyệt"
         act_close = Action(FluentIcon.POWER_BUTTON, close_title, self)
         act_close.triggered.connect(lambda: self.close_orbita_requested.emit(selected_ids))
         menu.addAction(act_close)

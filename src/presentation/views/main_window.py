@@ -600,6 +600,7 @@ class TikTokManagerMainWindow(QMainWindow):
                     try:
                         debugger_addr = self.orbita_launcher.launch_via_gologin_sdk(
                             profile_id=uuid_val,
+                            proxy_data=proxy,
                             headless=False,
                             sync=False,
                         )

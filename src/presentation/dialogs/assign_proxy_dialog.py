@@ -66,11 +66,7 @@ class AssignProxyDialog(QDialog):
         header_layout.addWidget(icon_widget)
 
         count = len(self.profile_ids)
-        title_text = (
-            f"Cập Nhật Proxy cho {count} hồ sơ đang chọn"
-            if count > 1
-            else "Cập Nhật Proxy cho hồ sơ đã chọn"
-        )
+        title_text = f"Cập Nhật Proxy cho {count} hồ sơ đang chọn" if count > 1 else "Cập Nhật Proxy cho hồ sơ đã chọn"
         title_label = QLabel(title_text, self)
         title_label.setStyleSheet("font-size: 15px; font-weight: 600;")
         header_layout.addWidget(title_label)
@@ -84,9 +80,7 @@ class AssignProxyDialog(QDialog):
         tab_existing = QWidget()
         tab1_layout = QVBoxLayout(tab_existing)
         tab1_layout.setSpacing(10)
-        lbl_tab1 = QLabel(
-            "Chọn 1 proxy có sẵn trong hệ thống để gán chung cho các hồ sơ đã chọn:"
-        )
+        lbl_tab1 = QLabel("Chọn 1 proxy có sẵn trong hệ thống để gán chung cho các hồ sơ đã chọn:")
         lbl_tab1.setStyleSheet("color: #666666; font-size: 12px;")
         tab1_layout.addWidget(lbl_tab1)
 
@@ -156,9 +150,7 @@ class AssignProxyDialog(QDialog):
         if current_tab_idx == 0:
             # Mode 1: Assign single proxy from dropdown
             chosen_proxy_id = self.combo_proxy.currentData()
-            updated_count = self.profile_repo.bulk_assign_proxy(
-                self.profile_ids, chosen_proxy_id
-            )
+            updated_count = self.profile_repo.bulk_assign_proxy(self.profile_ids, chosen_proxy_id)
             if updated_count > 0:
                 self.accept()
             else:
