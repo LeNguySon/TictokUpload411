@@ -18,16 +18,38 @@ class ProfileRepository:
     def __init__(self, db_path: Path | str | None = None) -> None:
         self.db_path = db_path or DEFAULT_DB_PATH
 
-    def create(self, data: dict[str, Any]) -> int:
-        payload = dict(data)
+    def create(self, data: dict[str, Any] | None = None, **kwargs: Any) -> int:
+        payload = dict(data or {})
+        payload.update(kwargs)
         if "uuid" not in payload:
             payload["uuid"] = str(uuid.uuid4())
-        cols = list(payload.keys())
-        placeholders = ", ".join("?" for _ in cols)
-        sql = f"INSERT INTO profiles ({', '.join(cols)}) VALUES ({placeholders});"
+        if "name" not in payload:
+            payload["name"] = f"Profile_{payload['uuid'][:8]}"
+        if "storage_dir" not in payload:
+            payload["storage_dir"] = f"profiles/{payload['name']}"
+        if "user_agent" not in payload:
+            payload["user_agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/130.0.0.0"
+
+        # Alias mappings
+        if "tiktok_id" in payload and "username_on_tiktok" not in payload:
+            payload["username_on_tiktok"] = payload.pop("tiktok_id")
+        elif "tiktok_id" in payload:
+            payload.pop("tiktok_id")
+
+        if "cookie" in payload and "cookies_json" not in payload:
+            payload["cookies_json"] = payload.pop("cookie")
+        elif "cookie" in payload:
+            payload.pop("cookie")
 
         with db_session(self.db_path) as conn:
-            cur = conn.execute(sql, tuple(payload.values()))
+            col_rows = conn.execute("PRAGMA table_info(profiles);").fetchall()
+            valid_cols = {r["name"] for r in col_rows}
+            clean_payload = {k: v for k, v in payload.items() if k in valid_cols}
+
+            cols = list(clean_payload.keys())
+            placeholders = ", ".join("?" for _ in cols)
+            sql = f"INSERT INTO profiles ({', '.join(cols)}) VALUES ({placeholders});"
+            cur = conn.execute(sql, tuple(clean_payload.values()))
             return int(cur.lastrowid)
 
     def get_by_id(self, profile_id: int) -> dict[str, Any] | None:

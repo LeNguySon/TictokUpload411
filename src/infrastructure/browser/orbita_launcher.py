@@ -1,0 +1,110 @@
+"""
+Orbita Antidetect Browser Launcher integrating GoLogin Orbita profiles with fingerprint isolation.
+"""
+
+import logging
+import os
+import subprocess
+from pathlib import Path
+from typing import Any
+
+logger = logging.getLogger(__name__)
+
+
+class OrbitaLauncher:
+    """
+    Manages discovery and launching of Orbita Antidetect Browser with custom flags,
+    proxy authentication routing, and fingerprint noise injection.
+    """
+
+    DEFAULT_ORBITA_PATHS = [
+        Path(os.environ.get("USERPROFILE", "C:/Users/sonson")) / ".gologin/browser/orbita-browser-130/chrome.exe",
+        Path(os.environ.get("USERPROFILE", "C:/Users/sonson")) / ".gologin/browser/orbita-browser-128/chrome.exe",
+        Path("C:/Program Files/Google/Chrome/Application/chrome.exe"),
+        Path("C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe"),
+    ]
+
+    def __init__(self, executable_path: str | Path | None = None) -> None:
+        self.executable_path = Path(executable_path) if executable_path else self._find_browser_executable()
+
+    def _find_browser_executable(self) -> Path:
+        for p in self.DEFAULT_ORBITA_PATHS:
+            if p.exists() and p.is_file():
+                return p
+        return Path("chrome.exe")
+
+    def build_launch_args(
+        self,
+        user_data_dir: str | Path,
+        proxy_uri: str | None = None,
+        user_agent: str | None = None,
+        canvas_noise: float = 8.0,
+        webgl_vendor: str | None = None,
+        webgl_renderer: str | None = None,
+        start_url: str = "https://www.tiktok.com",
+    ) -> list[str]:
+        """Constructs Chromium command line arguments enforcing fingerprint and isolation boundaries."""
+        args = [
+            str(self.executable_path),
+            f"--user-data-dir={Path(user_data_dir).resolve()}",
+            "--no-first-run",
+            "--no-default-browser-check",
+            "--password-store=basic",
+            f"--fingerprint-canvas-noise={canvas_noise}",
+        ]
+
+        if proxy_uri:
+            # Strip credentials if embedded in uri because chromium flag expects host:port
+            # Format: http://user:pass@host:port -> http://host:port
+            clean_proxy = proxy_uri
+            if "@" in proxy_uri:
+                scheme, rest = proxy_uri.split("://", 1)
+                _, host_port = rest.split("@", 1)
+                clean_proxy = f"{scheme}://{host_port}"
+            args.append(f"--proxy-server={clean_proxy}")
+
+        if user_agent:
+            args.append(f"--user-agent={user_agent}")
+
+        if webgl_vendor:
+            args.append(f"--webgl-vendor={webgl_vendor}")
+        if webgl_renderer:
+            args.append(f"--webgl-renderer={webgl_renderer}")
+
+        args.append(start_url)
+        return args
+
+    def launch_profile(
+        self,
+        profile_data: dict[str, Any],
+        proxy_data: dict[str, Any] | None = None,
+        start_url: str = "https://www.tiktok.com",
+    ) -> subprocess.Popen:
+        """Launches the Orbita browser process asynchronously without blocking GUI thread."""
+        storage_dir = profile_data.get("storage_dir") or f"profiles/{profile_data.get('name', 'default')}"
+        p_dir = Path(storage_dir).resolve()
+        p_dir.mkdir(parents=True, exist_ok=True)
+
+        proxy_uri = None
+        if proxy_data:
+            scheme = proxy_data.get("protocol", "http")
+            host = proxy_data.get("host")
+            port = proxy_data.get("port")
+            usr = proxy_data.get("username")
+            pwd = proxy_data.get("password")
+            auth = f"{usr}:{pwd}@" if usr and pwd else ""
+            if host and port:
+                proxy_uri = f"{scheme}://{auth}{host}:{port}"
+
+        args = self.build_launch_args(
+            user_data_dir=p_dir,
+            proxy_uri=proxy_uri,
+            user_agent=profile_data.get("user_agent"),
+            canvas_noise=profile_data.get("canvas_noise", 8.0),
+            webgl_vendor=profile_data.get("webgl_vendor"),
+            webgl_renderer=profile_data.get("webgl_renderer"),
+            start_url=start_url,
+        )
+
+        logger.info("Launching Orbita browser for profile: %s with args: %s", profile_data.get("name"), args)
+        return subprocess.Popen(args, shell=False)

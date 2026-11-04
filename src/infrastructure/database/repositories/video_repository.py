@@ -118,6 +118,17 @@ class VideoRepository:
             )
             return cur.rowcount > 0
 
+    def update_metadata(self, video_id: int, file_name: str | None = None) -> bool:
+        """Updates video metadata such as custom title or file name."""
+        with db_session(self.db_path) as conn:
+            if file_name:
+                cur = conn.execute(
+                    "UPDATE video_registry SET file_name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?;",
+                    (file_name, video_id),
+                )
+                return cur.rowcount > 0
+            return False
+
     def list_available(self) -> list[dict[str, Any]]:
         with db_session(self.db_path, write=False) as conn:
             rows = conn.execute("SELECT * FROM video_registry WHERE status = 'available' ORDER BY id ASC;").fetchall()

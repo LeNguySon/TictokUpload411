@@ -13,6 +13,7 @@ from PyQt6.QtWidgets import (
     QLabel,
     QMainWindow,
     QSplitter,
+    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -40,6 +41,7 @@ from src.application.signals.app_signals import AppSignalBus
 from src.application.workers.metrics_sync_worker import MetricsSyncWorker
 from src.application.workers.thread_pool_manager import ThreadPoolManager
 from src.application.workers.upload_worker import UploadWorker
+from src.infrastructure.browser.orbita_launcher import OrbitaLauncher
 from src.infrastructure.credentials.windows_vault import WindowsCredentialVault
 from src.infrastructure.database.repositories.profile_repository import ProfileRepository
 from src.infrastructure.database.repositories.project_repository import ProjectRepository
@@ -47,10 +49,17 @@ from src.infrastructure.database.repositories.proxy_repository import ProxyRepos
 from src.infrastructure.database.repositories.video_repository import VideoRepository
 from src.infrastructure.tiktok.sammonny_adapter import SamMonnyTikTokAdapter
 from src.presentation.dialogs.add_profile_dialog import AddProfileDialog
+from src.presentation.dialogs.api_cookie_dialog import ApiCookieDialog
 from src.presentation.dialogs.bulk_add_profile_dialog import BulkAddProfileDialog
+from src.presentation.dialogs.permissions_dialog import PermissionsDialog
 from src.presentation.dialogs.project_dialog import ProjectManagerDialog
 from src.presentation.dialogs.proxy_dialog import ProxyManagerDialog
+from src.presentation.dialogs.schedule_dialog import ScheduleVideoDialog
+from src.presentation.dialogs.sync_transfer_dialog import SyncTransferDialog
+from src.presentation.dialogs.table_settings_dialog import TableSettingsDialog
 from src.presentation.dialogs.trash_dialog import TrashDialog
+from src.presentation.dialogs.user_guide_dialog import UserGuideDialog
+from src.presentation.dialogs.video_metadata_dialog import VideoMetadataDialog
 from src.presentation.widgets.profile_table_widget import ProfileTableWidget
 from src.presentation.widgets.video_queue_table_widget import VideoQueueTableWidget
 
@@ -81,6 +90,7 @@ class TikTokManagerMainWindow(QMainWindow):
         # Infrastructure & Vault
         self.vault = WindowsCredentialVault()
         self.tiktok_adapter = SamMonnyTikTokAdapter(vault=self.vault)
+        self.orbita_launcher = OrbitaLauncher()
 
         # Application Services
         self.proxy_service = ProxyService(proxy_repo=self.proxy_repo)
@@ -98,6 +108,9 @@ class TikTokManagerMainWindow(QMainWindow):
         # Signal Bus & Concurrency Manager
         self.signal_bus = AppSignalBus.instance()
         self.thread_pool = ThreadPoolManager.instance()
+
+        # UI Preferences
+        self.hidden_columns: set[int] = set()
 
         self.setWindowTitle("SSMATool Reup Tiktok - TAVM 2026 Windows 11 Edition")
         self.resize(1366, 850)
@@ -161,6 +174,7 @@ class TikTokManagerMainWindow(QMainWindow):
         bottom_toolbar.addWidget(self.lbl_video_header)
 
         self.btn_schedule = PushButton("📅 Lên lịch", self)
+        self.btn_schedule.clicked.connect(self._on_schedule_videos)
         bottom_toolbar.addWidget(self.btn_schedule)
 
         self.btn_pick_pc = PrimaryPushButton("💻 Thêm Video (Máy tính)", self)
@@ -178,6 +192,7 @@ class TikTokManagerMainWindow(QMainWindow):
 
         self.search_video = SearchLineEdit(self)
         self.search_video.setPlaceholderText("Tìm video theo tiêu đề trong bảng..")
+        self.search_video.textChanged.connect(self._on_search_video)
         bottom_toolbar.addWidget(self.search_video, 2)
 
         self.btn_clear_videos = PushButton("Xóa bảng", self)
@@ -221,13 +236,18 @@ class TikTokManagerMainWindow(QMainWindow):
         self.signal_bus.upload_failed.connect(self._on_upload_failed)
         self.signal_bus.profile_updated.connect(self._on_profile_updated)
 
-        # Context Menu Events
+        # Context Menu Events on Profile Table
         self.profile_table.open_orbita_requested.connect(self._on_launch_orbita)
         self.profile_table.check_cookie_requested.connect(self._on_check_single_cookie)
         self.profile_table.change_status_requested.connect(self._on_change_profile_status)
         self.profile_table.soft_delete_requested.connect(self._on_soft_delete_profiles)
+
+        # Context Menu & Selection Events on Video Table
         self.video_table.upload_now_requested.connect(self._on_upload_single_video)
         self.video_table.delete_video_requested.connect(self._on_delete_selected_videos)
+        self.video_table.edit_metadata_requested.connect(self._on_edit_video_metadata)
+        self.video_table.schedule_video_requested.connect(self._on_schedule_videos_from_table)
+        self.video_table.itemSelectionChanged.connect(self._on_video_selection_changed)
 
     def refresh_all_data(self) -> None:
         self._refresh_project_dropdown()
@@ -251,13 +271,12 @@ class TikTokManagerMainWindow(QMainWindow):
     def refresh_videos(self) -> None:
         available = self.video_repo.list_available()
         self.video_table.load_videos(available)
-        self.lbl_video_header.setText(f"Bảng video Đã chọn 1 / {len(available)}")
+        self.lbl_video_header.setText(f"Bảng video Đã chọn 0 / {len(available)}")
 
     def _on_project_changed(self) -> None:
         self.refresh_profiles()
 
     def _on_search_profile(self, text: str) -> None:
-        # Client-side filtering across rows
         filter_text = text.strip().lower()
         for row in range(self.profile_table.rowCount()):
             matched = False
@@ -267,6 +286,95 @@ class TikTokManagerMainWindow(QMainWindow):
                     matched = True
                     break
             self.profile_table.setRowHidden(row, not matched if filter_text else False)
+
+    def _on_search_video(self, text: str) -> None:
+        filter_text = text.strip().lower()
+        for row in range(self.video_table.rowCount()):
+            item = self.video_table.item(row, 1)  # Col 1: Tiêu đề
+            matched = not filter_text or (item and filter_text in item.text().lower())
+            self.video_table.setRowHidden(row, not matched)
+
+    def _on_video_selection_changed(self) -> None:
+        selected_rows = {index.row() for index in self.video_table.selectedIndexes()}
+        total_rows = self.video_table.rowCount()
+        self.lbl_video_header.setText(f"Bảng video Đã chọn {len(selected_rows)} / {total_rows}")
+
+    def _init_settings_menu(self) -> None:
+        """Centralized Settings & Tools Menu housing all administrative actions."""
+        self.settings_menu = RoundMenu(parent=self)
+
+        # 1. Thao tác hồ sơ
+        act_add_1 = Action(FluentIcon.ADD, "Add 1 profile (Thêm 1 hồ sơ)", self)
+        act_add_1.triggered.connect(self._on_add_profile)
+        self.settings_menu.addAction(act_add_1)
+
+        act_add_many = Action(FluentIcon.FOLDER_ADD, "Add nhiều profile (Hàng loạt)", self)
+        act_add_many.triggered.connect(self._on_bulk_add_profiles)
+        self.settings_menu.addAction(act_add_many)
+
+        act_show_all = Action(FluentIcon.VIEW, "Show all (Hiển thị tất cả hồ sơ)", self)
+        act_show_all.triggered.connect(self._on_show_all_profiles)
+        self.settings_menu.addAction(act_show_all)
+
+        act_sync = Action(FluentIcon.SYNC, "Đồng bộ số liệu TikTok", self)
+        act_sync.triggered.connect(self._on_sync_selected_metrics)
+        self.settings_menu.addAction(act_sync)
+
+        act_orbita = Action(FluentIcon.GLOBE, "Mở Trình duyệt Orbita Antidetect", self)
+        act_orbita.triggered.connect(self._on_launch_orbita_selected)
+        self.settings_menu.addAction(act_orbita)
+
+        self.settings_menu.addSeparator()
+
+        # 2. Quản lý Dự án & Proxy
+        act_projects = Action(FluentIcon.TAG, "Quản lý Dự án / Chiến dịch", self)
+        act_projects.triggered.connect(self._on_open_project_manager)
+        self.settings_menu.addAction(act_projects)
+
+        act_proxy = Action(FluentIcon.WIFI, "Công cụ Proxy & Leak Audit", self)
+        act_proxy.triggered.connect(self._on_open_proxy_manager)
+        self.settings_menu.addAction(act_proxy)
+
+        act_table_cfg = Action(FluentIcon.LAYOUT, "Cài đặt bảng (28 cột MMO)", self)
+        act_table_cfg.triggered.connect(self._on_table_cfg)
+        self.settings_menu.addAction(act_table_cfg)
+
+        concurrency_val = self.thread_pool.max_thread_count
+        act_concurrency = Action(FluentIcon.SPEED_HIGH, f"Cấu hình luồng check ({concurrency_val} luồng)...", self)
+        act_concurrency.triggered.connect(self._on_configure_concurrency)
+        self.settings_menu.addAction(act_concurrency)
+
+        self.settings_menu.addSeparator()
+
+        # 3. Tiện ích Menu (API | Cookie, Cấp quyền, Nhận và Gửi)
+        act_api_cookie = Action(FluentIcon.VPN, "API | Cookie (TikTok Direct Post)", self)
+        act_api_cookie.triggered.connect(self._on_api_cookie)
+        self.settings_menu.addAction(act_api_cookie)
+
+        act_permissions = Action(FluentIcon.CERTIFICATE, "Cấp quyền (OAuth 2.0 PKCE)", self)
+        act_permissions.triggered.connect(self._on_permissions)
+        self.settings_menu.addAction(act_permissions)
+
+        act_send_recv = Action(FluentIcon.SEND, "Nhận và Gửi (Sao lưu & Khôi phục CSDL)", self)
+        act_send_recv.triggered.connect(self._on_send_recv)
+        self.settings_menu.addAction(act_send_recv)
+
+        self.settings_menu.addSeparator()
+
+        # 4. Bảo trì & Trợ giúp
+        act_trash = Action(FluentIcon.DELETE, "Thùng rác (Phục hồi hồ sơ)", self)
+        act_trash.triggered.connect(self._on_open_trash)
+        self.settings_menu.addAction(act_trash)
+
+        act_clean = Action(FluentIcon.BRUSH, "Dọn dẹp trình duyệt & Giải phóng RAM", self)
+        act_clean.triggered.connect(self._on_clean_browser)
+        self.settings_menu.addAction(act_clean)
+
+        act_guide = Action(FluentIcon.HELP, "Hướng dẫn sử dụng (Documentation)", self)
+        act_guide.triggered.connect(self._on_guide)
+        self.settings_menu.addAction(act_guide)
+
+        self.btn_settings.setMenu(self.settings_menu)
 
     def _on_open_project_manager(self) -> None:
         dlg = ProjectManagerDialog(self.project_repo, self)
@@ -294,6 +402,16 @@ class TikTokManagerMainWindow(QMainWindow):
                 position=InfoBarPosition.TOP,
                 parent=self,
             )
+
+    def _on_bulk_add_profiles(self) -> None:
+        dlg = BulkAddProfileDialog(
+            profile_repo=self.profile_repo,
+            project_repo=self.project_repo,
+            proxy_repo=self.proxy_repo,
+            parent=self,
+        )
+        if dlg.exec():
+            self.refresh_profiles()
 
     def _on_show_all_profiles(self) -> None:
         self.project_combo.setCurrentIndex(0)
@@ -324,6 +442,160 @@ class TikTokManagerMainWindow(QMainWindow):
             parent=self,
         )
 
+    def _on_launch_orbita_selected(self) -> None:
+        selected = self.profile_table.get_selected_profile_ids()
+        if not selected:
+            InfoBar.warning(
+                title="Chưa chọn hồ sơ",
+                content="Vui lòng click chọn 1 hồ sơ trong bảng để mở trình duyệt.",
+                position=InfoBarPosition.TOP,
+                parent=self,
+            )
+            return
+        self._on_launch_orbita(selected[0])
+
+    def _on_launch_orbita(self, profile_id: int) -> None:
+        p = self.profile_repo.get_by_id(profile_id)
+        if not p:
+            return
+        proxy = self.proxy_repo.get_by_id(p["proxy_id"]) if p.get("proxy_id") else None
+        try:
+            proc = self.orbita_launcher.launch_profile(p, proxy)
+            InfoBar.success(
+                title="Khởi Chạy Orbita",
+                content=f"Đã mở trình duyệt cho hồ sơ '{p.get('name')}' (PID: {proc.pid}).",
+                position=InfoBarPosition.TOP,
+                parent=self,
+            )
+        except Exception as e:
+            logger.error("Launch orbita failed: %s", e)
+            InfoBar.error(
+                title="Khởi Chạy Thất Bại",
+                content=f"Không thể mở Orbita: {e}",
+                position=InfoBarPosition.TOP,
+                parent=self,
+            )
+
+    def _on_configure_concurrency(self) -> None:
+        from PyQt6.QtWidgets import QInputDialog
+
+        val, ok = QInputDialog.getInt(
+            self,
+            "Cấu Hình Luồng Check",
+            "Nhập số luồng kiểm tra / tải lên đồng thời (1 - 50):",
+            self.thread_pool.max_thread_count,
+            1,
+            50,
+        )
+        if ok:
+            self.thread_pool.set_max_threads(val)
+            self._init_settings_menu()
+            InfoBar.success(
+                title="Cấu Hình Luồng",
+                content=f"Đã cập nhật số luồng chạy nền thành {val} luồng.",
+                position=InfoBarPosition.TOP,
+                parent=self,
+            )
+
+    def _on_clean_browser(self) -> None:
+        try:
+            import sammonny
+
+            sammonny.MemoryManager.trim_working_set()
+        except Exception:
+            pass
+        InfoBar.success(
+            title="Dọn Dẹp Trình Duyệt",
+            content="Đã dọn sạch cache tạm và giải phóng bộ nhớ RAM thành công.",
+            position=InfoBarPosition.TOP,
+            parent=self,
+        )
+
+    def _on_api_cookie(self) -> None:
+        dlg = ApiCookieDialog(vault=self.vault, parent=self)
+        dlg.exec()
+
+    def _on_permissions(self) -> None:
+        dlg = PermissionsDialog(parent=self)
+        dlg.exec()
+
+    def _on_send_recv(self) -> None:
+        dlg = SyncTransferDialog(
+            project_repo=self.project_repo,
+            profile_repo=self.profile_repo,
+            proxy_repo=self.proxy_repo,
+            parent=self,
+        )
+        if dlg.exec():
+            self.refresh_all_data()
+
+    def _on_table_cfg(self) -> None:
+        dlg = TableSettingsDialog(hidden_columns=self.hidden_columns, parent=self)
+        if dlg.exec():
+            self.hidden_columns = dlg.hidden_columns
+            for col_idx in range(self.profile_table.columnCount()):
+                self.profile_table.setColumnHidden(col_idx, col_idx in self.hidden_columns)
+            visible_count = self.profile_table.columnCount() - len(self.hidden_columns)
+            InfoBar.success(
+                title="Đã Lưu Cài Đặt Bảng",
+                content=f"Đang hiển thị {visible_count} cột, ẩn {len(self.hidden_columns)} cột.",
+                position=InfoBarPosition.TOP,
+                parent=self,
+            )
+
+    def _on_guide(self) -> None:
+        dlg = UserGuideDialog(parent=self)
+        dlg.exec()
+
+    def _on_check_single_cookie(self, profile_id: int) -> None:
+        p = self.profile_repo.get_by_id(profile_id)
+        cookie = p.get("cookie") or p.get("cookies_json") if p else None
+        if not cookie:
+            InfoBar.warning(
+                title="Không có Cookie",
+                content=f"Hồ sơ #{profile_id} chưa lưu cookie đăng nhập.",
+                position=InfoBarPosition.TOP,
+                parent=self,
+            )
+            return
+
+        is_live = bool("sessionid=" in cookie or "msToken=" in cookie)
+        new_status = "LIVE" if is_live else "DIE"
+        self.profile_repo.update(profile_id, status=new_status)
+        self.refresh_profiles()
+        InfoBar.success(
+            title="Kiểm Tra Cookie",
+            content=f"Hồ sơ #{profile_id}: Trạng thái hiện tại là {new_status}.",
+            position=InfoBarPosition.TOP,
+            parent=self,
+        )
+
+    def _on_change_profile_status(self, profile_id: int, status: str) -> None:
+        self.profile_repo.update(profile_id, status=status)
+        self.refresh_profiles()
+        InfoBar.info(
+            title="Đổi Trạng Thái",
+            content=f"Hồ sơ #{profile_id} đã chuyển sang trạng thái: {status}.",
+            position=InfoBarPosition.TOP,
+            parent=self,
+        )
+
+    def _on_soft_delete_profiles(self, profile_ids: list[int]) -> None:
+        for p_id in profile_ids:
+            self.profile_repo.soft_delete(p_id)
+        self.refresh_profiles()
+        InfoBar.info(
+            title="Thùng Rác",
+            content=f"Đã chuyển {len(profile_ids)} hồ sơ vào thùng rác.",
+            position=InfoBarPosition.TOP,
+            parent=self,
+        )
+
+    def _on_open_trash(self) -> None:
+        dlg = TrashDialog(profile_repo=self.profile_repo, parent=self)
+        dlg.exec()
+        self.refresh_profiles()
+
     def _on_pick_video_files(self) -> None:
         files, _ = QFileDialog.getOpenFileNames(
             self,
@@ -351,6 +623,63 @@ class TikTokManagerMainWindow(QMainWindow):
             parent=self,
         )
 
+    def _on_schedule_videos(self) -> None:
+        available_videos = self.video_repo.list_available()
+        if not available_videos:
+            InfoBar.warning(
+                title="Hàng Đợi Trống",
+                content="Chưa có video nào trong hàng đợi để lên lịch.",
+                position=InfoBarPosition.TOP,
+                parent=self,
+            )
+            return
+
+        dlg = ScheduleVideoDialog(video_count=len(available_videos), parent=self)
+        if dlg.exec() and dlg.generated_schedules:
+            for idx, sched_time in enumerate(dlg.generated_schedules):
+                if idx < len(available_videos):
+                    self.video_table.setItem(idx, 6, QTableWidgetItem(sched_time))
+            InfoBar.success(
+                title="Đã Lên Lịch Tự Động",
+                content=f"Đã phân bổ thời gian đăng cho {min(len(available_videos), len(dlg.generated_schedules))} video.",
+                position=InfoBarPosition.TOP,
+                parent=self,
+            )
+
+    def _on_schedule_videos_from_table(self, selected_rows: list[int]) -> None:
+        if not selected_rows:
+            return
+
+        dlg = ScheduleVideoDialog(video_count=len(selected_rows), parent=self)
+        if dlg.exec() and dlg.generated_schedules:
+            for idx, row in enumerate(selected_rows):
+                if idx < len(dlg.generated_schedules):
+                    self.video_table.setItem(row, 6, QTableWidgetItem(dlg.generated_schedules[idx]))
+            InfoBar.success(
+                title="Đã Lên Lịch Đăng",
+                content=f"Đã phân bổ lịch đăng cho {len(selected_rows)} video đã chọn.",
+                position=InfoBarPosition.TOP,
+                parent=self,
+            )
+
+    def _on_edit_video_metadata(self, row_index: int) -> None:
+        available = self.video_repo.list_available()
+        if row_index < len(available):
+            v = available[row_index]
+            dlg = VideoMetadataDialog(video_data=v, parent=self)
+            if dlg.exec():
+                new_title = dlg.video_data.get("title", "")
+                new_priv = dlg.video_data.get("privacy_level", "Public")
+                self.video_table.item(row_index, 1).setText(new_title)
+                self.video_table.item(row_index, 5).setText(new_priv)
+                self.video_repo.update_metadata(v["id"], file_name=new_title)
+                InfoBar.success(
+                    title="Cập Nhật Video",
+                    content=f"Đã cập nhật thông tin video: {new_title}",
+                    position=InfoBarPosition.TOP,
+                    parent=self,
+                )
+
     def _on_start_upload_queue(self) -> None:
         selected_profiles = self.profile_table.get_selected_profile_ids()
         available_videos = self.video_repo.list_available()
@@ -373,7 +702,6 @@ class TikTokManagerMainWindow(QMainWindow):
             )
             return
 
-        # Pair available videos to selected profiles
         dispatched = 0
         for idx, video in enumerate(available_videos):
             profile_id = selected_profiles[idx % len(selected_profiles)]
@@ -417,88 +745,6 @@ class TikTokManagerMainWindow(QMainWindow):
     def _on_profile_updated(self, profile_id: int, fields: dict) -> None:
         self.refresh_profiles()
 
-    def _on_bulk_add_profiles(self) -> None:
-        dlg = BulkAddProfileDialog(
-            profile_repo=self.profile_repo,
-            project_repo=self.project_repo,
-            proxy_repo=self.proxy_repo,
-            parent=self,
-        )
-        if dlg.exec():
-            self.refresh_profiles()
-
-    def _on_launch_orbita_selected(self) -> None:
-        selected = self.profile_table.get_selected_profile_ids()
-        if not selected:
-            InfoBar.warning(
-                title="Chưa chọn hồ sơ",
-                content="Vui lòng click chọn 1 hồ sơ trong bảng để mở trình duyệt.",
-                position=InfoBarPosition.TOP,
-                parent=self,
-            )
-            return
-        self._on_launch_orbita(selected[0])
-
-    def _on_launch_orbita(self, profile_id: int) -> None:
-        p = self.profile_repo.get_by_id(profile_id)
-        name = p.get("name", str(profile_id)) if p else str(profile_id)
-        InfoBar.info(
-            title="Khởi Chạy Trình Duyệt Orbita",
-            content=f"Đang chuẩn bị môi trường Antidetect và mở hồ sơ: {name}...",
-            position=InfoBarPosition.TOP,
-            parent=self,
-        )
-
-    def _on_check_single_cookie(self, profile_id: int) -> None:
-        p = self.profile_repo.get_by_id(profile_id)
-        cookie = p.get("cookie") if p else None
-        if not cookie:
-            InfoBar.warning(
-                title="Không có Cookie",
-                content=f"Hồ sơ #{profile_id} chưa lưu cookie đăng nhập.",
-                position=InfoBarPosition.TOP,
-                parent=self,
-            )
-            return
-
-        # Simple verification: msToken presence or sessionid
-        is_live = bool("sessionid=" in cookie or "msToken=" in cookie)
-        new_status = "LIVE" if is_live else "DIE"
-        self.profile_repo.update(profile_id, status=new_status)
-        self.refresh_profiles()
-        InfoBar.success(
-            title="Kiểm Tra Cookie",
-            content=f"Hồ sơ #{profile_id}: Trạng thái hiện tại là {new_status}.",
-            position=InfoBarPosition.TOP,
-            parent=self,
-        )
-
-    def _on_change_profile_status(self, profile_id: int, status: str) -> None:
-        self.profile_repo.update(profile_id, status=status)
-        self.refresh_profiles()
-        InfoBar.info(
-            title="Đổi Trạng Thái",
-            content=f"Hồ sơ #{profile_id} đã chuyển sang trạng thái: {status}.",
-            position=InfoBarPosition.TOP,
-            parent=self,
-        )
-
-    def _on_soft_delete_profiles(self, profile_ids: list[int]) -> None:
-        for p_id in profile_ids:
-            self.profile_repo.soft_delete(p_id)
-        self.refresh_profiles()
-        InfoBar.info(
-            title="Thùng Rác",
-            content=f"Đã chuyển {len(profile_ids)} hồ sơ vào thùng rác.",
-            position=InfoBarPosition.TOP,
-            parent=self,
-        )
-
-    def _on_open_trash(self) -> None:
-        dlg = TrashDialog(profile_repo=self.profile_repo, parent=self)
-        dlg.exec()
-        self.refresh_profiles()
-
     def _on_upload_single_video(self, row_index: int) -> None:
         selected_profiles = self.profile_table.get_selected_profile_ids()
         if not selected_profiles:
@@ -536,151 +782,13 @@ class TikTokManagerMainWindow(QMainWindow):
         self.video_table.setRowCount(0)
         self.lbl_video_header.setText("Bảng video Đã chọn 0 / 0")
 
-    def _init_settings_menu(self) -> None:
-        """Centralized Settings & Tools Menu housing all secondary administrative actions."""
-        self.settings_menu = RoundMenu(parent=self)
+    def closeEvent(self, event) -> None:
+        """Cleanup Chromium RAM working set before closing application."""
+        if self.chk_clean_exit.isChecked():
+            try:
+                import sammonny
 
-        # 1. Thao tác hồ sơ
-        act_add_1 = Action(FluentIcon.ADD, "Add 1 profile (Thêm 1 hồ sơ)", self)
-        act_add_1.triggered.connect(self._on_add_profile)
-        self.settings_menu.addAction(act_add_1)
-
-        act_add_many = Action(FluentIcon.FOLDER_ADD, "Add nhiều profile (Hàng loạt)", self)
-        act_add_many.triggered.connect(self._on_bulk_add_profiles)
-        self.settings_menu.addAction(act_add_many)
-
-        act_show_all = Action(FluentIcon.VIEW, "Show all (Hiển thị tất cả hồ sơ)", self)
-        act_show_all.triggered.connect(self._on_show_all_profiles)
-        self.settings_menu.addAction(act_show_all)
-
-        act_sync = Action(FluentIcon.SYNC, "Đồng bộ số liệu TikTok", self)
-        act_sync.triggered.connect(self._on_sync_selected_metrics)
-        self.settings_menu.addAction(act_sync)
-
-        act_orbita = Action(FluentIcon.GLOBE, "Mở Trình duyệt Orbita Antidetect", self)
-        act_orbita.triggered.connect(self._on_launch_orbita_selected)
-        self.settings_menu.addAction(act_orbita)
-
-        self.settings_menu.addSeparator()
-
-        # 2. Quản lý Dự án & Proxy
-        act_projects = Action(FluentIcon.TAG, "Quản lý Dự án / Chiến dịch", self)
-        act_projects.triggered.connect(self._on_open_project_manager)
-        self.settings_menu.addAction(act_projects)
-
-        act_proxy = Action(FluentIcon.WIFI, "Công cụ Proxy & Leak Audit", self)
-        act_proxy.triggered.connect(self._on_open_proxy_manager)
-        self.settings_menu.addAction(act_proxy)
-
-        concurrency_val = self.thread_pool.max_thread_count
-        act_concurrency = Action(FluentIcon.SPEED_HIGH, f"Cấu hình luồng check ({concurrency_val} luồng)...", self)
-        act_concurrency.triggered.connect(self._on_configure_concurrency)
-        self.settings_menu.addAction(act_concurrency)
-
-        self.settings_menu.addSeparator()
-
-        # 3. Tiện ích Menu Bar cũ (API | Cookie, Thùng rác, Dọn dẹp, Cài đặt bảng, Cấp quyền...)
-        act_trash = Action(FluentIcon.DELETE, "Thùng rác (Phục hồi hồ sơ)", self)
-        act_trash.triggered.connect(self._on_open_trash)
-        self.settings_menu.addAction(act_trash)
-
-        act_clean = Action(FluentIcon.BRUSH, "Dọn dẹp trình duyệt & Giải phóng RAM", self)
-        act_clean.triggered.connect(self._on_clean_browser)
-        self.settings_menu.addAction(act_clean)
-
-        act_api_cookie = Action(FluentIcon.VPN, "API | Cookie", self)
-        act_api_cookie.triggered.connect(self._on_api_cookie)
-        self.settings_menu.addAction(act_api_cookie)
-
-        act_permissions = Action(FluentIcon.CERTIFICATE, "Cấp quyền", self)
-        act_permissions.triggered.connect(self._on_permissions)
-        self.settings_menu.addAction(act_permissions)
-
-        act_send_recv = Action(FluentIcon.SEND, "Nhận và Gửi", self)
-        act_send_recv.triggered.connect(self._on_send_recv)
-        self.settings_menu.addAction(act_send_recv)
-
-        act_table_cfg = Action(FluentIcon.LAYOUT, "Cài đặt bảng", self)
-        act_table_cfg.triggered.connect(self._on_table_cfg)
-        self.settings_menu.addAction(act_table_cfg)
-
-        act_guide = Action(FluentIcon.HELP, "Hướng dẫn sử dụng", self)
-        act_guide.triggered.connect(self._on_guide)
-        self.settings_menu.addAction(act_guide)
-
-        self.btn_settings.setMenu(self.settings_menu)
-
-    def _on_configure_concurrency(self) -> None:
-        from PyQt6.QtWidgets import QInputDialog
-
-        val, ok = QInputDialog.getInt(
-            self,
-            "Cấu Hình Luồng Check",
-            "Nhập số luồng kiểm tra / tải lên đồng thời (1 - 50):",
-            self.thread_pool.max_thread_count,
-            1,
-            50,
-        )
-        if ok:
-            self.thread_pool.set_max_threads(val)
-            self._init_settings_menu()
-            InfoBar.success(
-                title="Cấu Hình Luồng",
-                content=f"Đã cập nhật số luồng chạy nền thành {val} luồng.",
-                position=InfoBarPosition.TOP,
-                parent=self,
-            )
-
-    def _on_clean_browser(self) -> None:
-        try:
-            import sammonny
-
-            sammonny.MemoryManager.trim_working_set()
-        except Exception:
-            pass
-        InfoBar.success(
-            title="Dọn Dẹp Trình Duyệt",
-            content="Đã dọn sạch cache tạm và giải phóng bộ nhớ RAM thành công.",
-            position=InfoBarPosition.TOP,
-            parent=self,
-        )
-
-    def _on_api_cookie(self) -> None:
-        InfoBar.info(
-            title="API | Cookie",
-            content="Hệ thống đang bảo vệ Token OAuth & Cookie qua Windows Vault DPAPI an toàn tuyệt đối.",
-            position=InfoBarPosition.TOP,
-            parent=self,
-        )
-
-    def _on_permissions(self) -> None:
-        InfoBar.info(
-            title="Cấp Quyền",
-            content="Toàn bộ quyền điều khiển trình duyệt và ghi CSDL đã được cấp phép.",
-            position=InfoBarPosition.TOP,
-            parent=self,
-        )
-
-    def _on_send_recv(self) -> None:
-        InfoBar.info(
-            title="Nhận và Gửi",
-            content="Sẵn sàng kết nối kênh trao đổi dữ liệu kịch bản và profile.",
-            position=InfoBarPosition.TOP,
-            parent=self,
-        )
-
-    def _on_table_cfg(self) -> None:
-        InfoBar.info(
-            title="Cài Đặt Bảng",
-            content="Bảng đang hiển thị chuẩn 28 cột MMO và 14 cột hàng đợi video.",
-            position=InfoBarPosition.TOP,
-            parent=self,
-        )
-
-    def _on_guide(self) -> None:
-        InfoBar.info(
-            title="Hướng Dẫn Sử Dụng",
-            content="Vui lòng tham khảo tài liệu kỹ thuật tại thư mục docs/ và file README.md.",
-            position=InfoBarPosition.TOP,
-            parent=self,
-        )
+                sammonny.MemoryManager.trim_working_set()
+            except Exception:
+                pass
+        event.accept()

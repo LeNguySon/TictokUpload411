@@ -44,4 +44,22 @@ def test_main_window_creation_and_layout(qapp):
         # Check default project dropdown has item
         assert window.project_combo.count() >= 1
 
+        # Check Settings Menu is created and has actions
+        assert window.settings_menu is not None
+        actions = window.settings_menu.actions()
+        assert len(actions) >= 10
+
+        # Check searching video filters rows
+        window.search_video.setText("non_existent_search_query")
+        # Video table rows should be hidden
+        for r in range(window.video_table.rowCount()):
+            assert window.video_table.isRowHidden(r)
+        window.search_video.clear()
+
+        # Check searching profile filters rows
+        window.search_profile.setText("ghost_profile")
+        for r in range(window.profile_table.rowCount()):
+            assert window.profile_table.isRowHidden(r)
+        window.search_profile.clear()
+
         window.close()

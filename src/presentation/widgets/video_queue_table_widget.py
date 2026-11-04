@@ -23,6 +23,8 @@ class VideoQueueTableWidget(TableWidget):
 
     upload_now_requested = pyqtSignal(int)
     delete_video_requested = pyqtSignal(list)
+    edit_metadata_requested = pyqtSignal(int)
+    schedule_video_requested = pyqtSignal(list)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -168,9 +170,20 @@ class VideoQueueTableWidget(TableWidget):
             return
 
         menu = RoundMenu(parent=self)
+        first_row = selected_rows[0]
+
+        act_edit = Action("📝 Chỉnh Sửa Thông Tin Video", self)
+        act_edit.triggered.connect(lambda: self.edit_metadata_requested.emit(first_row))
+        menu.addAction(act_edit)
+
+        act_schedule = Action("📅 Lên Lịch Đăng Video Đã Chọn...", self)
+        act_schedule.triggered.connect(lambda: self.schedule_video_requested.emit(selected_rows))
+        menu.addAction(act_schedule)
+
+        menu.addSeparator()
 
         act_upload = Action("🚀 Đăng Ngay Video Này", self)
-        act_upload.triggered.connect(lambda: self.upload_now_requested.emit(selected_rows[0]))
+        act_upload.triggered.connect(lambda: self.upload_now_requested.emit(first_row))
         menu.addAction(act_upload)
 
         menu.addSeparator()

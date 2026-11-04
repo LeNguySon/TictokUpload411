@@ -82,6 +82,32 @@ class ProxyRepository:
     def __init__(self, db_path: Path | str | None = None) -> None:
         self.db_path = db_path or DEFAULT_DB_PATH
 
+    def create(
+        self,
+        host: str,
+        port: int,
+        protocol: str = "http",
+        username: str | None = None,
+        password: str | None = None,
+        proxy_type: str = "static",
+        change_ip_url: str | None = None,
+    ) -> int:
+        """Inserts a single proxy record into the database."""
+        with db_session(self.db_path) as conn:
+            cur = conn.execute(
+                """
+                INSERT INTO proxies (
+                    host, port, username, password, protocol, proxy_type, change_ip_url
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(host, port, username) DO UPDATE SET
+                    password = excluded.password,
+                    protocol = excluded.protocol,
+                    change_ip_url = excluded.change_ip_url;
+                """,
+                (host, port, username, password, protocol, proxy_type, change_ip_url),
+            )
+            return cur.lastrowid
+
     def bulk_import(self, raw_lines: list[str]) -> int:
         """Parses and imports a batch of proxy strings. Unique proxies counted."""
         seen_keys: set[tuple[str, int, str | None]] = set()
