@@ -1,0 +1,70 @@
+# ==============================================================================
+# TikTok Account & Video Manager (TAVM-2026-WIN) — Git Ignore Policy
+# AgentShield Tier-1 Security Compliance
+# ==============================================================================
+
+# Python bytecode & cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Environments
+.venv/
+venv/
+env/
+ENV/
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Testing & Quality Assurance
+.pytest_cache/
+.coverage
+htmlcov/
+.ruff_cache/
+.mypy_cache/
+.pytype/
+*.log
+
+# CSDL SQLite & WAL files (AgentShield & Database Provenance)
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+gloglin.db*
+
+# Sensitive Secrets, Cookies & Tokens (Bảo mật Windows Vault / DPAPI)
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+secrets/
+vault/
+tokens/
+cookies/
+cooki.txt
+acc.txt
+token.json
+credentials.json
+
+# IDEs & System files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+.DS_Store
+
+# Temporary outputs
+scratch/
+tmp/
+temp/
+run_output.log
