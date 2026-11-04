@@ -118,16 +118,32 @@ class VideoRepository:
             )
             return cur.rowcount > 0
 
-    def update_metadata(self, video_id: int, file_name: str | None = None) -> bool:
-        """Updates video metadata such as custom title or file name."""
-        with db_session(self.db_path) as conn:
-            if file_name:
-                cur = conn.execute(
-                    "UPDATE video_registry SET file_name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?;",
-                    (file_name, video_id),
-                )
-                return cur.rowcount > 0
+    def update_metadata(
+        self,
+        video_id: int,
+        file_name: str | None = None,
+        file_path: str | None = None,
+    ) -> bool:
+        """Updates video metadata such as custom title, file name, or isolated file path."""
+        updates: list[str] = []
+        params: list[Any] = []
+        if file_name is not None:
+            updates.append("file_name = ?")
+            params.append(file_name)
+        if file_path is not None:
+            updates.append("file_path = ?")
+            params.append(file_path)
+
+        if not updates:
             return False
+
+        updates.append("updated_at = CURRENT_TIMESTAMP")
+        params.append(video_id)
+        sql = f"UPDATE video_registry SET {', '.join(updates)} WHERE id = ?;"
+
+        with db_session(self.db_path) as conn:
+            cur = conn.execute(sql, tuple(params))
+            return cur.rowcount > 0
 
     def delete(self, video_id: int) -> bool:
         """Deletes a single video record by ID."""

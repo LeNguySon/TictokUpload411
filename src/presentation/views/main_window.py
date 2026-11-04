@@ -1312,10 +1312,18 @@ class TikTokManagerMainWindow(QMainWindow):
         self.video_table.update_progress(video_id, pct)
 
     def _on_upload_completed(self, video_id: int, publish_id: str) -> None:
+        # Tự động cách ly video đã upload vào thư mục _posted/
+        try:
+            isolated_path = self.upload_service.isolate_video_file(video_id)
+            if isolated_path:
+                logger.info("Video #%s physically isolated to %s", video_id, isolated_path)
+        except Exception as e:
+            logger.warning("Failed to physically isolate video #%s: %s", video_id, e)
+
         self.refresh_videos()
         InfoBar.success(
             title="Upload Hoàn Tất",
-            content=f"Video #{video_id} đã xuất bản thành công: {publish_id}",
+            content=f"Video #{video_id} đã xuất bản thành công & cách ly vào _posted/: {publish_id}",
             position=InfoBarPosition.TOP,
             parent=self,
         )

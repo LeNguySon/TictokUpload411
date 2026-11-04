@@ -26,3 +26,4 @@
 ## 3. Cập Nhật Live Trên Giao Diện PyQt6
 - Mọi cập nhật dữ liệu từ background worker hoặc sniffer đều phát qua `AppSignalBus.instance().profile_updated.emit(profile_id, data)`.
 - `MainWindow._on_profile_updated` tự động gọi `refresh_profiles()` để làm mới 28 cột MMO trên bảng `ProfileTableWidget` tức thì.
+

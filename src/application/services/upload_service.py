@@ -13,6 +13,7 @@ from src.domain.policies.retry_policy import RetryPolicy
 from src.domain.policies.video_validation_policy import VideoValidationPolicy
 from src.infrastructure.database.repositories.profile_repository import ProfileRepository
 from src.infrastructure.database.repositories.video_repository import VideoRepository
+from src.infrastructure.media.video_isolation import move_video_to_posted_folder
 from src.infrastructure.tiktok.sammonny_adapter import SamMonnyTikTokAdapter
 
 logger = logging.getLogger(__name__)
@@ -122,6 +123,10 @@ class UploadService:
                     published_profile_id=profile_id,
                     tiktok_video_id=result.publish_id,
                 )
+                try:
+                    self.isolate_video_file(video_id)
+                except Exception as iso_err:
+                    logger.warning("Failed to auto-isolate video %s post-upload: %s", video_id, iso_err)
             else:
                 logger.warning("Upload failed for video %s: %s", video_id, result.error)
                 self.video_repo.mark_error(video_id=video_id, error_message=result.error or "Unknown failure")
@@ -132,3 +137,27 @@ class UploadService:
             logger.error("Exception during upload of video %s: %s", video_id, e)
             self.video_repo.mark_error(video_id=video_id, error_message=str(e))
             raise
+
+    def isolate_video_file(self, video_id: int, subfolder_name: str = "_posted") -> Path | None:
+        """
+        Physically isolates video into _posted/ subfolder and updates database metadata.
+        Returns the resolved new Path, or None if the record/file does not exist.
+        """
+        video_row = self.video_repo.get_by_id(video_id)
+        if not video_row or not video_row.get("file_path"):
+            logger.warning("Video %s not found in repository for isolation", video_id)
+            return None
+
+        src_path = Path(video_row["file_path"])
+        if not src_path.is_file():
+            logger.warning("Physical video file for video %s does not exist: %s", video_id, src_path)
+            return None
+
+        new_path = move_video_to_posted_folder(src_path, subfolder_name=subfolder_name)
+        self.video_repo.update_metadata(
+            video_id=video_id,
+            file_name=new_path.name,
+            file_path=str(new_path),
+        )
+        logger.info("Video %s successfully isolated to %s and repository updated", video_id, new_path)
+        return new_path

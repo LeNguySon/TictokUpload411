@@ -380,6 +380,8 @@ class VideoQueueTableWidget(TableWidget):
                 file_paths.append(str(fpath))
             elif fpath.is_dir():
                 for vf in fpath.rglob("*"):
+                    if any(part in ("_posted", ".posted") for part in vf.parts):
+                        continue
                     if vf.is_file() and vf.suffix.lower() in valid_extensions:
                         file_paths.append(str(vf))
 

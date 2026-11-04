@@ -35,6 +35,7 @@ class OrbitaLauncher:
     def __init__(self, executable_path: str | Path | None = None) -> None:
         self.executable_path = Path(executable_path) if executable_path else self._find_browser_executable()
         self._active_processes: dict[int, subprocess.Popen] = {}
+        self.vpn_bridges: dict[Any, Any] = {}
 
     def _find_browser_executable(self) -> Path:
         for p in self.DEFAULT_ORBITA_PATHS:
@@ -139,9 +140,35 @@ class OrbitaLauncher:
         }
         gologin["hardwareConcurrency"] = int(profile_data.get("cpu_cores", 8))
         gologin["deviceMemory"] = int(profile_data.get("memory_gb", 8)) * 1024
-        gologin["languages"] = "en-US,en"
-        gologin["langHeader"] = "en-US,en;q=0.9"
         gologin["doNotTrack"] = False
+
+        # Align Timezone, Geolocation, and Languages with proxy/profile geolocation
+        timezone_id = (
+            profile_data.get("timezone_id")
+            or (proxy_data.get("timezone") if proxy_data else None)
+            or "America/New_York"
+        )
+        gologin["timezone"] = {"id": timezone_id}
+
+        lat = profile_data.get("latitude") or (proxy_data.get("latitude") if proxy_data else None) or 40.7128
+        lon = profile_data.get("longitude") or (proxy_data.get("longitude") if proxy_data else None) or -74.0060
+        gologin["geoLocation"] = {
+            "latitude": float(lat),
+            "longitude": float(lon),
+            "accuracy": 10,
+        }
+
+        country = (profile_data.get("country") or (proxy_data.get("country") if proxy_data else None) or "US").upper()
+        if country == "US":
+            gologin["languages"] = "en-US,en"
+            gologin["langHeader"] = "en-US,en;q=0.9"
+        elif country == "VN":
+            gologin["languages"] = "vi-VN,vi,en-US,en"
+            gologin["langHeader"] = "vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7"
+        else:
+            lang_code = country.lower()
+            gologin["languages"] = f"en-{country},{lang_code},en"
+            gologin["langHeader"] = f"en-{country},{lang_code};q=0.9,en;q=0.8"
 
         # Proxy Configuration Injection
         if proxy_data and proxy_data.get("host") and proxy_data.get("port"):
@@ -207,11 +234,22 @@ class OrbitaLauncher:
         if proxy_uri:
             # Strip credentials if embedded in uri because chromium flag expects host:port
             clean_proxy = proxy_uri
+            proxy_host = None
             if "@" in proxy_uri:
                 scheme, rest = proxy_uri.split("://", 1)
                 _, host_port = rest.split("@", 1)
                 clean_proxy = f"{scheme}://{host_port}"
+                proxy_host = host_port.split(":")[0]
+            elif "://" in proxy_uri:
+                rest = proxy_uri.split("://", 1)[1]
+                proxy_host = rest.split(":")[0]
+            else:
+                proxy_host = proxy_uri.split(":")[0]
+
             args.append(f"--proxy-server={clean_proxy}")
+            if proxy_host:
+                args.append(f'--host-resolver-rules="MAP * 0.0.0.0 , EXCLUDE {proxy_host}"')
+            args.append("--enforce-webrtc-ip-permission-check")
 
         if user_agent:
             args.append(f"--user-agent={user_agent}")
@@ -233,6 +271,28 @@ class OrbitaLauncher:
         start_url: str = "https://www.tiktok.com",
     ) -> subprocess.Popen:
         """Launches the Orbita browser process asynchronously without blocking GUI thread."""
+        # WireGuard VPN Userspace Bridge integration: route via local SOCKS5 if configured
+        if profile_data.get("vpn_config") and not proxy_data:
+            try:
+                from src.infrastructure.vpn.vpn_bridge import UserspaceVpnBridge
+                from src.infrastructure.vpn.wireguard_manager import WireGuardConfig
+
+                wg_cfg = WireGuardConfig.from_conf(
+                    profile_data["vpn_config"],
+                    name=f"wg_{profile_data.get('id', 'default')}",
+                )
+                p_id_key = profile_data.get("id", "default")
+                bridge = UserspaceVpnBridge(
+                    profile_id=p_id_key,
+                    config=wg_cfg,
+                    mock_mode=True,
+                )
+                bridge.start()
+                self.vpn_bridges[p_id_key] = bridge
+                proxy_data = bridge.as_proxy_dict()
+            except Exception as ve:
+                logger.warning("Could not initialize VPN bridge: %s", ve)
+
         storage_dir = profile_data.get("storage_dir") or f"profiles/{profile_data.get('name', 'default')}"
         p_dir = self.prepare_profile_environment(storage_dir, profile_data, proxy_data)
 
@@ -295,6 +355,15 @@ class OrbitaLauncher:
                     closed = True
                 except Exception:
                     pass
+
+        # 3. Stop Userspace VPN Bridge if associated with this profile
+        if p_id is not None and p_id in self.vpn_bridges:
+            try:
+                bridge = self.vpn_bridges.pop(p_id)
+                bridge.stop()
+                closed = True
+            except Exception as e:
+                logger.warning("Error stopping VPN bridge for profile %s: %s", p_id, e)
 
         return closed
 
