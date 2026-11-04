@@ -22,3 +22,4 @@ Người dùng phản ánh hệ thống quản lý có nhiều dự án / nhiề
    - **Bảng 2 (Target Profiles Table)**:
      - Tự động đồng bộ và hiển thị tài khoản của tất cả các nhóm được chọn, có cột hiển thị rõ tên Dự Án.
    - **Zero GUI Freeze**: Chạy ngầm 100%, có thanh `ProgressBar` và nhãn hiển thị tiến trình mượt mà.
+
