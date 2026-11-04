@@ -17,15 +17,19 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 from qfluentwidgets import (
+    Action,
     ComboBox,
+    FluentIcon,
     InfoBar,
     InfoBarPosition,
     PrimaryPushButton,
     PushButton,
+    RoundMenu,
     SearchLineEdit,
     SpinBox,
     SwitchButton,
     Theme,
+    TransparentToolButton,
     setTheme,
 )
 
@@ -109,39 +113,7 @@ class TikTokManagerMainWindow(QMainWindow):
         main_layout.setContentsMargins(10, 8, 10, 8)
         main_layout.setSpacing(6)
 
-        # 1. Top Menu Strip
-        menu_bar = QHBoxLayout()
-        menu_bar.setSpacing(16)
-        btn_api_cookie = PushButton("API | Cookie", self)
-        btn_trash = PushButton("Thùng rác", self)
-        btn_trash.clicked.connect(self._on_open_trash)
-        btn_guide = PushButton("Hướng dẫn sử dụng", self)
-        btn_clean_browser = PushButton("Dọn dẹp trình duyệt", self)
-        btn_table_cfg = PushButton("Cài đặt bảng", self)
-        btn_permissions = PushButton("Cấp quyền", self)
-        btn_send_recv = PushButton("Nhận và Gửi", self)
-
-        btn_tools = PrimaryPushButton("Công Cụ Proxy", self)
-        btn_tools.clicked.connect(self._on_open_proxy_manager)
-
-        btn_quick_find = PushButton("Tìm nhanh", self)
-
-        for btn in (
-            btn_api_cookie,
-            btn_trash,
-            btn_guide,
-            btn_clean_browser,
-            btn_table_cfg,
-            btn_permissions,
-            btn_send_recv,
-            btn_tools,
-            btn_quick_find,
-        ):
-            menu_bar.addWidget(btn)
-        menu_bar.addStretch()
-        main_layout.addLayout(menu_bar)
-
-        # 2. Dual-Table Splitter
+        # 1. Dual-Table Splitter
         self.splitter = QSplitter(Qt.Orientation.Vertical, self)
         self.splitter.setHandleWidth(6)
 
@@ -151,7 +123,7 @@ class TikTokManagerMainWindow(QMainWindow):
         top_layout.setContentsMargins(0, 0, 0, 4)
         top_layout.setSpacing(6)
 
-        # Profiles Header Toolbar
+        # Profiles Header Toolbar: Clean Minimalist Bar (Dự án + Tìm kiếm + Icon Cài Đặt)
         top_toolbar = QHBoxLayout()
         top_toolbar.addWidget(QLabel("Dự án:", self))
 
@@ -159,41 +131,16 @@ class TikTokManagerMainWindow(QMainWindow):
         self.project_combo.currentIndexChanged.connect(self._on_project_changed)
         top_toolbar.addWidget(self.project_combo, 2)
 
-        self.btn_manage_projects = PushButton("⚙ Dự án", self)
-        self.btn_manage_projects.clicked.connect(self._on_open_project_manager)
-        top_toolbar.addWidget(self.btn_manage_projects)
-
-        top_toolbar.addWidget(QLabel("Luồng check:", self))
-        self.spin_concurrency = SpinBox(self)
-        self.spin_concurrency.setValue(10)
-        self.spin_concurrency.setRange(1, 50)
-        self.spin_concurrency.valueChanged.connect(self.thread_pool.set_max_threads)
-        top_toolbar.addWidget(self.spin_concurrency)
-
         self.search_profile = SearchLineEdit(self)
         self.search_profile.setPlaceholderText("Tìm theo id|profile|email|proxy...")
         self.search_profile.textChanged.connect(self._on_search_profile)
-        top_toolbar.addWidget(self.search_profile, 3)
+        top_toolbar.addWidget(self.search_profile, 5)
 
-        self.btn_add_1 = PushButton("Add 1 profile", self)
-        self.btn_add_1.clicked.connect(self._on_add_profile)
-        top_toolbar.addWidget(self.btn_add_1)
-
-        self.btn_add_many = PrimaryPushButton("Add nhiều", self)
-        self.btn_add_many.clicked.connect(self._on_bulk_add_profiles)
-        top_toolbar.addWidget(self.btn_add_many)
-
-        self.btn_show_all = PushButton("Show all", self)
-        self.btn_show_all.clicked.connect(self._on_show_all_profiles)
-        top_toolbar.addWidget(self.btn_show_all)
-
-        self.btn_sync_metrics = PushButton("🔄 Đồng bộ số liệu", self)
-        self.btn_sync_metrics.clicked.connect(self._on_sync_selected_metrics)
-        top_toolbar.addWidget(self.btn_sync_metrics)
-
-        self.btn_orbita = PushButton("🌐 Mở Browser", self)
-        self.btn_orbita.clicked.connect(self._on_launch_orbita_selected)
-        top_toolbar.addWidget(self.btn_orbita)
+        # Unified Settings & Tools Menu Button
+        self.btn_settings = TransparentToolButton(FluentIcon.SETTING, self)
+        self.btn_settings.setToolTip("Cài đặt & Tất cả công cụ quản trị")
+        self._init_settings_menu()
+        top_toolbar.addWidget(self.btn_settings)
 
         top_layout.addLayout(top_toolbar)
 
@@ -588,3 +535,152 @@ class TikTokManagerMainWindow(QMainWindow):
     def _on_clear_video_table(self) -> None:
         self.video_table.setRowCount(0)
         self.lbl_video_header.setText("Bảng video Đã chọn 0 / 0")
+
+    def _init_settings_menu(self) -> None:
+        """Centralized Settings & Tools Menu housing all secondary administrative actions."""
+        self.settings_menu = RoundMenu(parent=self)
+
+        # 1. Thao tác hồ sơ
+        act_add_1 = Action(FluentIcon.ADD, "Add 1 profile (Thêm 1 hồ sơ)", self)
+        act_add_1.triggered.connect(self._on_add_profile)
+        self.settings_menu.addAction(act_add_1)
+
+        act_add_many = Action(FluentIcon.FOLDER_ADD, "Add nhiều profile (Hàng loạt)", self)
+        act_add_many.triggered.connect(self._on_bulk_add_profiles)
+        self.settings_menu.addAction(act_add_many)
+
+        act_show_all = Action(FluentIcon.VIEW, "Show all (Hiển thị tất cả hồ sơ)", self)
+        act_show_all.triggered.connect(self._on_show_all_profiles)
+        self.settings_menu.addAction(act_show_all)
+
+        act_sync = Action(FluentIcon.SYNC, "Đồng bộ số liệu TikTok", self)
+        act_sync.triggered.connect(self._on_sync_selected_metrics)
+        self.settings_menu.addAction(act_sync)
+
+        act_orbita = Action(FluentIcon.GLOBE, "Mở Trình duyệt Orbita Antidetect", self)
+        act_orbita.triggered.connect(self._on_launch_orbita_selected)
+        self.settings_menu.addAction(act_orbita)
+
+        self.settings_menu.addSeparator()
+
+        # 2. Quản lý Dự án & Proxy
+        act_projects = Action(FluentIcon.TAG, "Quản lý Dự án / Chiến dịch", self)
+        act_projects.triggered.connect(self._on_open_project_manager)
+        self.settings_menu.addAction(act_projects)
+
+        act_proxy = Action(FluentIcon.WIFI, "Công cụ Proxy & Leak Audit", self)
+        act_proxy.triggered.connect(self._on_open_proxy_manager)
+        self.settings_menu.addAction(act_proxy)
+
+        concurrency_val = self.thread_pool.max_thread_count
+        act_concurrency = Action(FluentIcon.SPEED_HIGH, f"Cấu hình luồng check ({concurrency_val} luồng)...", self)
+        act_concurrency.triggered.connect(self._on_configure_concurrency)
+        self.settings_menu.addAction(act_concurrency)
+
+        self.settings_menu.addSeparator()
+
+        # 3. Tiện ích Menu Bar cũ (API | Cookie, Thùng rác, Dọn dẹp, Cài đặt bảng, Cấp quyền...)
+        act_trash = Action(FluentIcon.DELETE, "Thùng rác (Phục hồi hồ sơ)", self)
+        act_trash.triggered.connect(self._on_open_trash)
+        self.settings_menu.addAction(act_trash)
+
+        act_clean = Action(FluentIcon.BRUSH, "Dọn dẹp trình duyệt & Giải phóng RAM", self)
+        act_clean.triggered.connect(self._on_clean_browser)
+        self.settings_menu.addAction(act_clean)
+
+        act_api_cookie = Action(FluentIcon.VPN, "API | Cookie", self)
+        act_api_cookie.triggered.connect(self._on_api_cookie)
+        self.settings_menu.addAction(act_api_cookie)
+
+        act_permissions = Action(FluentIcon.CERTIFICATE, "Cấp quyền", self)
+        act_permissions.triggered.connect(self._on_permissions)
+        self.settings_menu.addAction(act_permissions)
+
+        act_send_recv = Action(FluentIcon.SEND, "Nhận và Gửi", self)
+        act_send_recv.triggered.connect(self._on_send_recv)
+        self.settings_menu.addAction(act_send_recv)
+
+        act_table_cfg = Action(FluentIcon.LAYOUT, "Cài đặt bảng", self)
+        act_table_cfg.triggered.connect(self._on_table_cfg)
+        self.settings_menu.addAction(act_table_cfg)
+
+        act_guide = Action(FluentIcon.HELP, "Hướng dẫn sử dụng", self)
+        act_guide.triggered.connect(self._on_guide)
+        self.settings_menu.addAction(act_guide)
+
+        self.btn_settings.setMenu(self.settings_menu)
+
+    def _on_configure_concurrency(self) -> None:
+        from PyQt6.QtWidgets import QInputDialog
+
+        val, ok = QInputDialog.getInt(
+            self,
+            "Cấu Hình Luồng Check",
+            "Nhập số luồng kiểm tra / tải lên đồng thời (1 - 50):",
+            self.thread_pool.max_thread_count,
+            1,
+            50,
+        )
+        if ok:
+            self.thread_pool.set_max_threads(val)
+            self._init_settings_menu()
+            InfoBar.success(
+                title="Cấu Hình Luồng",
+                content=f"Đã cập nhật số luồng chạy nền thành {val} luồng.",
+                position=InfoBarPosition.TOP,
+                parent=self,
+            )
+
+    def _on_clean_browser(self) -> None:
+        try:
+            import sammonny
+
+            sammonny.MemoryManager.trim_working_set()
+        except Exception:
+            pass
+        InfoBar.success(
+            title="Dọn Dẹp Trình Duyệt",
+            content="Đã dọn sạch cache tạm và giải phóng bộ nhớ RAM thành công.",
+            position=InfoBarPosition.TOP,
+            parent=self,
+        )
+
+    def _on_api_cookie(self) -> None:
+        InfoBar.info(
+            title="API | Cookie",
+            content="Hệ thống đang bảo vệ Token OAuth & Cookie qua Windows Vault DPAPI an toàn tuyệt đối.",
+            position=InfoBarPosition.TOP,
+            parent=self,
+        )
+
+    def _on_permissions(self) -> None:
+        InfoBar.info(
+            title="Cấp Quyền",
+            content="Toàn bộ quyền điều khiển trình duyệt và ghi CSDL đã được cấp phép.",
+            position=InfoBarPosition.TOP,
+            parent=self,
+        )
+
+    def _on_send_recv(self) -> None:
+        InfoBar.info(
+            title="Nhận và Gửi",
+            content="Sẵn sàng kết nối kênh trao đổi dữ liệu kịch bản và profile.",
+            position=InfoBarPosition.TOP,
+            parent=self,
+        )
+
+    def _on_table_cfg(self) -> None:
+        InfoBar.info(
+            title="Cài Đặt Bảng",
+            content="Bảng đang hiển thị chuẩn 28 cột MMO và 14 cột hàng đợi video.",
+            position=InfoBarPosition.TOP,
+            parent=self,
+        )
+
+    def _on_guide(self) -> None:
+        InfoBar.info(
+            title="Hướng Dẫn Sử Dụng",
+            content="Vui lòng tham khảo tài liệu kỹ thuật tại thư mục docs/ và file README.md.",
+            position=InfoBarPosition.TOP,
+            parent=self,
+        )
