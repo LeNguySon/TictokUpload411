@@ -564,7 +564,11 @@ class OrbitaLauncher:
         return False
 
     def _scan_psutil_for_profile(self, uuid_val: str | None = None, storage_dir: str | None = None) -> bool:
-        """Inspects running OS processes for chrome.exe / orbita.exe running this profile."""
+        """Inspects running OS processes for chrome.exe / orbita.exe running this profile.
+        Caches scanned commandlines for 2.5s to prevent GUI/CPU starvation during batch checks.
+        """
+        import time
+
         try:
             import psutil
         except ImportError:
@@ -576,16 +580,24 @@ class OrbitaLauncher:
         uuid_search = uuid_val.lower() if uuid_val and len(uuid_val) > 8 else None
         dir_search = str(Path(storage_dir).resolve()).lower() if storage_dir else None
 
-        for proc in psutil.process_iter(["name", "cmdline"]):
-            try:
-                name = (proc.info.get("name") or "").lower()
-                if "chrome" not in name and "orbita" not in name:
+        now = time.monotonic()
+        if not hasattr(self, "_cached_scan_time") or (now - self._cached_scan_time > 2.5):
+            cmdlines: list[str] = []
+            for proc in psutil.process_iter(["name", "cmdline"]):
+                try:
+                    name = (proc.info.get("name") or "").lower()
+                    if "chrome" not in name and "orbita" not in name:
+                        continue
+                    cmdline = " ".join(proc.info.get("cmdline") or []).lower()
+                    cmdlines.append(cmdline)
+                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                     continue
-                cmdline = " ".join(proc.info.get("cmdline") or []).lower()
-                if uuid_search and uuid_search in cmdline:
-                    return True
-                if dir_search and dir_search in cmdline:
-                    return True
-            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-                continue
+            self._cached_running_cmdlines = cmdlines
+            self._cached_scan_time = now
+
+        for cmdline in getattr(self, "_cached_running_cmdlines", []):
+            if uuid_search and uuid_search in cmdline:
+                return True
+            if dir_search and dir_search in cmdline:
+                return True
         return False

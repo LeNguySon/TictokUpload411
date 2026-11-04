@@ -36,3 +36,4 @@
 - Tuyệt đối không gọi bare `requests.get(...)` mà không có proxy routing cho các tác vụ TikTok Creator/Passport. Luôn dùng `GoLoginTikTokClient`.
 - Khi cập nhật trạng thái `appealed` cho video, luôn cập nhật đồng thời cả hai bảng `violateVideos` và `accountAppeals` để đảm bảo tính toàn vẹn dữ liệu.
 - Giữ vững nguyên tắc AgentShield: Cookie và mật khẩu proxy luôn được mã hóa/giải mã qua DPAPI, không bao giờ in plaintext vào log.
+

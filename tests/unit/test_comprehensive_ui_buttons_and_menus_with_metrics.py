@@ -138,6 +138,7 @@ def test_toolbar_buttons_and_filtering_metrics(populated_db, app_instance):
     with (
         patch("src.presentation.views.main_window.setTheme"),
         patch("src.presentation.views.main_window.MetricsSyncWorker"),
+        patch("src.presentation.views.main_window.SamMonnyDaemonSupervisor"),
     ):
         win = TikTokManagerMainWindow(db_path=db_file)
 
@@ -200,6 +201,8 @@ def test_toolbar_buttons_and_filtering_metrics(populated_db, app_instance):
         assert win.video_table.rowCount() == 0
 
         win.scheduler_timer.stop()
+        if hasattr(win, "profile_status_timer") and win.profile_status_timer.isActive():
+            win.profile_status_timer.stop()
         win.profile_table.clearSelection()
         win.video_table.clearSelection()
         win.close()
@@ -218,6 +221,7 @@ def test_profile_context_menu_actions_and_database_metrics(populated_db, app_ins
     with (
         patch("src.presentation.views.main_window.setTheme"),
         patch("src.presentation.views.main_window.MetricsSyncWorker"),
+        patch("src.presentation.views.main_window.SamMonnyDaemonSupervisor"),
     ):
         win = TikTokManagerMainWindow(db_path=db_file)
         win.profile_table.selectRow(0)
@@ -247,7 +251,10 @@ def test_profile_context_menu_actions_and_database_metrics(populated_db, app_ins
 
         # 5. act_add_video (Add video for profile)
         sample_vid = populated_db["videos"][0]
-        with patch("PyQt6.QtWidgets.QFileDialog.getOpenFileNames", return_value=([str(sample_vid)], "Video Files")):
+        with patch(
+            "src.presentation.views.main_window.QFileDialog.getOpenFileNames",
+            return_value=([str(sample_vid)], "Video Files"),
+        ):
             with patch.object(win.thread_pool, "dispatch") as mock_dispatch:
 
                 def run_worker_sync(worker):
@@ -317,6 +324,8 @@ def test_profile_context_menu_actions_and_database_metrics(populated_db, app_ins
             assert win.profile_table.rowCount() == 2
 
         win.scheduler_timer.stop()
+        if hasattr(win, "profile_status_timer") and win.profile_status_timer.isActive():
+            win.profile_status_timer.stop()
         win.profile_table.clearSelection()
         win.video_table.clearSelection()
         win.close()
@@ -334,6 +343,7 @@ def test_video_queue_context_menu_actions_and_metrics(populated_db, app_instance
     with (
         patch("src.presentation.views.main_window.setTheme"),
         patch("src.presentation.views.main_window.MetricsSyncWorker"),
+        patch("src.presentation.views.main_window.SamMonnyDaemonSupervisor"),
     ):
         win = TikTokManagerMainWindow(db_path=db_file)
         assert win.video_table.rowCount() == 3
@@ -386,6 +396,8 @@ def test_video_queue_context_menu_actions_and_metrics(populated_db, app_instance
             assert win.video_repo.get_by_id(vid_id) is None
 
         win.scheduler_timer.stop()
+        if hasattr(win, "profile_status_timer") and win.profile_status_timer.isActive():
+            win.profile_status_timer.stop()
         win.profile_table.clearSelection()
         win.video_table.clearSelection()
         win.close()
@@ -403,6 +415,7 @@ def test_settings_menu_actions_and_system_metrics(populated_db, app_instance):
     with (
         patch("src.presentation.views.main_window.setTheme"),
         patch("src.presentation.views.main_window.MetricsSyncWorker"),
+        patch("src.presentation.views.main_window.SamMonnyDaemonSupervisor"),
     ):
         win = TikTokManagerMainWindow(db_path=db_file)
 
@@ -438,7 +451,7 @@ def test_settings_menu_actions_and_system_metrics(populated_db, app_instance):
             win._on_launch_orbita_selected()
 
         # 6. act_gologin_sync (Sync GoLogin profiles)
-        with patch.object(win.thread_pool, "dispatch") as mock_dispatch:
+        with patch.object(win.gologin_sync_service, "sync_from_local_gologin", return_value=5):
             win._on_sync_gologin_profiles()
 
         # 7. act_projects (Project Manager)
@@ -475,10 +488,14 @@ def test_settings_menu_actions_and_system_metrics(populated_db, app_instance):
             win._on_open_trash()
 
         # 15. act_clean (Clean browser cache & RAM)
-        with patch(
-            "src.infrastructure.browser.process_supervisor.BrowserProcessSupervisor.trim_working_set",
-            return_value={"freed_mb": 12.5},
+        with (
+            patch(
+                "src.infrastructure.browser.process_supervisor.BrowserProcessSupervisor.trim_working_set",
+                return_value={"freed_mb": 12.5},
+            ),
+            patch("src.presentation.views.main_window.MessageBox") as mock_mb_clean,
         ):
+            mock_mb_clean.return_value.exec.return_value = True
             win._on_clean_browser()
 
         # 16. act_guide (User Guide Dialog)
@@ -492,6 +509,8 @@ def test_settings_menu_actions_and_system_metrics(populated_db, app_instance):
             win._on_batch_channel_update([1, 2])
 
         win.scheduler_timer.stop()
+        if hasattr(win, "profile_status_timer") and win.profile_status_timer.isActive():
+            win.profile_status_timer.stop()
         win.profile_table.clearSelection()
         win.video_table.clearSelection()
         win.close()

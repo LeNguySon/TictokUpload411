@@ -386,6 +386,12 @@ class UploadService:
         self,
         video_id: int,
         profile_id: int,
+        privacy: str | None = None,
+        allow_comment: bool | None = None,
+        allow_duet: bool | None = None,
+        allow_stitch: bool | None = None,
+        allow_hd: bool | None = None,
+        is_ai_generated: bool | None = None,
         schedule_time: str | None = None,
         progress_callback: Callable[[int, int, float], None] | None = None,
         cancel_token: Callable[[], bool] | None = None,
@@ -395,6 +401,7 @@ class UploadService:
         and executes publication through the SamMonny adapter under a profile mutex.
         If schedule_time is provided (or preset on video), it passes it to the adapter
         for native TikTok Studio Cloud scheduling.
+        Supports custom privacy, interactive flags (comment, duet, stitch, hd), and AI content declaration.
         """
         lock = get_profile_upload_lock(profile_id)
         with lock:
@@ -422,16 +429,24 @@ class UploadService:
                 tags = [w for w in clamped_title.split() if w.startswith("#")]
                 effective_schedule = schedule_time if schedule_time is not None else video_row.get("schedule_time")
 
+                eff_privacy = privacy or video_row.get("privacy") or "PUBLIC_TO_EVERYONE"
+                eff_comment = allow_comment if allow_comment is not None else video_row.get("allow_comment", True)
+                eff_duet = allow_duet if allow_duet is not None else video_row.get("allow_duet", True)
+                eff_stitch = allow_stitch if allow_stitch is not None else video_row.get("allow_stitch", True)
+                eff_hd = allow_hd if allow_hd is not None else video_row.get("allow_hd", True)
+                eff_ai = is_ai_generated if is_ai_generated is not None else video_row.get("is_ai_generated", False)
+
                 result = self.tiktok_adapter.upload_video(
                     profile_id=profile_id,
                     video_path=video_row["file_path"],
                     title=clamped_title,
                     tags=tags,
-                    privacy="PUBLIC_TO_EVERYONE",
-                    allow_comment=True,
-                    allow_duet=True,
-                    allow_stitch=True,
-                    allow_hd=True,
+                    privacy=eff_privacy,
+                    allow_comment=eff_comment,
+                    allow_duet=eff_duet,
+                    allow_stitch=eff_stitch,
+                    allow_hd=eff_hd,
+                    is_ai_generated=eff_ai,
                     schedule_time=effective_schedule,
                     progress_callback=progress_callback,
                     cancel_token=cancel_token,

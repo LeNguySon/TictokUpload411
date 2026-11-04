@@ -44,15 +44,26 @@ def clamp_caption(caption: str, max_chars: int = 2200) -> str:
     if len(ht_suffix) > 400:
         ht_suffix = " ".join(hashtags[:10])
 
-    allowed_body_len = max(50, max_chars - len(ht_suffix) - 5) if ht_suffix else max_chars
+    # If hashtags themselves exceed max_chars, prune hashtags from the end
+    while ht_suffix and len(ht_suffix) >= max_chars and hashtags:
+        hashtags.pop()
+        ht_suffix = " ".join(hashtags)
+
+    allowed_body_len = max_chars - (len(ht_suffix) + 1 if ht_suffix else 0)
     body_text = " ".join(non_hashtags)
 
-    if len(body_text) > allowed_body_len:
-        truncated = body_text[:allowed_body_len]
-        if " " in truncated:
-            body_text = truncated.rsplit(" ", 1)[0] + "..."
-        else:
-            body_text = truncated + "..."
+    if allowed_body_len > 0:
+        if len(body_text) > allowed_body_len:
+            budget = max(0, allowed_body_len - 3)
+            truncated = body_text[:budget]
+            if " " in truncated:
+                body_text = truncated.rsplit(" ", 1)[0] + "..."
+            elif truncated:
+                body_text = truncated + "..."
+            else:
+                body_text = "..." if allowed_body_len >= 3 else ""
+    else:
+        body_text = ""
 
     result = f"{body_text} {ht_suffix}".strip() if ht_suffix else body_text.strip()
     if len(result) > max_chars:

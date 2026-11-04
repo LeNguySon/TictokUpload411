@@ -27,14 +27,86 @@ from src.infrastructure.credentials.windows_vault import WindowsCredentialVault
 logger = logging.getLogger(__name__)
 
 
-def _default_session_factory(profile_id: str) -> AntidetectSession:
-    """Default AntidetectSession factory connecting via SamMonny Engine to Orbita profiles."""
+class LazyActiveSession:
+    """
+    Fluent wrapper around AntidetectSession that lazily starts the browser profile
+    and connects the CDP client on first access to cdp, actions, or navigate.
+    Ensures safe shutdown and resource cleanup via close().
+    """
+
+    def __init__(self, session: AntidetectSession, headless: bool = True) -> None:
+        self._session = session
+        self._headless = headless
+
+    def _ensure_active(self) -> None:
+        if not getattr(self._session, "_cdp", None):
+            logger.info(
+                "Lazy-starting AntidetectSession for profile %s (headless=%s)...",
+                getattr(self._session, "profile_id", "?"),
+                self._headless,
+            )
+            self._session.start(headless=self._headless)
+
+    @property
+    def cdp(self) -> Any:
+        self._ensure_active()
+        return self._session.cdp
+
+    @property
+    def actions(self) -> Any:
+        self._ensure_active()
+        return self._session.actions
+
+    def navigate(self, url: str) -> Any:
+        self._ensure_active()
+        return self._session.navigate(url)
+
+    def goto(self, url: str) -> Any:
+        self._ensure_active()
+        return self._session.goto(url)
+
+    def close(self) -> None:
+        try:
+            self._session.close()
+        except Exception as e:
+            logger.warning("Error closing AntidetectSession %s: %s", getattr(self._session, "profile_id", "?"), e)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._session, name)
+
+    def __repr__(self) -> str:
+        return f"<LazyActiveSession({getattr(self._session, 'profile_id', '?')})>"
+
+
+def _default_session_factory(
+    profile_id: str | int,
+    db_path: Path | str | None = None,
+    lazy: bool = True,
+) -> AntidetectSession:
+    """Default AntidetectSession factory connecting via SamMonny Engine to Orbita profiles.
+    Resolves integer database profile_id to authentic profile UUID if necessary.
+    Returns LazyActiveSession wrapper so that CDP is initiated upon first demand.
+    """
     from sammonny.engine.core import AntidetectEngine
 
     from src.infrastructure.browser.orbita_launcher import OrbitaLauncher
+    from src.infrastructure.database.repositories.profile_repository import ProfileRepository
+
+    target_profile_uuid = str(profile_id)
+    if str(profile_id).isdigit():
+        try:
+            repo = ProfileRepository(db_path=db_path)
+            prof = repo.get_by_id(int(profile_id))
+            if prof and prof.get("uuid"):
+                target_profile_uuid = prof["uuid"]
+        except Exception as e:
+            logger.warning("Could not resolve profile_id %s to UUID: %s", profile_id, e)
 
     engine = AntidetectEngine(profiles_dir=OrbitaLauncher.DAEMON_PROFILES_DIR)
-    return engine.session(profile_id=str(profile_id))
+    raw_sess = engine.session(profile_id=target_profile_uuid)
+    if lazy:
+        return LazyActiveSession(raw_sess, headless=True)  # type: ignore[return-value]
+    return raw_sess
 
 
 class SamMonnyTikTokAdapter:
@@ -50,10 +122,15 @@ class SamMonnyTikTokAdapter:
         direct_client: TikTokDirectPostClient | None = None,
         session_factory: Callable[[str], AntidetectSession] | None = None,
         preferred_mode: UploadMode | None = None,
+        db_path: Path | str | None = None,
     ) -> None:
         self.vault = vault or WindowsCredentialVault()
         self.direct_client = direct_client or TikTokDirectPostClient()
-        self.session_factory = session_factory or _default_session_factory
+        self.db_path = db_path
+        if session_factory:
+            self.session_factory = session_factory
+        else:
+            self.session_factory = lambda pid: _default_session_factory(pid, db_path=self.db_path)
         self.preferred_mode = preferred_mode
 
         self.publisher = TikTokPublisherAdapter(
@@ -126,12 +203,38 @@ class SamMonnyTikTokAdapter:
             self.publisher.preferred_mode,
         )
 
-        return self.publisher.upload(
-            draft=draft,
-            account_id=str(profile_id),
-            progress_callback=progress_callback,
-            cancel_token=cancel_token,
-        )
+        active_session: Any = None
+
+        def tracking_session_factory(pid: str) -> Any:
+            nonlocal active_session
+            s = self.session_factory(pid)
+            active_session = s
+            return s
+
+        orig_sf = self.publisher.session_factory
+        if orig_sf:
+            self.publisher.session_factory = tracking_session_factory
+
+        try:
+            return self.publisher.upload(
+                draft=draft,
+                account_id=str(profile_id),
+                progress_callback=progress_callback,
+                cancel_token=cancel_token,
+            )
+        finally:
+            self.publisher.session_factory = orig_sf
+            if active_session and hasattr(active_session, "close"):
+                try:
+                    active_session.close()
+                except Exception as ce:
+                    logger.warning("Error closing session after upload: %s", ce)
+            try:
+                from sammonny.system.memory import MemoryManager
+
+                MemoryManager.trim_working_set()
+            except Exception:
+                pass
 
     def fetch_creator_metrics(self, profile_id: int | str) -> dict[str, Any]:
         """
