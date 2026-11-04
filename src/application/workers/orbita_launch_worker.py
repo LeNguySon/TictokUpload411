@@ -129,6 +129,7 @@ class OrbitaLaunchWorker(QRunnable):
                             proxy_data=proxy,
                             headless=False,
                             sync=False,
+                            db_profile_id=profile_id,
                         )
                     except Exception as sdk_err:
                         logger.warning(

@@ -28,3 +28,4 @@
 ### 3. Concurrency & UI Hygiene Invariants
 - Scheduled timers (`self.scheduler_timer`) in `MainWindow` must be wrapped in `try...except` and stopped in `closeEvent` to prevent event-loop callback crashes against deleted temporary databases.
 - `AppSignalBus` should be disconnected on window close and reset in `conftest.py` between test suites to eliminate cross-suite slot contamination.
+

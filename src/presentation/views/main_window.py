@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from PyQt6.QtCore import QPoint, QSettings, QSize, Qt, QTimer, QUrl
-from PyQt6.QtGui import QDesktopServices, QKeySequence, QShortcut
+from PyQt6.QtGui import QColor, QDesktopServices, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QCheckBox,
     QFileDialog,
@@ -18,6 +18,7 @@ from PyQt6.QtWidgets import (
     QLabel,
     QMainWindow,
     QSplitter,
+    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -65,6 +66,7 @@ from src.presentation.dialogs.assign_proxy_dialog import AssignProxyDialog
 from src.presentation.dialogs.batch_folder_upload_dialog import BatchFolderUploadDialog
 from src.presentation.dialogs.bulk_add_profile_dialog import BulkAddProfileDialog
 from src.presentation.dialogs.bulk_edit_profile_dialog import BulkEditProfileDialog
+from src.presentation.dialogs.channel_radar_dialog import ChannelRadarDialog
 from src.presentation.dialogs.permissions_dialog import PermissionsDialog
 from src.presentation.dialogs.project_dialog import ProjectManagerDialog
 from src.presentation.dialogs.proxy_dialog import ProxyManagerDialog
@@ -170,6 +172,12 @@ class TikTokManagerMainWindow(QMainWindow):
         self.scheduler_timer.setInterval(15000)
         self.scheduler_timer.timeout.connect(self._check_scheduled_queue)
         self.scheduler_timer.start()
+
+        # Real-time Profile Runtime Status Sync Timer (Every 3s)
+        self.profile_status_timer = QTimer(self)
+        self.profile_status_timer.setInterval(3000)
+        self.profile_status_timer.timeout.connect(self._sync_active_profile_statuses)
+        self.profile_status_timer.start()
 
     def _init_ui(self) -> None:
         central_widget = QWidget(self)
@@ -356,6 +364,7 @@ class TikTokManagerMainWindow(QMainWindow):
         self.profile_table.rotate_proxy_requested.connect(self._on_rotate_proxy_selected)
         self.profile_table.check_proxy_requested.connect(self._on_check_proxy_selected)
         self.profile_table.batch_channel_update_requested.connect(self._on_batch_channel_update)
+        self.profile_table.channel_radar_requested.connect(self._on_open_channel_radar)
 
         # Context Menu & Selection Events on Video Table
         self.video_table.upload_now_requested.connect(self._on_upload_single_video)
@@ -396,6 +405,87 @@ class TikTokManagerMainWindow(QMainWindow):
                 self.profile_repo.update(p_id, status="stopped")
                 p["status"] = "stopped"
         self.profile_table.load_profiles(profiles)
+
+    def _sync_active_profile_statuses(self) -> None:
+        """
+        Periodically checks running state of profiles to detect external/manual close or launch.
+        Only updates rows whose status has actually changed to prevent UI redraw flickering.
+        """
+        try:
+            total_rows = self.profile_table.rowCount()
+            if total_rows == 0:
+                return
+
+            for row in range(total_rows):
+                stt_item = self.profile_table.item(row, 0)
+                if not stt_item:
+                    continue
+                prof = stt_item.data(Qt.ItemDataRole.UserRole)
+                if not isinstance(prof, dict):
+                    continue
+
+                p_id = prof.get("id")
+                if not p_id:
+                    continue
+
+                current_status = prof.get("status", "stopped")
+                is_running = self.orbita_launcher.is_profile_running(prof)
+
+                if is_running and current_status != "running":
+                    self.profile_repo.update(p_id, status="running")
+                    prof["status"] = "running"
+                    self._update_profile_status_cell(row, "running")
+                elif not is_running and current_status == "running":
+                    self.profile_repo.update(p_id, status="stopped")
+                    prof["status"] = "stopped"
+                    self._update_profile_status_cell(row, "stopped")
+                    # Trigger passive cookie inspection in background
+                    try:
+                        worker = MetricsSyncWorker(
+                            profile_ids=[p_id],
+                            profile_service=self.profile_service,
+                            signal_bus=self.signal_bus,
+                        )
+                        self.thread_pool.dispatch(worker)
+                    except Exception as err:
+                        logger.debug("Failed dispatching passive sync on watcher close: %s", err)
+        except Exception as e:
+            logger.debug("Error in _sync_active_profile_statuses: %s", e)
+
+    def _update_profile_status_cell(self, row: int, status: str) -> None:
+        item = self.profile_table.item(row, 12)
+        if not item:
+            item = QTableWidgetItem(status)
+            item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.profile_table.setItem(row, 12, item)
+
+        item.setText(status)
+        item.setToolTip(f"Trạng thái hoạt động: {status}")
+        if status == "running":
+            item.setForeground(QColor("#0078D4"))
+            font = item.font()
+            font.setBold(True)
+            item.setFont(font)
+        elif status == "LIVE":
+            item.setForeground(QColor("#107C41"))
+            font = item.font()
+            font.setBold(False)
+            item.setFont(font)
+        elif status == "DIE":
+            item.setForeground(QColor("#D83B01"))
+            font = item.font()
+            font.setBold(False)
+            item.setFont(font)
+        elif status == "CHECKPOINT":
+            item.setForeground(QColor("#CA5010"))
+            font = item.font()
+            font.setBold(False)
+            item.setFont(font)
+        elif status == "stopped":
+            item.setForeground(QColor("#605E5C"))
+            font = item.font()
+            font.setBold(False)
+            item.setFont(font)
 
     def refresh_videos(self) -> None:
         project_id = self.project_combo.currentData()
@@ -497,6 +587,10 @@ class TikTokManagerMainWindow(QMainWindow):
         act_send_recv = Action(FluentIcon.SEND, "Nhận và Gửi (Sao lưu & Khôi phục CSDL)", self)
         act_send_recv.triggered.connect(self._on_send_recv)
         self.settings_menu.addAction(act_send_recv)
+
+        act_radar = Action(FluentIcon.SPEED_HIGH, "Radar Đánh Giá Kênh & Cảnh Báo...", self)
+        act_radar.triggered.connect(lambda: self._on_open_channel_radar())
+        self.settings_menu.addAction(act_radar)
 
         self.settings_menu.addSeparator()
 
@@ -1164,6 +1258,29 @@ class TikTokManagerMainWindow(QMainWindow):
         )
         dlg.exec()
 
+    def _on_open_channel_radar(self, profile_id: int | None = None) -> None:
+        target_id = profile_id
+        if target_id is None or target_id <= 0:
+            selected = self.profile_table.get_selected_profile_ids()
+            if selected:
+                target_id = selected[0]
+            else:
+                InfoBar.warning(
+                    title="Chưa Chọn Hồ Sơ",
+                    content="Vui lòng chọn ít nhất một hồ sơ TikTok để xem Radar sức khỏe kênh.",
+                    position=InfoBarPosition.TOP,
+                    parent=self,
+                )
+                return
+
+        dlg = ChannelRadarDialog(
+            profile_id=target_id,
+            profile_repo=self.profile_repo,
+            db_path=self.db_path,
+            parent=self,
+        )
+        dlg.exec()
+
     def _on_edit_profile(self, profile_id: int) -> None:
         p = self.profile_repo.get_by_id(profile_id)
         if not p:
@@ -1820,6 +1937,8 @@ class TikTokManagerMainWindow(QMainWindow):
         try:
             if hasattr(self, "scheduler_timer") and self.scheduler_timer.isActive():
                 self.scheduler_timer.stop()
+            if hasattr(self, "profile_status_timer") and self.profile_status_timer.isActive():
+                self.profile_status_timer.stop()
         except Exception:
             pass
 

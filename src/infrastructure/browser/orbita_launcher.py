@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import shutil
+import socket
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -14,6 +15,16 @@ from typing import Any
 from src.infrastructure.browser.process_supervisor import BrowserProcessSupervisor
 
 logger = logging.getLogger(__name__)
+
+
+def is_port_open(port: int, host: str = "127.0.0.1", timeout: float = 0.1) -> bool:
+    """Ultra-fast TCP connect test (sub-millisecond) to verify remote debugging port."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(timeout)
+            return s.connect_ex((host, port)) == 0
+    except Exception:
+        return False
 
 
 class OrbitaLauncher:
@@ -38,6 +49,7 @@ class OrbitaLauncher:
         self.executable_path = Path(executable_path) if executable_path else self._find_browser_executable()
         self._active_processes: dict[int, subprocess.Popen] = {}
         self._active_profile_dirs: dict[int, Path] = {}
+        self._active_sdk_sessions: dict[Any, str] = {}
         self.vpn_bridges: dict[Any, Any] = {}
         self.supervisor = BrowserProcessSupervisor()
 
@@ -343,7 +355,13 @@ class OrbitaLauncher:
             uuid_val = profile_data.get("uuid")
 
         closed = False
-        # 1. Stop via GoLogin SDK if UUID available
+        # 1. Clean up active SDK tracking
+        if p_id is not None:
+            self._active_sdk_sessions.pop(p_id, None)
+        if uuid_val:
+            self._active_sdk_sessions.pop(str(uuid_val), None)
+
+        # 2. Stop via GoLogin SDK if UUID available
         if uuid_val:
             try:
                 self.stop_via_gologin_sdk(str(uuid_val))
@@ -433,6 +451,7 @@ class OrbitaLauncher:
         headless: bool = False,
         sync: bool = False,
         port: int = 36912,
+        db_profile_id: int | None = None,
     ) -> str:
         """
         Launches profile through SamMonny GoLogin SDK compatibility layer.
@@ -447,10 +466,15 @@ class OrbitaLauncher:
         gl = GoLogin({"profile_id": profile_id, "port": port, "sync": sync, "headless": headless})
         debugger_address = gl.start()
         logger.info("GoLogin SDK launched profile %s at debugger address %s", profile_id, debugger_address)
+        if debugger_address:
+            self._active_sdk_sessions[str(profile_id)] = str(debugger_address)
+            if db_profile_id is not None:
+                self._active_sdk_sessions[db_profile_id] = str(debugger_address)
         return debugger_address
 
     def stop_via_gologin_sdk(self, profile_id: str, port: int = 36912) -> bool:
         """Stops profile session through SamMonny GoLogin SDK."""
+        self._active_sdk_sessions.pop(str(profile_id), None)
         from sammonny.gologin.gologin import GoLogin
 
         gl = GoLogin({"profile_id": profile_id, "port": port})
@@ -459,13 +483,18 @@ class OrbitaLauncher:
     def is_profile_running(self, profile_data_or_id: dict[str, Any] | int) -> bool:
         """
         Determines whether a profile is actively running in the OS.
-        Checks:
+        Multi-layered inspection:
         1. In-memory subprocess Popen (poll() is None).
-        2. Supervisor lock file inspection for profile directory.
+        2. In-memory active SDK session debugger address socket probe (< 1ms).
+        3. SamMonny Daemon API check (/api/v1/profiles or get_profile).
+        4. Supervisor lock file inspection for profile directory.
+        5. psutil process inspection for chrome.exe / orbita.exe command line.
         """
         p_id = profile_data_or_id if isinstance(profile_data_or_id, int) else profile_data_or_id.get("id")
+        uuid_val = None if isinstance(profile_data_or_id, int) else profile_data_or_id.get("uuid")
+        s_dir = None if isinstance(profile_data_or_id, int) else profile_data_or_id.get("storage_dir")
 
-        # 1. Check in-memory active process
+        # 1. Check in-memory active process (direct binary launch)
         if p_id is not None and p_id in self._active_processes:
             proc = self._active_processes[p_id]
             if proc.poll() is None:
@@ -474,21 +503,89 @@ class OrbitaLauncher:
                 # Process has terminated, clean up stale reference
                 self._active_processes.pop(p_id, None)
 
-        # 2. Check active profile directory lock via supervisor
+        # 2. Check active SDK session debugger address (sub-millisecond socket check)
+        dbg_addr = None
+        if p_id is not None and p_id in self._active_sdk_sessions:
+            dbg_addr = self._active_sdk_sessions[p_id]
+        elif uuid_val and str(uuid_val) in self._active_sdk_sessions:
+            dbg_addr = self._active_sdk_sessions[str(uuid_val)]
+
+        if dbg_addr:
+            try:
+                host, port_str = dbg_addr.split(":")
+                if is_port_open(int(port_str), host):
+                    return True
+                else:
+                    self._active_sdk_sessions.pop(p_id, None)
+                    if uuid_val:
+                        self._active_sdk_sessions.pop(str(uuid_val), None)
+            except Exception:
+                pass
+
+        # 3. Check SamMonny Daemon API (if uuid_val is present)
+        if uuid_val:
+            try:
+                from sammonny.core.client import SamMonnyDaemonClient
+
+                client = SamMonnyDaemonClient(
+                    base_url="http://127.0.0.1:7654",
+                    sdk_url="http://127.0.0.1:36912",
+                )
+                prof = client.get_profile(str(uuid_val))
+                if prof and prof.status == "running":
+                    if prof.port and is_port_open(int(prof.port)):
+                        self._active_sdk_sessions[str(uuid_val)] = f"127.0.0.1:{prof.port}"
+                        if p_id is not None:
+                            self._active_sdk_sessions[p_id] = f"127.0.0.1:{prof.port}"
+                        return True
+                    elif not prof.port:
+                        return True
+            except Exception:
+                pass
+
+        # 4. Check active profile directory lock via supervisor
         if p_id is not None and p_id in self._active_profile_dirs:
             p_dir = self._active_profile_dirs[p_id]
             if self.supervisor.is_process_running(p_dir):
                 return True
 
-        if isinstance(profile_data_or_id, dict):
-            s_dir = profile_data_or_id.get("storage_dir")
-            if s_dir and self.supervisor.is_process_running(Path(s_dir)):
+        if s_dir and self.supervisor.is_process_running(Path(s_dir)):
+            return True
+
+        if uuid_val:
+            daemon_dir = self.DAEMON_PROFILES_DIR / str(uuid_val)
+            if daemon_dir.exists() and self.supervisor.is_process_running(daemon_dir):
                 return True
 
-            uuid_val = profile_data_or_id.get("uuid")
-            if uuid_val:
-                daemon_dir = self.DAEMON_PROFILES_DIR / str(uuid_val)
-                if daemon_dir.exists() and self.supervisor.is_process_running(daemon_dir):
-                    return True
+        # 5. Fallback: inspect psutil for running chrome/orbita with matching storage or uuid
+        if self._scan_psutil_for_profile(uuid_val=str(uuid_val) if uuid_val else None, storage_dir=s_dir):
+            return True
 
+        return False
+
+    def _scan_psutil_for_profile(self, uuid_val: str | None = None, storage_dir: str | None = None) -> bool:
+        """Inspects running OS processes for chrome.exe / orbita.exe running this profile."""
+        try:
+            import psutil
+        except ImportError:
+            return False
+
+        if not uuid_val and not storage_dir:
+            return False
+
+        uuid_search = uuid_val.lower() if uuid_val and len(uuid_val) > 8 else None
+        dir_search = str(Path(storage_dir).resolve()).lower() if storage_dir else None
+
+        for proc in psutil.process_iter(["name", "cmdline"]):
+            try:
+                name = (proc.info.get("name") or "").lower()
+                if "chrome" not in name and "orbita" not in name:
+                    continue
+                cmdline = " ".join(proc.info.get("cmdline") or []).lower()
+                if uuid_search and uuid_search in cmdline:
+                    return True
+                if dir_search and dir_search in cmdline:
+                    return True
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                continue
         return False

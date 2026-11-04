@@ -41,6 +41,7 @@ class ProfileTableWidget(TableWidget):
     rotate_proxy_requested = pyqtSignal(list)
     check_proxy_requested = pyqtSignal(list)
     batch_channel_update_requested = pyqtSignal(list)
+    channel_radar_requested = pyqtSignal(int)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -78,7 +79,7 @@ class ProfileTableWidget(TableWidget):
         self.setColumnWidth(9, 85)  # T.Views
         self.setColumnWidth(10, 60)  # T.Video
         self.setColumnWidth(11, 140)  # Email
-        self.setColumnWidth(12, 110)  # Tình trạng
+        self.setColumnWidth(12, 115)  # Tình trạng
         self.setColumnWidth(13, 110)  # Cookie
         self.setColumnWidth(14, 75)  # $Earned
         self.setColumnWidth(15, 75)  # $Balance
@@ -210,6 +211,7 @@ class ProfileTableWidget(TableWidget):
 
             # Col 12: Tình trạng
             status_item = make_item(status, Qt.AlignmentFlag.AlignCenter)
+            status_item.setToolTip(f"Trạng thái hoạt động: {status}")
             if status == "running":
                 status_item.setForeground(QColor("#0078D4"))
                 font = status_item.font()
@@ -449,6 +451,10 @@ class ProfileTableWidget(TableWidget):
         act_project = Action(FluentIcon.FOLDER, project_title, self)
         act_project.triggered.connect(lambda: self.change_project_requested.emit(selected_ids))
         menu.addAction(act_project)
+
+        act_channel_radar = Action(FluentIcon.SPEED_HIGH, "Radar Đánh Giá Kênh & Cảnh Báo...", self)
+        act_channel_radar.triggered.connect(lambda: self.channel_radar_requested.emit(int(first_id or 0)))
+        menu.addAction(act_channel_radar)
 
         menu.addSeparator()
 

@@ -140,6 +140,8 @@ def test_main_window_orbita_lifecycle_updates_db_and_ui(isolated_db, app_instanc
         assert item2.text() == "stopped"
 
         win.scheduler_timer.stop()
+        if hasattr(win, "profile_status_timer"):
+            win.profile_status_timer.stop()
         win.profile_table.clearSelection()
         win.close()
         win.deleteLater()
@@ -173,6 +175,8 @@ def test_main_window_refresh_profiles_auto_reconciliation(isolated_db, app_insta
         assert prof_repo.get_by_id(p2)["status"] == "stopped"
 
         win.scheduler_timer.stop()
+        if hasattr(win, "profile_status_timer"):
+            win.profile_status_timer.stop()
         win.profile_table.clearSelection()
         win.close()
         win.deleteLater()
@@ -180,12 +184,12 @@ def test_main_window_refresh_profiles_auto_reconciliation(isolated_db, app_insta
 
 
 def test_profile_table_widget_column_width_and_no_truncation(app_instance):
-    """Verifies that Status Column 12 has adequate width (>= 105px) and correct styling."""
+    """Verifies that Status Column 12 has adequate width (>= 115px) and tooltip styling."""
     table = ProfileTableWidget()
-    # Check column width
-    assert table.columnWidth(12) >= 105
+    # Check column width >= 115px
+    assert table.columnWidth(12) >= 115
 
-    # Check status rendering
+    # Check status rendering & tooltip
     profiles = [
         {"id": 1, "name": "Prof1", "status": "running"},
         {"id": 2, "name": "Prof2", "status": "stopped"},
@@ -195,11 +199,89 @@ def test_profile_table_widget_column_width_and_no_truncation(app_instance):
 
     item_running = table.item(0, 12)
     assert item_running.text() == "running"
-    # Font is bold
     assert item_running.font().bold() is True
+    assert "running" in item_running.toolTip()
 
     item_stopped = table.item(1, 12)
     assert item_stopped.text() == "stopped"
+    assert "stopped" in item_stopped.toolTip()
 
     item_live = table.item(2, 12)
     assert item_live.text() == "LIVE"
+
+
+def test_orbita_launcher_sdk_session_running_and_port_probe():
+    """Verifies that SDK sessions are tracked and validated via socket probe."""
+    launcher = OrbitaLauncher(executable_path=Path("C:/dummy/chrome.exe"))
+    prof_uuid = "test-uuid-12345"
+
+    with patch("src.infrastructure.browser.orbita_launcher.is_port_open") as mock_port:
+        mock_port.return_value = True
+        launcher._active_sdk_sessions[prof_uuid] = "127.0.0.1:45678"
+
+        # Check with uuid in dict
+        assert launcher.is_profile_running({"id": 10, "uuid": prof_uuid}) is True
+
+        # When port is closed (browser killed manually)
+        mock_port.return_value = False
+        assert launcher.is_profile_running({"id": 10, "uuid": prof_uuid}) is False
+        # Stale session cleaned up
+        assert prof_uuid not in launcher._active_sdk_sessions
+
+
+def test_orbita_launcher_daemon_status_and_psutil_fallback():
+    """Verifies fallback to SamMonny daemon API and psutil scan."""
+    launcher = OrbitaLauncher(executable_path=Path("C:/dummy/chrome.exe"))
+    prof_uuid = "daemon-uuid-67890"
+
+    # 1. Daemon API says running
+    with patch("sammonny.core.client.SamMonnyDaemonClient") as mock_client_cls:
+        mock_client = MagicMock()
+        mock_prof = MagicMock()
+        mock_prof.status = "running"
+        mock_prof.port = None
+        mock_client.get_profile.return_value = mock_prof
+        mock_client_cls.return_value = mock_client
+
+        assert launcher.is_profile_running({"id": 11, "uuid": prof_uuid}) is True
+
+    # 2. psutil scan fallback
+    with patch.object(launcher, "_scan_psutil_for_profile", return_value=True):
+        assert launcher.is_profile_running({"id": 12, "uuid": "other-uuid"}) is True
+
+
+def test_main_window_periodic_status_watcher_sync(isolated_db, app_instance):
+    """Verifies that periodic status watcher detects process exit and updates cell directly."""
+    db_file = isolated_db["db_file"]
+    prof_repo = isolated_db["prof_repo"]
+    p1 = isolated_db["p1"]
+    prof_repo.update(p1, status="running")
+
+    with patch("src.presentation.views.main_window.setTheme"):
+        win = TikTokManagerMainWindow(db_path=db_file)
+
+        # Profile is initially shown as running
+        row = -1
+        for r in range(win.profile_table.rowCount()):
+            it = win.profile_table.item(r, 0)
+            if it and it.data(Qt.ItemDataRole.UserRole).get("id") == p1:
+                row = r
+                break
+        assert row >= 0
+
+        # Now simulate browser closing: is_profile_running becomes False
+        with patch.object(win.orbita_launcher, "is_profile_running", return_value=False):
+            win._sync_active_profile_statuses()
+
+        # Cell 12 must be updated to stopped
+        item = win.profile_table.item(row, 12)
+        assert item.text() == "stopped"
+        assert prof_repo.get_by_id(p1)["status"] == "stopped"
+
+        win.scheduler_timer.stop()
+        if hasattr(win, "profile_status_timer"):
+            win.profile_status_timer.stop()
+        win.profile_table.clearSelection()
+        win.close()
+        win.deleteLater()
+        app_instance.processEvents()
