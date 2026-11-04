@@ -31,9 +31,28 @@ class ThreadPoolManager(QObject):
 
     @classmethod
     def instance(cls, max_threads: int = 10) -> "ThreadPoolManager":
+        if cls._instance is not None:
+            try:
+                import shiboken6
+
+                if not shiboken6.isValid(cls._instance) or not shiboken6.isValid(cls._instance.pool):
+                    cls._instance = None
+            except Exception:
+                pass
+
+        if cls._instance is not None:
+            try:
+                _ = cls._instance.pool.maxThreadCount()
+            except (RuntimeError, Exception):
+                cls._instance = None
+
         if cls._instance is None:
             cls._instance = cls(max_threads=max_threads)
         return cls._instance
+
+    @classmethod
+    def reset_instance(cls) -> None:
+        cls._instance = None
 
     @property
     def max_thread_count(self) -> int:

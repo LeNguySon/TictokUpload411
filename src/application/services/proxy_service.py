@@ -96,6 +96,10 @@ class ProxyService:
         item = self._to_proxy_item(row)
         return sammonny.trigger_ip_rotation(item)
 
+    def change_rotating_ip(self, proxy_id: int) -> dict[str, Any]:
+        """Alias for rotate_proxy_ip for backward compatibility."""
+        return self.rotate_proxy_ip(proxy_id)
+
     def check_all_proxies(self) -> list[ProxyHealthResult]:
         """Performs sequential health checks for all stored proxies."""
         proxies = self.proxy_repo.list_all()

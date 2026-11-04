@@ -187,6 +187,23 @@ class ProxyRepository:
             )
             return cur.rowcount > 0
 
+    def update(self, proxy_id: int, **kwargs: Any) -> bool:
+        """Dynamically updates proxy attributes."""
+        if not kwargs:
+            return False
+        cols = []
+        vals = []
+        for k, v in kwargs.items():
+            cols.append(f"{k} = ?")
+            vals.append(v)
+        vals.append(proxy_id)
+        with db_session(self.db_path) as conn:
+            cur = conn.execute(
+                f"UPDATE proxies SET {', '.join(cols)} WHERE id = ?;",
+                tuple(vals),
+            )
+            return cur.rowcount > 0
+
     def delete(self, proxy_id: int) -> bool:
         """Deletes a single proxy record by ID."""
         with db_session(self.db_path) as conn:

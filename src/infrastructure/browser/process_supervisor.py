@@ -76,6 +76,39 @@ class BrowserProcessSupervisor:
         """Checks if a lock file exists for the profile directory."""
         return self._lock_path(profile_dir).is_file()
 
+    def is_process_running(self, profile_dir: Path) -> bool:
+        """
+        Checks if the process associated with profile_dir is currently alive in the OS.
+        Inspects .process.lock (supports JSON dict with 'pid' or plain PID integer).
+        """
+        path = self._lock_path(profile_dir)
+        if not path.is_file():
+            return False
+
+        try:
+            raw_text = path.read_text(encoding="utf-8").strip()
+            pid: int | None = None
+            if raw_text.startswith("{"):
+                data = json.loads(raw_text)
+                pid = data.get("pid")
+            elif raw_text.isdigit():
+                pid = int(raw_text)
+
+            if not pid or pid <= 0:
+                return False
+
+            if psutil is not None:
+                return psutil.pid_exists(pid)
+            else:
+                try:
+                    os.kill(pid, 0)
+                    return True
+                except (OSError, ProcessLookupError):
+                    return False
+        except Exception as e:
+            logger.debug("Failed checking is_process_running for %s: %s", profile_dir, e)
+            return False
+
     def remove_lock(self, profile_dir: Path) -> None:
         """Removes the process lock file."""
         try:

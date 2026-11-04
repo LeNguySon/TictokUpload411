@@ -40,6 +40,22 @@ class BaseWorker(QRunnable):
     def is_cancelled(self) -> bool:
         return self._cancelled
 
+    @property
+    def started(self):
+        return self.signals.started
+
+    @property
+    def finished(self):
+        return self.signals.finished
+
+    @property
+    def completed(self):
+        return self.signals.completed
+
+    @property
+    def failed(self):
+        return self.signals.failed
+
     def run(self) -> None:
         """Template method wrapping execute() in try-except and lifecycle signals."""
         self.signals.started.emit()

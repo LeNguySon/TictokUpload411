@@ -37,6 +37,25 @@ class AppSignalBus(QObject):
 
     @classmethod
     def instance(cls) -> "AppSignalBus":
+        if cls._instance is not None:
+            try:
+                import shiboken6
+
+                if not shiboken6.isValid(cls._instance):
+                    cls._instance = None
+            except Exception:
+                pass
+
+        if cls._instance is not None:
+            try:
+                _ = cls._instance.signalsBlocked()
+            except (RuntimeError, Exception):
+                cls._instance = None
+
         if cls._instance is None:
             cls._instance = cls()
         return cls._instance
+
+    @classmethod
+    def reset_instance(cls) -> None:
+        cls._instance = None

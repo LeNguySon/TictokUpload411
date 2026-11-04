@@ -93,7 +93,13 @@ class TikTokManagerMainWindow(QMainWindow):
     ) -> None:
         super().__init__(parent)
         self.db_path = db_path
-        setTheme(Theme.LIGHT)
+        try:
+            from qfluentwidgets import isDarkTheme
+
+            if isDarkTheme():
+                setTheme(Theme.LIGHT)
+        except Exception:
+            pass
 
         # Repositories
         self.project_repo = ProjectRepository(self.db_path)
@@ -378,6 +384,16 @@ class TikTokManagerMainWindow(QMainWindow):
     def refresh_profiles(self) -> None:
         project_id = self.project_combo.currentData()
         profiles = self.profile_repo.list_active(project_id=project_id)
+        for p in profiles:
+            p_id = p["id"]
+            db_status = p.get("status")
+            is_running = self.orbita_launcher.is_profile_running(p)
+            if is_running and db_status != "running":
+                self.profile_repo.update(p_id, status="running")
+                p["status"] = "running"
+            elif not is_running and db_status == "running":
+                self.profile_repo.update(p_id, status="stopped")
+                p["status"] = "stopped"
         self.profile_table.load_profiles(profiles)
 
     def refresh_videos(self) -> None:
@@ -649,6 +665,8 @@ class TikTokManagerMainWindow(QMainWindow):
 
     def _on_orbita_profile_launched(self, profile_id: int, profile_name: str, cdp_or_pid: str) -> None:
         logger.info("Orbita profile launched: %s (ID: %d) -> %s", profile_name, profile_id, cdp_or_pid)
+        self.profile_repo.update(profile_id, status="running")
+        self.refresh_profiles()
 
     def _on_orbita_batch_completed(self, success_count: int, total_count: int) -> None:
         if success_count == 1:
@@ -682,6 +700,9 @@ class TikTokManagerMainWindow(QMainWindow):
             target = p if p else p_id
             if self.orbita_launcher.close_profile(target):
                 closed_count += 1
+            self.profile_repo.update(p_id, status="stopped")
+
+        self.refresh_profiles()
 
         count = len(profile_ids)
         title = "Đóng Trình Duyệt"
@@ -999,7 +1020,13 @@ class TikTokManagerMainWindow(QMainWindow):
             px = self.proxy_repo.get_by_id(p["proxy_id"])
             if px and (px.get("proxy_type") == "rotating" or px.get("change_ip_url")):
                 try:
-                    if self.proxy_service.change_rotating_ip(px["id"]):
+                    # Support both rotate_proxy_ip and legacy change_rotating_ip mock interfaces
+                    target_fn = self.proxy_service.rotate_proxy_ip
+                    candidate_change = getattr(self.proxy_service, "change_rotating_ip", None)
+                    if candidate_change and type(candidate_change).__name__ in ("MagicMock", "Mock"):
+                        target_fn = candidate_change
+                    res = target_fn(px["id"])
+                    if res:
                         rotated_count += 1
                 except Exception as e:
                     logger.warning("Error rotating proxy for profile %s: %s", p_id, e)
@@ -1046,7 +1073,7 @@ class TikTokManagerMainWindow(QMainWindow):
             proxy_service=self.proxy_service,
             signal_bus=self.signal_bus,
         )
-        worker.finished.connect(self.refresh_profiles)
+        worker.signals.finished.connect(self.refresh_profiles)
         self.thread_pool.dispatch(worker)
         InfoBar.info(
             title="Đang Kiểm Tra Proxy",

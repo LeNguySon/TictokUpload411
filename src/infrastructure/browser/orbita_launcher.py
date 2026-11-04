@@ -455,3 +455,40 @@ class OrbitaLauncher:
 
         gl = GoLogin({"profile_id": profile_id, "port": port})
         return gl.stop()
+
+    def is_profile_running(self, profile_data_or_id: dict[str, Any] | int) -> bool:
+        """
+        Determines whether a profile is actively running in the OS.
+        Checks:
+        1. In-memory subprocess Popen (poll() is None).
+        2. Supervisor lock file inspection for profile directory.
+        """
+        p_id = profile_data_or_id if isinstance(profile_data_or_id, int) else profile_data_or_id.get("id")
+
+        # 1. Check in-memory active process
+        if p_id is not None and p_id in self._active_processes:
+            proc = self._active_processes[p_id]
+            if proc.poll() is None:
+                return True
+            else:
+                # Process has terminated, clean up stale reference
+                self._active_processes.pop(p_id, None)
+
+        # 2. Check active profile directory lock via supervisor
+        if p_id is not None and p_id in self._active_profile_dirs:
+            p_dir = self._active_profile_dirs[p_id]
+            if self.supervisor.is_process_running(p_dir):
+                return True
+
+        if isinstance(profile_data_or_id, dict):
+            s_dir = profile_data_or_id.get("storage_dir")
+            if s_dir and self.supervisor.is_process_running(Path(s_dir)):
+                return True
+
+            uuid_val = profile_data_or_id.get("uuid")
+            if uuid_val:
+                daemon_dir = self.DAEMON_PROFILES_DIR / str(uuid_val)
+                if daemon_dir.exists() and self.supervisor.is_process_running(daemon_dir):
+                    return True
+
+        return False

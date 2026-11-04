@@ -501,5 +501,7 @@ def test_metric_main_window_full_synchronization_pipeline(qapp, metric_db: Path,
         window._on_schedule_videos()
 
     finally:
+        window.scheduler_timer.stop()
         window.close()
+        window.deleteLater()
         qapp.processEvents()

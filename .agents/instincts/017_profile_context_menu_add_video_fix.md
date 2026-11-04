@@ -34,3 +34,4 @@ Khi người dùng chuột phải vào một hàng hồ sơ trong bảng `Profil
    - Nhãn menu chuột phải tự động đổi theo ngữ cảnh:
      - 1 hồ sơ: `Nạp Video Vào Hàng Đợi Cho Hồ Sơ ({prof_name})...`
      - Nhiều hồ sơ: `Nạp Video Phân Bổ Cho ({count} hồ sơ)...`
+

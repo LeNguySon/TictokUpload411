@@ -84,6 +84,7 @@ class VideoQueueTableWidget(TableWidget):
     def load_videos(self, videos: list[dict[str, Any]]) -> None:
         """Populates the table with video records."""
         self.setSortingEnabled(False)
+        self.clearSelection()
         self.setRowCount(len(videos))
         self._progress_bars.clear()
 

@@ -74,7 +74,7 @@ class ProfileTableWidget(TableWidget):
         self.setColumnWidth(9, 85)  # T.Views
         self.setColumnWidth(10, 60)  # T.Video
         self.setColumnWidth(11, 140)  # Email
-        self.setColumnWidth(12, 80)  # Tình trạng
+        self.setColumnWidth(12, 110)  # Tình trạng
         self.setColumnWidth(13, 110)  # Cookie
         self.setColumnWidth(14, 75)  # $Earned
         self.setColumnWidth(15, 75)  # $Balance
@@ -95,6 +95,7 @@ class ProfileTableWidget(TableWidget):
     def load_profiles(self, profiles: list[dict[str, Any]]) -> None:
         """Populates the table with profile records."""
         self.setSortingEnabled(False)
+        self.clearSelection()
         self.setRowCount(len(profiles))
 
         for row_idx, p in enumerate(profiles):
@@ -201,12 +202,19 @@ class ProfileTableWidget(TableWidget):
 
             # Col 12: Tình trạng
             status_item = make_item(status, Qt.AlignmentFlag.AlignCenter)
-            if status == "LIVE":
+            if status == "running":
+                status_item.setForeground(QColor("#0078D4"))
+                font = status_item.font()
+                font.setBold(True)
+                status_item.setFont(font)
+            elif status == "LIVE":
                 status_item.setForeground(QColor("#107C41"))
             elif status == "DIE":
                 status_item.setForeground(QColor("#D83B01"))
             elif status == "CHECKPOINT":
                 status_item.setForeground(QColor("#CA5010"))
+            elif status == "stopped":
+                status_item.setForeground(QColor("#605E5C"))
             self.setItem(row_idx, 12, status_item)
 
             # Col 13: Cookie (Masked)
