@@ -355,6 +355,7 @@ class TikTokManagerMainWindow(QMainWindow):
         self.profile_table.remove_proxy_requested.connect(self._on_remove_proxy_selected)
         self.profile_table.rotate_proxy_requested.connect(self._on_rotate_proxy_selected)
         self.profile_table.check_proxy_requested.connect(self._on_check_proxy_selected)
+        self.profile_table.batch_channel_update_requested.connect(self._on_batch_channel_update)
 
         # Context Menu & Selection Events on Video Table
         self.video_table.upload_now_requested.connect(self._on_upload_single_video)
@@ -457,6 +458,10 @@ class TikTokManagerMainWindow(QMainWindow):
         act_gologin_sync = Action(FluentIcon.CLOUD_DOWNLOAD, "Đồng bộ Profile GoLogin SDK (22+ có sẵn)", self)
         act_gologin_sync.triggered.connect(self._on_sync_gologin_profiles)
         self.settings_menu.addAction(act_gologin_sync)
+
+        act_chan = Action(FluentIcon.PEOPLE, "Cập nhật kênh hàng loạt (Avatar, Bio, Tên)...", self)
+        act_chan.triggered.connect(lambda: self._on_batch_channel_update())
+        self.settings_menu.addAction(act_chan)
 
         self.settings_menu.addSeparator()
 
@@ -1136,6 +1141,29 @@ class TikTokManagerMainWindow(QMainWindow):
                 parent=self,
             )
 
+    def _on_batch_channel_update(self, profile_ids: list[int] | None = None) -> None:
+        ids = profile_ids if profile_ids is not None else self.profile_table.get_selected_profile_ids()
+        if not ids:
+            ids = [p["id"] for p in self.profile_repo.list_all()]
+        if not ids:
+            InfoBar.warning(
+                title="Không có hồ sơ",
+                content="Vui lòng chọn ít nhất một hồ sơ để cập nhật thông tin kênh.",
+                position=InfoBarPosition.TOP,
+                parent=self,
+            )
+            return
+        from src.presentation.dialogs.batch_channel_update_dialog import BatchChannelUpdateDialog
+
+        dlg = BatchChannelUpdateDialog(
+            selected_profile_ids=ids,
+            profile_repo=self.profile_repo,
+            db_path=self.db_path,
+            signal_bus=self.signal_bus,
+            parent=self,
+        )
+        dlg.exec()
+
     def _on_edit_profile(self, profile_id: int) -> None:
         p = self.profile_repo.get_by_id(profile_id)
         if not p:
@@ -1492,42 +1520,45 @@ class TikTokManagerMainWindow(QMainWindow):
 
     def _check_scheduled_queue(self) -> None:
         """Periodically scans for scheduled videos that have reached their upload time."""
-        now_iso = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        due_videos = self.video_repo.list_scheduled_due(max_time_iso=now_iso)
-        if not due_videos:
-            return
+        try:
+            now_iso = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            due_videos = self.video_repo.list_scheduled_due(max_time_iso=now_iso)
+            if not due_videos:
+                return
 
-        selected_profiles = self.profile_table.get_selected_profile_ids()
-        dispatched = 0
+            selected_profiles = self.profile_table.get_selected_profile_ids()
+            dispatched = 0
 
-        for v in due_videos:
-            vid_id = v["id"]
-            # Target profile: assigned profile first, or fallback to selected profiles
-            target_profile = v.get("assigned_profile_id")
-            if not target_profile and selected_profiles:
-                target_profile = selected_profiles[dispatched % len(selected_profiles)]
+            for v in due_videos:
+                vid_id = v["id"]
+                # Target profile: assigned profile first, or fallback to selected profiles
+                target_profile = v.get("assigned_profile_id")
+                if not target_profile and selected_profiles:
+                    target_profile = selected_profiles[dispatched % len(selected_profiles)]
 
-            if not target_profile:
-                # Cannot dispatch without an assigned or selected profile
-                continue
+                if not target_profile:
+                    # Cannot dispatch without an assigned or selected profile
+                    continue
 
-            # Atomically reserve to prevent duplicate triggering
-            reserved = self.video_repo.try_reserve(video_id=vid_id, assigned_profile_id=target_profile)
-            if not reserved:
-                continue
+                # Atomically reserve to prevent duplicate triggering
+                reserved = self.video_repo.try_reserve(video_id=vid_id, assigned_profile_id=target_profile)
+                if not reserved:
+                    continue
 
-            worker = UploadWorker(
-                video_id=vid_id,
-                profile_id=target_profile,
-                upload_service=self.upload_service,
-                signal_bus=self.signal_bus,
-            )
-            self.thread_pool.dispatch(worker)
-            dispatched += 1
+                worker = UploadWorker(
+                    video_id=vid_id,
+                    profile_id=target_profile,
+                    upload_service=self.upload_service,
+                    signal_bus=self.signal_bus,
+                )
+                self.thread_pool.dispatch(worker)
+                dispatched += 1
 
-        if dispatched > 0:
-            logger.info("Auto-dispatch scheduler launched %d due videos", dispatched)
-            self.refresh_videos()
+            if dispatched > 0:
+                logger.info("Auto-dispatch scheduler launched %d due videos", dispatched)
+                self.refresh_videos()
+        except Exception as e:
+            logger.debug("Auto-dispatch queue check bypassed (DB closed/recycled): %s", e)
 
     def _on_edit_video_metadata(self, video_id_or_row: int) -> None:
         v = self.video_repo.get_by_id(video_id_or_row)
@@ -1661,7 +1692,10 @@ class TikTokManagerMainWindow(QMainWindow):
         except Exception as e:
             logger.warning("Failed to physically isolate video #%s: %s", video_id, e)
 
-        self.refresh_videos()
+        try:
+            self.refresh_videos()
+        except Exception:
+            pass
         InfoBar.success(
             title="Upload Hoàn Tất",
             content=f"Video #{video_id} đã xuất bản thành công & cách ly vào _posted/: {publish_id}",
@@ -1686,7 +1720,10 @@ class TikTokManagerMainWindow(QMainWindow):
                 self.thread_pool.dispatch(worker)
 
     def _on_upload_failed(self, video_id: int, error: str) -> None:
-        self.refresh_videos()
+        try:
+            self.refresh_videos()
+        except Exception:
+            pass
         InfoBar.error(
             title="Upload Thất Bại",
             content=f"Video #{video_id} gặp sự cố: {error}",
@@ -1695,7 +1732,10 @@ class TikTokManagerMainWindow(QMainWindow):
         )
 
     def _on_profile_updated(self, profile_id: int, fields: dict) -> None:
-        self.refresh_profiles()
+        try:
+            self.refresh_profiles()
+        except Exception:
+            pass
 
     def _on_upload_single_video(self, video_id_or_ids: list[int] | int) -> None:
         selected_profiles = self.profile_table.get_selected_profile_ids()
@@ -1777,7 +1817,20 @@ class TikTokManagerMainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:
         """Cleanup Chromium RAM working set and shutdown daemon before closing application."""
-        if self.chk_clean_exit.isChecked():
+        try:
+            if hasattr(self, "scheduler_timer") and self.scheduler_timer.isActive():
+                self.scheduler_timer.stop()
+        except Exception:
+            pass
+
+        try:
+            self.signal_bus.profile_updated.disconnect(self._on_profile_updated)
+            self.signal_bus.upload_completed.disconnect(self._on_upload_completed)
+            self.signal_bus.upload_failed.disconnect(self._on_upload_failed)
+        except Exception:
+            pass
+
+        if hasattr(self, "chk_clean_exit") and self.chk_clean_exit.isChecked():
             try:
                 import os
 

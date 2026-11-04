@@ -28,7 +28,6 @@ from src.infrastructure.tiktok.dom_hydration_extractor import TikTokDomHydration
 from src.infrastructure.tiktok.network_sniffer import TikTokNetworkSniffer
 from src.infrastructure.tiktok.passive_sync_service import (
     CHROMIUM_EPOCH_OFFSET_MICROS,
-    CORE_COOKIES,
     PassiveTikTokSyncService,
 )
 
@@ -418,9 +417,6 @@ def test_offline_cookie_sqlite_sammonny_micros_standard(passive_env):
             "storage_dir": str(profile_dir),
         }
     )
-
-    assert len(CORE_COOKIES) == 9
-    assert "sessionid" in CORE_COOKIES
 
     res = sync_service.sync_profile_offline_cookies(pid)
     assert res["ok"] is True

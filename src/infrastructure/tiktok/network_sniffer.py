@@ -414,3 +414,51 @@ class TikTokNetworkSniffer:
             "views_month": month_views,
             "total_views": total_observed_views,
         }
+
+
+def attach_playwright_sniffer(
+    context_or_page: Any,
+    profile_id: int,
+    db_path: Path | str | None = None,
+    signal_bus: AppSignalBus | None = None,
+) -> None:
+    """Attach response listener to Playwright context or page for passive live sniffing."""
+    sniffer = TikTokNetworkSniffer(db_path=db_path, signal_bus=signal_bus)
+
+    def on_response(response: Any) -> None:
+        try:
+            url = getattr(response, "url", "")
+            if not url or not any(d in url for d in ("tiktok.com", "tiktokv.com", "byteoversea.com", "ibytedtos.com")):
+                return
+            if not any(
+                x in url
+                for x in (
+                    "/api/",
+                    "/creator-center/api/",
+                    "/passport/web/",
+                    "/aweme/v1/",
+                    "/traffic_source",
+                    "/service/2/",
+                    "/item/insight",
+                    "/item/detail",
+                )
+            ):
+                return
+            status = getattr(response, "status", 0)
+            if status != 200:
+                return
+
+            try:
+                body = response.json()
+                if isinstance(body, dict):
+                    sniffer.process_api_response(profile_id, url, body)
+            except Exception:
+                pass
+        except Exception as exc:
+            logger.debug("Passive sniffer error on response: %s", exc)
+
+    try:
+        context_or_page.on("response", on_response)
+        logger.info("Attached passive Playwright sniffer for profile %s", profile_id)
+    except Exception as exc:
+        logger.debug("Could not attach sniffer listener: %s", exc)

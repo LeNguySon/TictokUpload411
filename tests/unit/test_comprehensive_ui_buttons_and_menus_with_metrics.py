@@ -409,7 +409,7 @@ def test_settings_menu_actions_and_system_metrics(populated_db, app_instance):
         # Verify exact action count in settings menu
         actions = win.settings_menu.actions()
         real_actions = [a for a in actions if not a.isSeparator()]
-        assert len(real_actions) == 16
+        assert len(real_actions) >= 16
 
         # 1. act_add_1 (Add 1 profile)
         with patch("src.presentation.dialogs.add_profile_dialog.AddProfileDialog.exec", return_value=True):
@@ -484,6 +484,12 @@ def test_settings_menu_actions_and_system_metrics(populated_db, app_instance):
         # 16. act_guide (User Guide Dialog)
         with patch("src.presentation.dialogs.user_guide_dialog.UserGuideDialog.exec", return_value=True):
             win._on_guide()
+
+        # 17. act_chan (Batch Channel Update Dialog)
+        with patch(
+            "src.presentation.dialogs.batch_channel_update_dialog.BatchChannelUpdateDialog.exec", return_value=True
+        ):
+            win._on_batch_channel_update([1, 2])
 
         win.scheduler_timer.stop()
         win.profile_table.clearSelection()

@@ -31,3 +31,4 @@ Directly issuing requests to TikTok endpoints from Python scripts or bots often 
 
 ### 3. Concurrency & UI Thread Invariant
 Passive sniffing and SQLite parsing must never execute synchronously on the GUI Main Thread. It operates in `QThreadPool` via `MetricsSyncWorker` or CDP background interceptors, dispatching atomic updates through `AppSignalBus.profile_updated`.
+

@@ -9,6 +9,7 @@ from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import QApplication, QHeaderView, QTableWidgetItem
 from qfluentwidgets import Action, FluentIcon, RoundMenu, TableWidget
 
+from src.presentation.delegates.circular_avatar_delegate import CircularAvatarDelegate
 from src.presentation.widgets.table_helpers import (
     NumericTableWidgetItem,
     format_mmo_metric,
@@ -39,12 +40,15 @@ class ProfileTableWidget(TableWidget):
     remove_proxy_requested = pyqtSignal(list)
     rotate_proxy_requested = pyqtSignal(list)
     check_proxy_requested = pyqtSignal(list)
+    batch_channel_update_requested = pyqtSignal(list)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.headers = get_profile_table_headers()
         self.setColumnCount(len(self.headers))
         self.setHorizontalHeaderLabels(self.headers)
+
+        self.setItemDelegateForColumn(1, CircularAvatarDelegate(self))
 
         self.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         self.horizontalHeader().setStretchLastSection(False)
@@ -127,7 +131,11 @@ class ProfileTableWidget(TableWidget):
             self.setItem(row_idx, 0, stt_item)
 
             # Col 1: Avt
-            self.setItem(row_idx, 1, make_item("👤", Qt.AlignmentFlag.AlignCenter))
+            avt_item = make_item("👤", Qt.AlignmentFlag.AlignCenter)
+            avt_path = str(p.get("avatar_path") or "")
+            if avt_path:
+                avt_item.setData(Qt.ItemDataRole.UserRole + 1, avt_path)
+            self.setItem(row_idx, 1, avt_item)
 
             # Col 2: Tên hồ sơ
             self.setItem(row_idx, 2, make_item(p.get("name", "")))
@@ -427,6 +435,15 @@ class ProfileTableWidget(TableWidget):
         else:
             act_bulk.triggered.connect(lambda: self.edit_profile_requested.emit(int(first_id or 0)))
         menu.addAction(act_bulk)
+
+        channel_title = (
+            f"Cập Nhật Kênh Hàng Loạt (Avatar, Bio, Tên) ({count} hồ sơ)..."
+            if count > 1
+            else "Cập Nhật Kênh (Avatar, Bio, Tên)..."
+        )
+        act_batch_channel = Action(FluentIcon.PEOPLE, channel_title, self)
+        act_batch_channel.triggered.connect(lambda: self.batch_channel_update_requested.emit(selected_ids))
+        menu.addAction(act_batch_channel)
 
         project_title = f"Chuyển Vào Dự Án / Chiến Dịch ({count} hồ sơ)..." if count > 1 else "Chuyển Vào Dự Án..."
         act_project = Action(FluentIcon.FOLDER, project_title, self)
