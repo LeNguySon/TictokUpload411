@@ -106,7 +106,7 @@ class ProxyRepository:
                 """,
                 (host, port, username, password, protocol, proxy_type, change_ip_url),
             )
-            return cur.lastrowid
+            return int(cur.lastrowid or 0)
 
     def bulk_import(self, raw_lines: list[str]) -> int:
         """Parses and imports a batch of proxy strings. Unique proxies counted."""

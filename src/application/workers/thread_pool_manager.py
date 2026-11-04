@@ -21,7 +21,10 @@ class ThreadPoolManager(QObject):
 
     def __init__(self, max_threads: int = 10) -> None:
         super().__init__()
-        self.pool = QThreadPool.globalInstance()
+        pool = QThreadPool.globalInstance()
+        if pool is None:
+            pool = QThreadPool(self)
+        self.pool: QThreadPool = pool
         self.pool.setMaxThreadCount(max_threads)
         self._tracked_workers: list[BaseWorker] = []
 
@@ -43,7 +46,7 @@ class ThreadPoolManager(QObject):
         """Adds worker to tracking list for cooperative cancellation."""
         self._tracked_workers.append(worker)
 
-        def _cleanup():
+        def _cleanup() -> None:
             if worker in self._tracked_workers:
                 self._tracked_workers.remove(worker)
 
@@ -55,12 +58,12 @@ class ThreadPoolManager(QObject):
         self.track_worker(worker)
         self.pool.start(worker)
 
-    def submit(self, fn, *args, **kwargs) -> None:
+    def submit(self, fn: Any, *args: Any, **kwargs: Any) -> None:
         """Submits an arbitrary callable to the QThreadPool."""
         from PyQt6.QtCore import QRunnable
 
         class _CallableRunnable(QRunnable):
-            def run(self_inner):
+            def run(self_inner) -> None:
                 try:
                     fn(*args, **kwargs)
                 except Exception as e:
