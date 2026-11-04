@@ -26,7 +26,21 @@ from src.infrastructure.tiktok.network_sniffer import TikTokNetworkSniffer
 
 logger = logging.getLogger(__name__)
 
+# Chromium epoch offset: microseconds between 1601-01-01 and 1970-01-01 (SamMonny SDK standard)
+CHROMIUM_EPOCH_OFFSET_MICROS = 11644473600000000
 WINDOWS_EPOCH_DELTA = 11644473600
+
+CORE_COOKIES = [
+    "sessionid",
+    "sessionid_ss",
+    "sid_tt",
+    "sid_guard",
+    "uid_tt",
+    "tt_chain_token",
+    "passport_csrf_token",
+    "ttwid",
+    "store-idc",
+]
 
 
 class PassiveTikTokSyncService:
@@ -99,15 +113,22 @@ class PassiveTikTokSyncService:
             for name, val, expires_utc in rows:
                 if not name:
                     continue
-                # Calculate expiry from Windows LDAP FileTime
+                # Calculate expiry from Windows LDAP FileTime using microsecond epoch offset
                 is_expired = False
                 if expires_utc > 0:
-                    unix_exp = (expires_utc / 1000000.0) - WINDOWS_EPOCH_DELTA
+                    if expires_utc > CHROMIUM_EPOCH_OFFSET_MICROS:
+                        unix_exp = (expires_utc - CHROMIUM_EPOCH_OFFSET_MICROS) / 1_000_000.0
+                    else:
+                        unix_exp = float(expires_utc)
                     if unix_exp < now_ts:
                         is_expired = True
 
                 if not is_expired and val:
                     cookies_found[str(name)] = str(val)
+
+            # CSRF equivalence: if tt_csrf_token is present and passport_csrf_token is missing
+            if "tt_csrf_token" in cookies_found and "passport_csrf_token" not in cookies_found:
+                cookies_found["passport_csrf_token"] = cookies_found["tt_csrf_token"]
 
             # Check core authentication token
             if "sessionid" in cookies_found or "sessionid_ss" in cookies_found:
@@ -122,6 +143,8 @@ class PassiveTikTokSyncService:
                 "cookies_json": json.dumps(cookies_found),
             }
             self.profile_repo.update(profile_id, **updates)
+            if self.signal_bus:
+                self.signal_bus.profile_updated.emit(profile_id, updates)
             logger.info(
                 "Offline cookie sync for profile %s: is_live=%s (found %d cookies)",
                 profile_id,

@@ -21,3 +21,4 @@
 5. **Phòng chống Access Violation trong Qt / QFluentWidgets**:
    - Thêm `self.clearSelection()` trước `setRowCount` trong bảng để tránh QItemDelegate updateEditorGeometry trên widget bị xóa.
    - Thêm kiểm tra `isDarkTheme()` trước khi gọi `setTheme(Theme.LIGHT)`.
+
