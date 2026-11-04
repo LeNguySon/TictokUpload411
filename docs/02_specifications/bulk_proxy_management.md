@@ -161,3 +161,4 @@ chrome.exe --proxy-server="http://user:pass@1.2.3.4:8080"
    - Nút `Kiểm Tra Toàn Bộ Proxy (Check All)`: Khởi chạy worker ngầm và hiển thị thanh `ProgressBar` chạy mượt mà.
    - Nút `Xóa Proxy Chết (Delete Dead)`: Dọn sạch các proxy hỏng.
    - Nút `Gán Tự Động Cho Các Profile Chưa Có Proxy`: Tự động phân bổ đều vào dàn tài khoản.
+

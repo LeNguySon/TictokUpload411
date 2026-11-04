@@ -1,0 +1,34 @@
+# ==============================================================================
+# TikTok Account & Video Manager (TAVM-2026-WIN) — Core Dependencies
+# Target: Windows 11 64-bit | Python 3.11+
+# ==============================================================================
+
+# GUI Framework & Windows 11 Fluent Theme
+PyQt6>=6.8.0
+PyQt6-Fluent-Widgets>=1.7.0
+PyQt6-Frameless-Window>=0.6.0
+
+# Database & Data Integrity
+pydantic>=2.10.0
+
+# Network, HTTP & Egress Client
+requests>=2.32.0
+curl_cffi>=0.7.0
+aiohttp>=3.10.0
+
+# Security & OS Vault (AgentShield Tier-1)
+keyring>=24.3.0
+cryptography>=44.0.0
+pywin32>=308
+
+# Geolocation & Network
+geoip2>=4.8.0
+maxminddb>=2.6.0
+
+# Development, Testing & Code Quality
+pytest>=8.3.0
+pytest-qt>=4.4.0
+pytest-asyncio>=0.24.0
+pytest-cov>=6.0.0
+ruff>=0.8.0
+mypy>=1.13.0

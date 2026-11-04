@@ -128,3 +128,4 @@ GROUP BY p.id;
 3. **Bộ lọc nhanh trên Bảng 1 (Account Table Filter Chip)**:
    - Cột `Dự án` hiển thị nhãn màu tròn `Tag` nhỏ tinh tế.
    - Cho phép kéo thả trực tiếp dòng profile từ bảng vào nhóm dự án mong muốn.
+
