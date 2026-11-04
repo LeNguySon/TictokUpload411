@@ -5,6 +5,7 @@ Clean Architecture: Infrastructure Layer.
 
 from __future__ import annotations
 
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -18,12 +19,15 @@ class ProfileRepository:
         self.db_path = db_path or DEFAULT_DB_PATH
 
     def create(self, data: dict[str, Any]) -> int:
-        cols = list(data.keys())
+        payload = dict(data)
+        if "uuid" not in payload:
+            payload["uuid"] = str(uuid.uuid4())
+        cols = list(payload.keys())
         placeholders = ", ".join("?" for _ in cols)
         sql = f"INSERT INTO profiles ({', '.join(cols)}) VALUES ({placeholders});"
 
         with db_session(self.db_path) as conn:
-            cur = conn.execute(sql, tuple(data.values()))
+            cur = conn.execute(sql, tuple(payload.values()))
             return int(cur.lastrowid)
 
     def get_by_id(self, profile_id: int) -> dict[str, Any] | None:
@@ -91,13 +95,16 @@ class ProfileRepository:
             )
             return cur.rowcount > 0
 
-    def update(self, profile_id: int, data: dict[str, Any]) -> bool:
-        if not data:
+    def update(self, profile_id: int, data: dict[str, Any] | None = None, **fields: Any) -> bool:
+        """Updates profile columns via dictionary and/or keyword arguments."""
+        payload = dict(data or {})
+        payload.update(fields)
+        if not payload:
             return False
 
-        cols = [f"{k} = ?" for k in data.keys()]
+        cols = [f"{k} = ?" for k in payload.keys()]
         sql = f"UPDATE profiles SET {', '.join(cols)}, updated_at = CURRENT_TIMESTAMP WHERE id = ?;"
-        params = list(data.values()) + [profile_id]
+        params = list(payload.values()) + [profile_id]
 
         with db_session(self.db_path) as conn:
             cur = conn.execute(sql, tuple(params))

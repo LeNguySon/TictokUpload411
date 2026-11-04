@@ -105,6 +105,19 @@ class VideoRepository:
             )
             return cur.rowcount > 0
 
+    def mark_error(self, video_id: int, error_message: str | None = None) -> bool:
+        """Marks video as failed and increments retry count."""
+        with db_session(self.db_path) as conn:
+            cur = conn.execute(
+                """
+                UPDATE video_registry
+                SET status = 'failed', retry_count = retry_count + 1, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?;
+                """,
+                (video_id,),
+            )
+            return cur.rowcount > 0
+
     def list_available(self) -> list[dict[str, Any]]:
         with db_session(self.db_path, write=False) as conn:
             rows = conn.execute("SELECT * FROM video_registry WHERE status = 'available' ORDER BY id ASC;").fetchall()
