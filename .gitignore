@@ -36,6 +36,9 @@ htmlcov/
 *.sqlite3
 gloglin.db*
 
+# Profiles & browser storage
+profiles/
+
 # Sensitive Secrets, Cookies & Tokens (Bảo mật Windows Vault / DPAPI)
 .env
 .env.*

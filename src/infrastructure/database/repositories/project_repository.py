@@ -76,9 +76,12 @@ class ProjectRepository:
             p.name AS project_name,
             p.color AS project_color,
             COUNT(pr.id) AS total_profiles,
+            SUM(CASE WHEN pr.status = 'LIVE' THEN 1 ELSE 0 END) AS live_profiles,
             SUM(CASE WHEN pr.status = 'LIVE' THEN 1 ELSE 0 END) AS live_count,
             SUM(CASE WHEN pr.status = 'DIE' THEN 1 ELSE 0 END) AS die_count,
+            COALESCE(SUM(pr.views_month), 0) AS total_views,
             COALESCE(SUM(pr.views_month), 0) AS total_views_30d,
+            COALESCE(SUM(pr.money_earned), 0.0) AS total_earned,
             COALESCE(SUM(pr.money_earned), 0.0) AS total_earned_usd,
             COALESCE(SUM(pr.balance), 0.0) AS total_balance_usd
         FROM projects p
@@ -89,3 +92,6 @@ class ProjectRepository:
         with db_session(self.db_path, write=False) as conn:
             rows = conn.execute(query).fetchall()
             return [dict(r) for r in rows]
+
+    get_project_aggregates = get_aggregates
+    safe_delete = delete

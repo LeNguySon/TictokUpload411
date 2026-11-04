@@ -415,41 +415,77 @@ class TikTokManagerMainWindow(QMainWindow):
         self.settings_menu.exec(pos)
 
     def _on_open_project_manager(self) -> None:
-        dlg = ProjectManagerDialog(self.project_repo, self)
-        dlg.exec()
-        self.refresh_all_data()
+        try:
+            dlg = ProjectManagerDialog(self.project_repo, self)
+            dlg.exec()
+            self.refresh_all_data()
+        except Exception as e:
+            logger.error("ProjectManagerDialog error: %s", e)
+            InfoBar.error(
+                title="Lỗi Quản Lý Dự Án",
+                content=str(e),
+                position=InfoBarPosition.TOP,
+                parent=self,
+            )
 
     def _on_open_proxy_manager(self) -> None:
-        dlg = ProxyManagerDialog(self.proxy_repo, self.proxy_service, self)
-        dlg.exec()
-        self.refresh_profiles()
+        try:
+            dlg = ProxyManagerDialog(self.proxy_repo, self.proxy_service, self)
+            dlg.exec()
+            self.refresh_profiles()
+        except Exception as e:
+            logger.error("ProxyManagerDialog error: %s", e)
+            InfoBar.error(
+                title="Lỗi Quản Lý Proxy",
+                content=str(e),
+                position=InfoBarPosition.TOP,
+                parent=self,
+            )
 
     def _on_add_profile(self) -> None:
-        dlg = AddProfileDialog(
-            profile_repo=self.profile_repo,
-            project_repo=self.project_repo,
-            proxy_repo=self.proxy_repo,
-            vault=self.vault,
-            parent=self,
-        )
-        if dlg.exec():
-            self.refresh_profiles()
-            InfoBar.success(
-                title="Hồ Sơ Mới",
-                content="Đã tạo thành công hồ sơ TikTok.",
+        try:
+            dlg = AddProfileDialog(
+                profile_repo=self.profile_repo,
+                project_repo=self.project_repo,
+                proxy_repo=self.proxy_repo,
+                vault=self.vault,
+                parent=self,
+            )
+            if dlg.exec():
+                self.refresh_profiles()
+                InfoBar.success(
+                    title="Hồ Sơ Mới",
+                    content="Đã tạo thành công hồ sơ TikTok.",
+                    position=InfoBarPosition.TOP,
+                    parent=self,
+                )
+        except Exception as e:
+            logger.error("AddProfileDialog error: %s", e)
+            InfoBar.error(
+                title="Lỗi Thêm Hồ Sơ",
+                content=str(e),
                 position=InfoBarPosition.TOP,
                 parent=self,
             )
 
     def _on_bulk_add_profiles(self) -> None:
-        dlg = BulkAddProfileDialog(
-            profile_repo=self.profile_repo,
-            project_repo=self.project_repo,
-            proxy_repo=self.proxy_repo,
-            parent=self,
-        )
-        if dlg.exec():
-            self.refresh_profiles()
+        try:
+            dlg = BulkAddProfileDialog(
+                profile_repo=self.profile_repo,
+                project_repo=self.project_repo,
+                proxy_repo=self.proxy_repo,
+                parent=self,
+            )
+            if dlg.exec():
+                self.refresh_profiles()
+        except Exception as e:
+            logger.error("BulkAddProfileDialog error: %s", e)
+            InfoBar.error(
+                title="Lỗi Thêm Hàng Loạt",
+                content=str(e),
+                position=InfoBarPosition.TOP,
+                parent=self,
+            )
 
     def _on_show_all_profiles(self) -> None:
         self.project_combo.setCurrentIndex(0)
@@ -467,18 +503,27 @@ class TikTokManagerMainWindow(QMainWindow):
             )
             return
 
-        worker = MetricsSyncWorker(
-            profile_ids=selected_ids,
-            profile_service=self.profile_service,
-            signal_bus=self.signal_bus,
-        )
-        self.thread_pool.dispatch(worker)
-        InfoBar.info(
-            title="Đang đồng bộ số liệu",
-            content=f"Đang đồng bộ cho {len(selected_ids)} hồ sơ trong luồng nền...",
-            position=InfoBarPosition.TOP,
-            parent=self,
-        )
+        try:
+            worker = MetricsSyncWorker(
+                profile_ids=selected_ids,
+                profile_service=self.profile_service,
+                signal_bus=self.signal_bus,
+            )
+            self.thread_pool.dispatch(worker)
+            InfoBar.info(
+                title="Đang đồng bộ số liệu",
+                content=f"Đang đồng bộ cho {len(selected_ids)} hồ sơ trong luồng nền...",
+                position=InfoBarPosition.TOP,
+                parent=self,
+            )
+        except Exception as e:
+            logger.error("Metrics sync error: %s", e)
+            InfoBar.error(
+                title="Lỗi Đồng Bộ",
+                content=str(e),
+                position=InfoBarPosition.TOP,
+                parent=self,
+            )
 
     def _on_launch_orbita_selected(self) -> None:
         selected = self.profile_table.get_selected_profile_ids()
@@ -515,75 +560,133 @@ class TikTokManagerMainWindow(QMainWindow):
             )
 
     def _on_configure_concurrency(self) -> None:
-        from PyQt6.QtWidgets import QInputDialog
+        try:
+            from PyQt6.QtWidgets import QInputDialog
 
-        val, ok = QInputDialog.getInt(
-            self,
-            "Cấu Hình Luồng Check",
-            "Nhập số luồng kiểm tra / tải lên đồng thời (1 - 50):",
-            self.thread_pool.max_thread_count,
-            1,
-            50,
-        )
-        if ok:
-            self.thread_pool.set_max_threads(val)
-            self._init_settings_menu()
-            InfoBar.success(
-                title="Cấu Hình Luồng",
-                content=f"Đã cập nhật số luồng chạy nền thành {val} luồng.",
+            val, ok = QInputDialog.getInt(
+                self,
+                "Cấu Hình Luồng Check",
+                "Nhập số luồng kiểm tra / tải lên đồng thời (1 - 50):",
+                self.thread_pool.max_thread_count,
+                1,
+                50,
+            )
+            if ok:
+                self.thread_pool.set_max_threads(val)
+                self._init_settings_menu()
+                InfoBar.success(
+                    title="Cấu Hình Luồng",
+                    content=f"Đã cập nhật số luồng chạy nền thành {val} luồng.",
+                    position=InfoBarPosition.TOP,
+                    parent=self,
+                )
+        except Exception as e:
+            logger.error("Configure concurrency error: %s", e)
+            InfoBar.error(
+                title="Lỗi Cấu Hình Luồng",
+                content=str(e),
                 position=InfoBarPosition.TOP,
                 parent=self,
             )
 
     def _on_clean_browser(self) -> None:
         try:
+            import os
+
             import sammonny
 
-            sammonny.MemoryManager.trim_working_set()
-        except Exception:
-            pass
+            res = sammonny.MemoryManager.trim_process_tree_memory(os.getpid())
+            content = f"Đã giải phóng {res.freed_mb} MB RAM (giảm {res.reduction_percent}%)."
+        except Exception as e:
+            logger.warning("Memory trim warning: %s", e)
+            content = "Đã dọn sạch cache tạm và giải phóng bộ nhớ RAM."
         InfoBar.success(
-            title="Dọn Dẹp Trình Duyệt",
-            content="Đã dọn sạch cache tạm và giải phóng bộ nhớ RAM thành công.",
+            title="Dọn Dẹp Trình Duyệt & RAM",
+            content=content,
             position=InfoBarPosition.TOP,
             parent=self,
         )
 
     def _on_api_cookie(self) -> None:
-        dlg = ApiCookieDialog(vault=self.vault, parent=self)
-        dlg.exec()
+        try:
+            dlg = ApiCookieDialog(vault=self.vault, parent=self)
+            dlg.exec()
+        except Exception as e:
+            logger.error("ApiCookieDialog error: %s", e)
+            InfoBar.error(
+                title="Lỗi Cấu Hình API",
+                content=str(e),
+                position=InfoBarPosition.TOP,
+                parent=self,
+            )
 
     def _on_permissions(self) -> None:
-        dlg = PermissionsDialog(parent=self)
-        dlg.exec()
+        try:
+            dlg = PermissionsDialog(parent=self)
+            dlg.exec()
+        except Exception as e:
+            logger.error("PermissionsDialog error: %s", e)
+            InfoBar.error(
+                title="Lỗi Cấp Quyền",
+                content=str(e),
+                position=InfoBarPosition.TOP,
+                parent=self,
+            )
 
     def _on_send_recv(self) -> None:
-        dlg = SyncTransferDialog(
-            project_repo=self.project_repo,
-            profile_repo=self.profile_repo,
-            proxy_repo=self.proxy_repo,
-            parent=self,
-        )
-        if dlg.exec():
-            self.refresh_all_data()
+        try:
+            dlg = SyncTransferDialog(
+                project_repo=self.project_repo,
+                profile_repo=self.profile_repo,
+                proxy_repo=self.proxy_repo,
+                parent=self,
+            )
+            if dlg.exec():
+                self.refresh_all_data()
+        except Exception as e:
+            logger.error("SyncTransferDialog error: %s", e)
+            InfoBar.error(
+                title="Lỗi Nhận và Gửi",
+                content=str(e),
+                position=InfoBarPosition.TOP,
+                parent=self,
+            )
 
     def _on_table_cfg(self) -> None:
-        dlg = TableSettingsDialog(hidden_columns=self.hidden_columns, parent=self)
-        if dlg.exec():
-            self.hidden_columns = dlg.hidden_columns
-            for col_idx in range(self.profile_table.columnCount()):
-                self.profile_table.setColumnHidden(col_idx, col_idx in self.hidden_columns)
-            visible_count = self.profile_table.columnCount() - len(self.hidden_columns)
-            InfoBar.success(
-                title="Đã Lưu Cài Đặt Bảng",
-                content=f"Đang hiển thị {visible_count} cột, ẩn {len(self.hidden_columns)} cột.",
+        try:
+            dlg = TableSettingsDialog(hidden_columns=self.hidden_columns, parent=self)
+            if dlg.exec():
+                self.hidden_columns = dlg.hidden_columns
+                for col_idx in range(self.profile_table.columnCount()):
+                    self.profile_table.setColumnHidden(col_idx, col_idx in self.hidden_columns)
+                visible_count = self.profile_table.columnCount() - len(self.hidden_columns)
+                InfoBar.success(
+                    title="Đã Lưu Cài Đặt Bảng",
+                    content=f"Đang hiển thị {visible_count} cột, ẩn {len(self.hidden_columns)} cột.",
+                    position=InfoBarPosition.TOP,
+                    parent=self,
+                )
+        except Exception as e:
+            logger.error("TableSettingsDialog error: %s", e)
+            InfoBar.error(
+                title="Lỗi Cài Đặt Bảng",
+                content=str(e),
                 position=InfoBarPosition.TOP,
                 parent=self,
             )
 
     def _on_guide(self) -> None:
-        dlg = UserGuideDialog(parent=self)
-        dlg.exec()
+        try:
+            dlg = UserGuideDialog(parent=self)
+            dlg.exec()
+        except Exception as e:
+            logger.error("UserGuideDialog error: %s", e)
+            InfoBar.error(
+                title="Lỗi Mở Hướng Dẫn",
+                content=str(e),
+                position=InfoBarPosition.TOP,
+                parent=self,
+            )
 
     def _on_check_single_cookie(self, profile_id: int) -> None:
         p = self.profile_repo.get_by_id(profile_id)
@@ -630,9 +733,18 @@ class TikTokManagerMainWindow(QMainWindow):
         )
 
     def _on_open_trash(self) -> None:
-        dlg = TrashDialog(profile_repo=self.profile_repo, parent=self)
-        dlg.exec()
-        self.refresh_profiles()
+        try:
+            dlg = TrashDialog(profile_repo=self.profile_repo, parent=self)
+            dlg.exec()
+            self.refresh_profiles()
+        except Exception as e:
+            logger.error("TrashDialog error: %s", e)
+            InfoBar.error(
+                title="Lỗi Thùng Rác",
+                content=str(e),
+                position=InfoBarPosition.TOP,
+                parent=self,
+            )
 
     def _on_pick_video_files(self) -> None:
         files, _ = QFileDialog.getOpenFileNames(

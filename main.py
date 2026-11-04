@@ -4,7 +4,9 @@ Clean Architecture & ECC Industrial Standards.
 """
 
 import logging
+import os
 import sys
+import traceback
 from pathlib import Path
 
 import sammonny
@@ -16,6 +18,15 @@ from src.infrastructure.logging.redaction_logger import configure_app_logger
 from src.presentation.views.main_window import TikTokManagerMainWindow
 
 logger = logging.getLogger("TikTokManagerApp")
+
+
+def global_exception_hook(exctype, value, tb):
+    """Crash-Proof Guardian: Catches unhandled exceptions, logs them with redaction, and prevents silent app crash."""
+    tb_lines = "".join(traceback.format_exception(exctype, value, tb))
+    logger.critical("Unhandled Exception Caught:\n%s", tb_lines)
+
+
+sys.excepthook = global_exception_hook
 
 
 def main() -> None:
@@ -55,7 +66,7 @@ def main() -> None:
     exit_code = app.exec()
 
     try:
-        sammonny.MemoryManager.trim_working_set()
+        sammonny.MemoryManager.trim_process_tree_memory(os.getpid())
     except Exception:
         pass
 
