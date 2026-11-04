@@ -11,6 +11,8 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from src.infrastructure.browser.process_supervisor import BrowserProcessSupervisor
+
 logger = logging.getLogger(__name__)
 
 
@@ -35,7 +37,9 @@ class OrbitaLauncher:
     def __init__(self, executable_path: str | Path | None = None) -> None:
         self.executable_path = Path(executable_path) if executable_path else self._find_browser_executable()
         self._active_processes: dict[int, subprocess.Popen] = {}
+        self._active_profile_dirs: dict[int, Path] = {}
         self.vpn_bridges: dict[Any, Any] = {}
+        self.supervisor = BrowserProcessSupervisor()
 
     def _find_browser_executable(self) -> Path:
         for p in self.DEFAULT_ORBITA_PATHS:
@@ -322,6 +326,11 @@ class OrbitaLauncher:
         profile_id = profile_data.get("id")
         if profile_id is not None:
             self._active_processes[profile_id] = proc
+            self._active_profile_dirs[profile_id] = p_dir
+
+        if proc and proc.pid:
+            self.supervisor.create_lock(p_dir, pid=proc.pid)
+
         return proc
 
     def close_profile(self, profile_data: dict[str, Any] | int) -> bool:
@@ -346,7 +355,7 @@ class OrbitaLauncher:
         if p_id is not None and p_id in self._active_processes:
             proc = self._active_processes.pop(p_id)
             try:
-                proc.terminate()
+                self.supervisor.shutdown_process_tree(proc.pid)
                 closed = True
             except Exception as e:
                 logger.warning("Error terminating process for profile %s: %s", p_id, e)
@@ -355,6 +364,15 @@ class OrbitaLauncher:
                     closed = True
                 except Exception:
                     pass
+
+        # Remove lock file
+        if p_id is not None and p_id in self._active_profile_dirs:
+            p_dir = self._active_profile_dirs.pop(p_id)
+            self.supervisor.remove_lock(p_dir)
+        elif isinstance(profile_data, dict):
+            s_dir = profile_data.get("storage_dir")
+            if s_dir:
+                self.supervisor.remove_lock(Path(s_dir))
 
         # 3. Stop Userspace VPN Bridge if associated with this profile
         if p_id is not None and p_id in self.vpn_bridges:

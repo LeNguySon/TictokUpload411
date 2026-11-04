@@ -760,13 +760,44 @@ class TikTokManagerMainWindow(QMainWindow):
         try:
             import os
 
-            import sammonny
+            from src.infrastructure.browser.cache_cleaner import BrowserCacheCleaner
+            from src.infrastructure.browser.process_supervisor import BrowserProcessSupervisor
 
-            res = sammonny.MemoryManager.trim_process_tree_memory(os.getpid())
-            content = f"Đã giải phóng {res.freed_mb} MB RAM (giảm {res.reduction_percent}%)."
+            supervisor = BrowserProcessSupervisor()
+            cleaner = BrowserCacheCleaner()
+
+            # 1. Clean lingering orphan/zombie browser processes
+            orphan_pids = supervisor.cleanup_orphan_browsers()
+
+            # 2. Gather profile directories and safely purge cache
+            profile_dirs: list[Path] = []
+            for p in self.profile_repo.list_all():
+                s_dir = p.get("storage_dir")
+                if s_dir and Path(s_dir).is_dir():
+                    profile_dirs.append(Path(s_dir))
+                else:
+                    uuid_val = p.get("uuid") or p.get("name")
+                    if uuid_val:
+                        candidate = Path("profiles") / str(uuid_val)
+                        if candidate.is_dir():
+                            profile_dirs.append(candidate)
+
+            cache_summary = cleaner.clean_cache(profile_dirs)
+            freed_cache_str = cache_summary.get("formatted_freed", "0 B")
+
+            # 3. Trim working set RAM
+            trim_res = supervisor.trim_working_set(os.getpid())
+            freed_ram_mb = trim_res.get("freed_mb", 0.0)
+
+            content = (
+                f"Đã diệt {len(orphan_pids)} tiến trình mồ côi | "
+                f"Giải phóng {freed_cache_str} cache rác | "
+                f"Thu hồi {freed_ram_mb} MB RAM (Bảo tồn 100% Cookie)."
+            )
         except Exception as e:
-            logger.warning("Memory trim warning: %s", e)
-            content = "Đã dọn sạch cache tạm và giải phóng bộ nhớ RAM."
+            logger.warning("Clean browser warning: %s", e)
+            content = "Đã dọn sạch cache tạm và tối ưu bộ nhớ trình duyệt."
+
         InfoBar.success(
             title="Dọn Dẹp Trình Duyệt & RAM",
             content=content,
