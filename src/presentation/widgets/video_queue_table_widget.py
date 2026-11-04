@@ -17,6 +17,7 @@ from PyQt6.QtWidgets import (
 from qfluentwidgets import Action, FluentIcon, ProgressBar, RoundMenu, TableWidget
 
 from src.presentation.widgets.table_helpers import (
+    NumericTableWidgetItem,
     format_duration_string,
     format_mmo_metric,
     get_video_table_headers,
@@ -55,6 +56,8 @@ class VideoQueueTableWidget(TableWidget):
         self.setEditTriggers(TableWidget.EditTrigger.NoEditTriggers)
         self.setWordWrap(False)
         self.setSortingEnabled(True)
+        self.setSelectRightClickedRow(True)
+        self.itemSelectionChanged.connect(self.updateSelectedRows)
         self.setAcceptDrops(True)
         self.setDragDropMode(TableWidget.DragDropMode.DropOnly)
         self.cellDoubleClicked.connect(self._on_cell_double_clicked)
@@ -95,8 +98,18 @@ class VideoQueueTableWidget(TableWidget):
                 item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
                 return item
 
+            def make_num_item(
+                val: int | float | None,
+                display_text: str | None = None,
+                align=Qt.AlignmentFlag.AlignCenter,
+            ) -> NumericTableWidgetItem:
+                item = NumericTableWidgetItem(val, display_text)
+                item.setTextAlignment(align)
+                item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+                return item
+
             # Col 0: STT (holds video dict in UserRole)
-            stt_item = make_item(str(row_idx + 1), Qt.AlignmentFlag.AlignCenter)
+            stt_item = make_num_item(row_idx + 1, str(row_idx + 1))
             stt_item.setData(Qt.ItemDataRole.UserRole, v)
             self.setItem(row_idx, 0, stt_item)
 
@@ -107,8 +120,10 @@ class VideoQueueTableWidget(TableWidget):
             self.setItem(
                 row_idx,
                 2,
-                make_item(
-                    format_mmo_metric(v.get("views", 0)), Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+                make_num_item(
+                    v.get("views", 0),
+                    format_mmo_metric(v.get("views", 0)),
+                    Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
                 ),
             )
 
@@ -116,14 +131,24 @@ class VideoQueueTableWidget(TableWidget):
             self.setItem(
                 row_idx,
                 3,
-                make_item(
-                    format_mmo_metric(v.get("likes", 0)), Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+                make_num_item(
+                    v.get("likes", 0),
+                    format_mmo_metric(v.get("likes", 0)),
+                    Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
                 ),
             )
 
             # Col 4: Duration
             duration = v.get("duration", 7.0)
-            self.setItem(row_idx, 4, make_item(format_duration_string(duration), Qt.AlignmentFlag.AlignCenter))
+            self.setItem(
+                row_idx,
+                4,
+                make_num_item(
+                    duration,
+                    format_duration_string(duration),
+                    Qt.AlignmentFlag.AlignCenter,
+                ),
+            )
 
             # Col 5: Hiển thị
             privacy_item = make_item("Public", Qt.AlignmentFlag.AlignCenter)
@@ -210,6 +235,23 @@ class VideoQueueTableWidget(TableWidget):
         id_item = self.item(row, 11)
         if id_item and id_item.text().isdigit():
             self.edit_metadata_requested.emit(int(id_item.text()))
+
+    def mousePressEvent(self, e) -> None:
+        super().mousePressEvent(e)
+        if e.buttons() & Qt.MouseButton.LeftButton:
+            self.updateSelectedRows()
+
+    def mouseMoveEvent(self, e) -> None:
+        super().mouseMoveEvent(e)
+        if e.buttons() & Qt.MouseButton.LeftButton:
+            self.updateSelectedRows()
+
+    def keyPressEvent(self, e) -> None:
+        super().keyPressEvent(e)
+        if e.key() == Qt.Key.Key_Delete:
+            selected_ids = self.get_selected_video_ids()
+            if selected_ids:
+                self.delete_video_requested.emit(selected_ids)
 
     def contextMenuEvent(self, event) -> None:
         pos = event.pos()

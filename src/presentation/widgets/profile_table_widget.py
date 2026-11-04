@@ -10,6 +10,7 @@ from PyQt6.QtWidgets import QApplication, QHeaderView, QTableWidgetItem
 from qfluentwidgets import Action, FluentIcon, RoundMenu, TableWidget
 
 from src.presentation.widgets.table_helpers import (
+    NumericTableWidgetItem,
     format_mmo_metric,
     format_money_string,
     get_profile_table_headers,
@@ -106,8 +107,18 @@ class ProfileTableWidget(TableWidget):
                 item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
                 return item
 
+            def make_num_item(
+                val: int | float | None,
+                display_text: str | None = None,
+                align=Qt.AlignmentFlag.AlignCenter,
+            ) -> NumericTableWidgetItem:
+                item = NumericTableWidgetItem(val, display_text)
+                item.setTextAlignment(align)
+                item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+                return item
+
             # Col 0: STT (holds profile record in UserRole)
-            stt_item = make_item(str(row_idx + 1), Qt.AlignmentFlag.AlignCenter)
+            stt_item = make_num_item(row_idx + 1, str(row_idx + 1))
             stt_item.setData(Qt.ItemDataRole.UserRole, p)
             self.setItem(row_idx, 0, stt_item)
 
@@ -140,7 +151,8 @@ class ProfileTableWidget(TableWidget):
             self.setItem(
                 row_idx,
                 7,
-                make_item(
+                make_num_item(
+                    p.get("views_30d", 0),
                     format_mmo_metric(p.get("views_30d", 0)),
                     Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
                 ),
@@ -150,7 +162,8 @@ class ProfileTableWidget(TableWidget):
             self.setItem(
                 row_idx,
                 8,
-                make_item(
+                make_num_item(
+                    p.get("t_follows", 0),
                     format_mmo_metric(p.get("t_follows", 0)),
                     Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
                 ),
@@ -160,13 +173,15 @@ class ProfileTableWidget(TableWidget):
             self.setItem(
                 row_idx,
                 9,
-                make_item(
-                    format_mmo_metric(p.get("t_views", 0)), Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+                make_num_item(
+                    p.get("t_views", 0),
+                    format_mmo_metric(p.get("t_views", 0)),
+                    Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
                 ),
             )
 
             # Col 10: T.Video
-            self.setItem(row_idx, 10, make_item(str(p.get("t_video", 0)), Qt.AlignmentFlag.AlignCenter))
+            self.setItem(row_idx, 10, make_num_item(p.get("t_video", 0)))
 
             # Col 11: Email
             self.setItem(row_idx, 11, make_item(p.get("email", "")))
@@ -190,7 +205,8 @@ class ProfileTableWidget(TableWidget):
             self.setItem(
                 row_idx,
                 14,
-                make_item(
+                make_num_item(
+                    p.get("earned", 0.0),
                     format_money_string(p.get("earned", 0.0)),
                     Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
                 ),
@@ -200,7 +216,8 @@ class ProfileTableWidget(TableWidget):
             self.setItem(
                 row_idx,
                 15,
-                make_item(
+                make_num_item(
+                    p.get("balance", 0.0),
                     format_money_string(p.get("balance", 0.0)),
                     Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
                 ),
@@ -213,8 +230,10 @@ class ProfileTableWidget(TableWidget):
             self.setItem(
                 row_idx,
                 17,
-                make_item(
-                    format_money_string(p.get("rpm", 0.0)), Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+                make_num_item(
+                    p.get("rpm", 0.0),
+                    format_money_string(p.get("rpm", 0.0)),
+                    Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
                 ),
             )
 
@@ -240,16 +259,16 @@ class ProfileTableWidget(TableWidget):
             self.setItem(row_idx, 24, make_item(p.get("ts", "Yes"), Qt.AlignmentFlag.AlignCenter))
 
             # Col 25: STT (secondary)
-            self.setItem(row_idx, 25, make_item(str(p.get("stt", row_idx + 1)), Qt.AlignmentFlag.AlignCenter))
+            self.setItem(row_idx, 25, make_num_item(p.get("stt", row_idx + 1)))
 
             # Col 26: VVP
-            self.setItem(row_idx, 26, make_item(str(p.get("vvp", 0)), Qt.AlignmentFlag.AlignCenter))
+            self.setItem(row_idx, 26, make_num_item(p.get("vvp", 0)))
 
             # Col 27: MP
-            self.setItem(row_idx, 27, make_item(str(p.get("mp", 0)), Qt.AlignmentFlag.AlignCenter))
+            self.setItem(row_idx, 27, make_num_item(p.get("mp", 0)))
 
             # Col 28: ID
-            self.setItem(row_idx, 28, make_item(str(p.get("id", "")), Qt.AlignmentFlag.AlignCenter))
+            self.setItem(row_idx, 28, make_num_item(p.get("id", 0)))
 
         self.setSortingEnabled(True)
 
@@ -295,6 +314,13 @@ class ProfileTableWidget(TableWidget):
         super().mouseMoveEvent(e)
         if e.buttons() & Qt.MouseButton.LeftButton:
             self.updateSelectedRows()
+
+    def keyPressEvent(self, e) -> None:
+        super().keyPressEvent(e)
+        if e.key() == Qt.Key.Key_Delete:
+            selected_ids = self.get_selected_profile_ids()
+            if selected_ids:
+                self.soft_delete_requested.emit(selected_ids)
 
     def contextMenuEvent(self, event) -> None:
         pos = event.pos()

@@ -96,6 +96,10 @@ class ProfileRepository:
                 rows = conn.execute(query, (limit, offset)).fetchall()
             return [dict(r) for r in rows]
 
+    def list_all(self) -> list[dict[str, Any]]:
+        """Returns all non-trashed profiles."""
+        return self.list_active(limit=100000)
+
     def bulk_assign_project(self, profile_ids: list[int], project_id: int | None) -> int:
         """Atomically moves a list of profiles to a target project in a single transaction."""
         if not profile_ids:

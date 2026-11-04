@@ -2,6 +2,42 @@
 Presentation Table formatting helpers and canonical column definitions for Windows 11 Dual-Table UI.
 """
 
+from typing import Any
+
+from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import QTableWidgetItem
+
+
+class NumericTableWidgetItem(QTableWidgetItem):
+    """
+    QTableWidgetItem that sorts numerically instead of lexicographically.
+    Stores raw float/int for magnitude comparison while displaying formatted text.
+    """
+
+    def __init__(self, value: int | float | None, display_text: str | None = None) -> None:
+        try:
+            self.raw_value: float = float(value) if value is not None else 0.0
+        except (ValueError, TypeError):
+            self.raw_value = 0.0
+
+        if display_text is not None:
+            text = display_text
+        elif self.raw_value.is_integer():
+            text = str(int(self.raw_value))
+        else:
+            text = str(self.raw_value)
+
+        super().__init__(text)
+        self.setData(Qt.ItemDataRole.EditRole, self.raw_value)
+
+    def __lt__(self, other: Any) -> bool:
+        if isinstance(other, NumericTableWidgetItem):
+            return self.raw_value < other.raw_value
+        try:
+            return self.raw_value < float(other.text().replace("$", "").replace(",", ""))
+        except (ValueError, TypeError):
+            return super().__lt__(other)
+
 
 def get_profile_table_headers() -> list[str]:
     """Returns the exact 29-column headers (28 MMO attributes + STT) for the Profiles Table."""

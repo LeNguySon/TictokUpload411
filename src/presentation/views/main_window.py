@@ -7,8 +7,8 @@ import os
 import subprocess
 from pathlib import Path
 
-from PyQt6.QtCore import QPoint, QSize, Qt, QUrl
-from PyQt6.QtGui import QDesktopServices
+from PyQt6.QtCore import QPoint, QSettings, QSize, Qt, QUrl
+from PyQt6.QtGui import QDesktopServices, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QCheckBox,
     QFileDialog,
@@ -26,6 +26,7 @@ from qfluentwidgets import (
     FluentIcon,
     InfoBar,
     InfoBarPosition,
+    MessageBox,
     PrimaryPushButton,
     PushButton,
     RoundMenu,
@@ -52,6 +53,7 @@ from src.infrastructure.database.repositories.profile_repository import ProfileR
 from src.infrastructure.database.repositories.project_repository import ProjectRepository
 from src.infrastructure.database.repositories.proxy_repository import ProxyRepository
 from src.infrastructure.database.repositories.video_repository import VideoRepository
+from src.infrastructure.tiktok.passive_sync_service import PassiveTikTokSyncService
 from src.infrastructure.tiktok.sammonny_adapter import SamMonnyTikTokAdapter
 from src.presentation.dialogs.add_profile_dialog import AddProfileDialog
 from src.presentation.dialogs.api_cookie_dialog import ApiCookieDialog
@@ -100,12 +102,22 @@ class TikTokManagerMainWindow(QMainWindow):
         self.tiktok_adapter = SamMonnyTikTokAdapter(vault=self.vault)
         self.orbita_launcher = OrbitaLauncher()
 
+        # Signal Bus & Concurrency Manager
+        self.signal_bus = AppSignalBus.instance()
+        self.thread_pool = ThreadPoolManager.instance()
+
         # Application Services
         self.proxy_service = ProxyService(proxy_repo=self.proxy_repo)
+        self.passive_sync_service = PassiveTikTokSyncService(
+            profile_repo=self.profile_repo,
+            proxy_repo=self.proxy_repo,
+            signal_bus=self.signal_bus,
+        )
         self.profile_service = ProfileService(
             profile_repo=self.profile_repo,
             proxy_repo=self.proxy_repo,
             tiktok_adapter=self.tiktok_adapter,
+            sync_service=self.passive_sync_service,
         )
         self.upload_service = UploadService(
             profile_repo=self.profile_repo,
@@ -121,19 +133,25 @@ class TikTokManagerMainWindow(QMainWindow):
             proxy_repo=self.proxy_repo,
             daemon_supervisor=self.daemon_supervisor,
         )
-
-        # Signal Bus & Concurrency Manager
-        self.signal_bus = AppSignalBus.instance()
-        self.thread_pool = ThreadPoolManager.instance()
         self.thread_pool.executor.submit(self.daemon_supervisor.ensure_daemon_running)
 
-        # UI Preferences
+        # UI Preferences & Persistent Settings
+        settings = QSettings("TAVM", "TikTokManager")
+        saved_hidden = settings.value("hidden_profile_columns", "")
         self.hidden_columns: set[int] = set()
+        if saved_hidden:
+            try:
+                self.hidden_columns = {int(x) for x in str(saved_hidden).split(",") if x.strip()}
+            except (ValueError, TypeError):
+                self.hidden_columns = set()
 
         self.setWindowTitle("SSMATool Reup Tiktok - TAVM 2026 Windows 11 Edition")
         self.resize(1366, 850)
 
         self._init_ui()
+        # Apply persistent column visibility
+        for col_idx in range(self.profile_table.columnCount()):
+            self.profile_table.setColumnHidden(col_idx, col_idx in self.hidden_columns)
         self._connect_signals()
         self.refresh_all_data()
 
@@ -282,6 +300,12 @@ class TikTokManagerMainWindow(QMainWindow):
         self.chk_clean_exit.setChecked(True)
         footer.addWidget(self.chk_clean_exit)
         main_layout.addLayout(footer)
+
+        # 4. Global Keyboard Shortcuts
+        self.shortcut_f5 = QShortcut(QKeySequence("F5"), self)
+        self.shortcut_f5.activated.connect(self.refresh_all_data)
+        self.shortcut_ctrl_r = QShortcut(QKeySequence("Ctrl+R"), self)
+        self.shortcut_ctrl_r.activated.connect(self.refresh_all_data)
 
     def _connect_signals(self) -> None:
         self.signal_bus.upload_progress.connect(self._on_upload_progress)
@@ -530,13 +554,15 @@ class TikTokManagerMainWindow(QMainWindow):
     def _on_sync_selected_metrics(self) -> None:
         selected_ids = self.profile_table.get_selected_profile_ids()
         if not selected_ids:
-            InfoBar.warning(
-                title="Chưa chọn hồ sơ",
-                content="Vui lòng chọn ít nhất 1 hồ sơ để đồng bộ số liệu.",
-                position=InfoBarPosition.TOP,
-                parent=self,
-            )
-            return
+            selected_ids = [p["id"] for p in self.profile_repo.list_all()]
+            if not selected_ids:
+                InfoBar.warning(
+                    title="Chưa có hồ sơ",
+                    content="Hệ thống chưa có hồ sơ nào để đồng bộ số liệu.",
+                    position=InfoBarPosition.TOP,
+                    parent=self,
+                )
+                return
 
         try:
             worker = MetricsSyncWorker(
@@ -547,7 +573,7 @@ class TikTokManagerMainWindow(QMainWindow):
             self.thread_pool.dispatch(worker)
             InfoBar.info(
                 title="Đang đồng bộ số liệu",
-                content=f"Đang đồng bộ cho {len(selected_ids)} hồ sơ trong luồng nền...",
+                content=f"Đang đồng bộ số liệu thụ động cho {len(selected_ids)} hồ sơ...",
                 position=InfoBarPosition.TOP,
                 parent=self,
             )
@@ -670,6 +696,17 @@ class TikTokManagerMainWindow(QMainWindow):
             parent=self,
         )
 
+        # Passively inspect cookies and update LIVE/DIE status in background
+        try:
+            worker = MetricsSyncWorker(
+                profile_ids=profile_ids,
+                profile_service=self.profile_service,
+                signal_bus=self.signal_bus,
+            )
+            self.thread_pool.dispatch(worker)
+        except Exception as se:
+            logger.debug("Passive sync dispatch on close error: %s", se)
+
     def _on_sync_gologin_profiles(self) -> None:
         try:
             count = self.gologin_sync_service.sync_from_local_gologin()
@@ -789,6 +826,11 @@ class TikTokManagerMainWindow(QMainWindow):
                 self.hidden_columns = dlg.hidden_columns
                 for col_idx in range(self.profile_table.columnCount()):
                     self.profile_table.setColumnHidden(col_idx, col_idx in self.hidden_columns)
+
+                # Persist to QSettings
+                settings = QSettings("TAVM", "TikTokManager")
+                settings.setValue("hidden_profile_columns", ",".join(str(x) for x in self.hidden_columns))
+
                 visible_count = self.profile_table.columnCount() - len(self.hidden_columns)
                 InfoBar.success(
                     title="Đã Lưu Cài Đặt Bảng",
@@ -1039,12 +1081,23 @@ class TikTokManagerMainWindow(QMainWindow):
         )
 
     def _on_soft_delete_profiles(self, profile_ids: list[int]) -> None:
+        if not profile_ids:
+            return
+        count = len(profile_ids)
+        msg_box = MessageBox(
+            "Xác Nhận Chuyển Vào Thùng Rác",
+            f"Bạn có chắc chắn muốn chuyển {count} hồ sơ đã chọn vào thùng rác không?\n(Bạn có thể phục hồi hồ sơ bất kỳ lúc nào từ menu Thùng Rác).",
+            self,
+        )
+        if not msg_box.exec():
+            return
+
         for p_id in profile_ids:
             self.profile_repo.soft_delete(p_id)
         self.refresh_profiles()
         InfoBar.info(
             title="Thùng Rác",
-            content=f"Đã chuyển {len(profile_ids)} hồ sơ vào thùng rác.",
+            content=f"Đã chuyển {count} hồ sơ vào thùng rác.",
             position=InfoBarPosition.TOP,
             parent=self,
         )
@@ -1337,18 +1390,41 @@ class TikTokManagerMainWindow(QMainWindow):
     def _on_delete_selected_videos(self, video_ids_or_rows: list[int]) -> None:
         if not video_ids_or_rows:
             return
+        count = len(video_ids_or_rows)
+        msg_box = MessageBox(
+            "Xác Nhận Xóa Video",
+            f"Bạn có chắc chắn muốn xóa {count} video đã chọn khỏi hàng đợi không?",
+            self,
+        )
+        if not msg_box.exec():
+            return
+
         self.video_repo.delete_many(video_ids_or_rows)
         self.refresh_videos()
         InfoBar.info(
             title="Xóa Video",
-            content=f"Đã xóa {len(video_ids_or_rows)} video khỏi hàng đợi.",
+            content=f"Đã xóa {count} video khỏi hàng đợi.",
             position=InfoBarPosition.TOP,
             parent=self,
         )
 
     def _on_clear_video_table(self) -> None:
-        self.video_table.setRowCount(0)
-        self.lbl_video_header.setText("Bảng video Đã chọn 0 / 0")
+        if self.video_table.rowCount() == 0:
+            return
+        msg_box = MessageBox(
+            "Xác Nhận Xóa Bảng Video",
+            "Bạn có chắc chắn muốn dọn sạch toàn bộ video đang hiển thị trong bảng không?",
+            self,
+        )
+        if msg_box.exec():
+            self.video_table.setRowCount(0)
+            self.lbl_video_header.setText("Bảng video (Đã chọn 0 / 0)")
+            InfoBar.info(
+                title="Đã Xóa Bảng",
+                content="Đã dọn sạch toàn bộ video trong bảng.",
+                position=InfoBarPosition.TOP,
+                parent=self,
+            )
 
     def closeEvent(self, event) -> None:
         """Cleanup Chromium RAM working set and shutdown daemon before closing application."""

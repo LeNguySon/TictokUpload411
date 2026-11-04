@@ -22,29 +22,37 @@ class ProfileService:
         profile_repo: ProfileRepository,
         proxy_repo: ProxyRepository | None = None,
         tiktok_adapter: SamMonnyTikTokAdapter | None = None,
+        sync_service: Any | None = None,
     ) -> None:
         self.profile_repo = profile_repo
         self.proxy_repo = proxy_repo
         self.tiktok_adapter = tiktok_adapter
+        self.sync_service = sync_service
 
     def sync_metrics_from_tiktok(self, profile_id: int) -> dict[str, Any]:
         """
-        Pulls author metrics and creator capabilities via SamMonny adapter
+        Pulls author metrics and creator capabilities via Passive Sync or SamMonny adapter
         and updates the profile record in SQLite.
         """
-        if not self.tiktok_adapter:
-            raise RuntimeError("TikTok adapter is required to sync live metrics")
+        if self.sync_service:
+            return self.sync_service.sync_single_profile(profile_id)
 
-        creator_data = self.tiktok_adapter.fetch_creator_metrics(profile_id)
+        if self.tiktok_adapter:
+            try:
+                creator_data = self.tiktok_adapter.fetch_creator_metrics(profile_id)
+                update_fields: dict[str, Any] = {}
+                if "creator_username" in creator_data:
+                    update_fields["username_on_tiktok"] = creator_data["creator_username"]
+                if update_fields:
+                    self.profile_repo.update(profile_id, **update_fields)
+                return creator_data
+            except Exception:
+                pass
 
-        update_fields: dict[str, Any] = {}
-        if "creator_username" in creator_data:
-            update_fields["username_on_tiktok"] = creator_data["creator_username"]
+        from src.infrastructure.tiktok.passive_sync_service import PassiveTikTokSyncService
 
-        if update_fields:
-            self.profile_repo.update(profile_id, **update_fields)
-
-        return creator_data
+        service = PassiveTikTokSyncService(self.profile_repo, self.proxy_repo)
+        return service.sync_single_profile(profile_id)
 
     def assign_proxy(self, profile_id: int, proxy_id: int) -> bool:
         """
