@@ -4,10 +4,10 @@ Profile Table Widget displaying the 28 TikTok MMO attributes with Windows 11 Flu
 
 from typing import Any
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import QHeaderView, QTableWidgetItem
-from qfluentwidgets import TableWidget
+from qfluentwidgets import Action, RoundMenu, TableWidget
 
 from src.presentation.widgets.table_helpers import (
     format_mmo_metric,
@@ -20,6 +20,11 @@ class ProfileTableWidget(TableWidget):
     """
     Fluent UI Table for managing TikTok profiles with 28 columns matching SSMATool parity.
     """
+
+    open_orbita_requested = pyqtSignal(int)
+    check_cookie_requested = pyqtSignal(int)
+    change_status_requested = pyqtSignal(int, str)
+    soft_delete_requested = pyqtSignal(list)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -237,3 +242,40 @@ class ProfileTableWidget(TableWidget):
             if id_item and id_item.text().isdigit():
                 ids.append(int(id_item.text()))
         return ids
+
+    def contextMenuEvent(self, event) -> None:
+        selected_ids = self.get_selected_profile_ids()
+        if not selected_ids:
+            return
+
+        menu = RoundMenu(parent=self)
+        first_id = selected_ids[0]
+
+        # Action: Open Orbita Browser
+        act_orbita = Action("🌐 Mở Browser (Orbita Antidetect)", self)
+        act_orbita.triggered.connect(lambda: self.open_orbita_requested.emit(first_id))
+        menu.addAction(act_orbita)
+
+        # Action: Check Cookie
+        act_cookie = Action("🍪 Kiểm Tra Cookie LIVE / DIE", self)
+        act_cookie.triggered.connect(lambda: self.check_cookie_requested.emit(first_id))
+        menu.addAction(act_cookie)
+
+        menu.addSeparator()
+
+        # Submenu: Change Status
+        status_menu = RoundMenu("Đổi Trạng Thái", self)
+        for stat in ("LIVE", "DIE", "CHECKPOINT", "stopped"):
+            act_stat = Action(stat, self)
+            act_stat.triggered.connect(lambda checked, s=stat: self.change_status_requested.emit(first_id, s))
+            status_menu.addAction(act_stat)
+        menu.addMenu(status_menu)
+
+        menu.addSeparator()
+
+        # Action: Soft Delete
+        act_delete = Action("🗑 Chuyển Vào Thùng Rác", self)
+        act_delete.triggered.connect(lambda: self.soft_delete_requested.emit(selected_ids))
+        menu.addAction(act_delete)
+
+        menu.exec(event.globalPos())

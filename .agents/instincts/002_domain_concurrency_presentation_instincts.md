@@ -26,3 +26,4 @@ Tài liệu này ghi nhận các bài học kỹ thuật quan trọng trong quá
 ### 4. Windows 11 Fluent UI Dual-Table Synchronization
 - Sử dụng `QSplitter(Qt.Orientation.Vertical)` để phân tách Bảng Profiles (28 cột MMO) và Bảng Video Queue (14 cột).
 - Sử dụng `ProgressBar` từ `qfluentwidgets` lồng vào cột "Source" của bảng video và kết nối với tín hiệu `upload_progress(video_id, done, total, pct)` để cập nhật mượt mà theo thời gian thực mà không làm giật khung hình.
+

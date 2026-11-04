@@ -43,8 +43,10 @@ from src.infrastructure.database.repositories.proxy_repository import ProxyRepos
 from src.infrastructure.database.repositories.video_repository import VideoRepository
 from src.infrastructure.tiktok.sammonny_adapter import SamMonnyTikTokAdapter
 from src.presentation.dialogs.add_profile_dialog import AddProfileDialog
+from src.presentation.dialogs.bulk_add_profile_dialog import BulkAddProfileDialog
 from src.presentation.dialogs.project_dialog import ProjectManagerDialog
 from src.presentation.dialogs.proxy_dialog import ProxyManagerDialog
+from src.presentation.dialogs.trash_dialog import TrashDialog
 from src.presentation.widgets.profile_table_widget import ProfileTableWidget
 from src.presentation.widgets.video_queue_table_widget import VideoQueueTableWidget
 
@@ -178,7 +180,7 @@ class TikTokManagerMainWindow(QMainWindow):
         top_toolbar.addWidget(self.btn_add_1)
 
         self.btn_add_many = PrimaryPushButton("Add nhiều", self)
-        self.btn_add_many.clicked.connect(self._on_add_profile)
+        self.btn_add_many.clicked.connect(self._on_bulk_add_profiles)
         top_toolbar.addWidget(self.btn_add_many)
 
         self.btn_show_all = PushButton("Show all", self)
@@ -190,6 +192,7 @@ class TikTokManagerMainWindow(QMainWindow):
         top_toolbar.addWidget(self.btn_sync_metrics)
 
         self.btn_orbita = PushButton("🌐 Mở Browser", self)
+        self.btn_orbita.clicked.connect(self._on_launch_orbita_selected)
         top_toolbar.addWidget(self.btn_orbita)
 
         top_layout.addLayout(top_toolbar)
@@ -270,6 +273,14 @@ class TikTokManagerMainWindow(QMainWindow):
         self.signal_bus.upload_completed.connect(self._on_upload_completed)
         self.signal_bus.upload_failed.connect(self._on_upload_failed)
         self.signal_bus.profile_updated.connect(self._on_profile_updated)
+
+        # Context Menu Events
+        self.profile_table.open_orbita_requested.connect(self._on_launch_orbita)
+        self.profile_table.check_cookie_requested.connect(self._on_check_single_cookie)
+        self.profile_table.change_status_requested.connect(self._on_change_profile_status)
+        self.profile_table.soft_delete_requested.connect(self._on_soft_delete_profiles)
+        self.video_table.upload_now_requested.connect(self._on_upload_single_video)
+        self.video_table.delete_video_requested.connect(self._on_delete_selected_videos)
 
     def refresh_all_data(self) -> None:
         self._refresh_project_dropdown()
@@ -459,13 +470,120 @@ class TikTokManagerMainWindow(QMainWindow):
     def _on_profile_updated(self, profile_id: int, fields: dict) -> None:
         self.refresh_profiles()
 
-    def _on_open_trash(self) -> None:
+    def _on_bulk_add_profiles(self) -> None:
+        dlg = BulkAddProfileDialog(
+            profile_repo=self.profile_repo,
+            project_repo=self.project_repo,
+            proxy_repo=self.proxy_repo,
+            parent=self,
+        )
+        if dlg.exec():
+            self.refresh_profiles()
+
+    def _on_launch_orbita_selected(self) -> None:
+        selected = self.profile_table.get_selected_profile_ids()
+        if not selected:
+            InfoBar.warning(
+                title="Chưa chọn hồ sơ",
+                content="Vui lòng click chọn 1 hồ sơ trong bảng để mở trình duyệt.",
+                position=InfoBarPosition.TOP,
+                parent=self,
+            )
+            return
+        self._on_launch_orbita(selected[0])
+
+    def _on_launch_orbita(self, profile_id: int) -> None:
+        p = self.profile_repo.get_by_id(profile_id)
+        name = p.get("name", str(profile_id)) if p else str(profile_id)
         InfoBar.info(
-            title="Thùng Rác",
-            content="Tính năng khôi phục hồ sơ đã xóa trong CSDL SQLite.",
+            title="Khởi Chạy Trình Duyệt Orbita",
+            content=f"Đang chuẩn bị môi trường Antidetect và mở hồ sơ: {name}...",
             position=InfoBarPosition.TOP,
             parent=self,
         )
+
+    def _on_check_single_cookie(self, profile_id: int) -> None:
+        p = self.profile_repo.get_by_id(profile_id)
+        cookie = p.get("cookie") if p else None
+        if not cookie:
+            InfoBar.warning(
+                title="Không có Cookie",
+                content=f"Hồ sơ #{profile_id} chưa lưu cookie đăng nhập.",
+                position=InfoBarPosition.TOP,
+                parent=self,
+            )
+            return
+
+        # Simple verification: msToken presence or sessionid
+        is_live = bool("sessionid=" in cookie or "msToken=" in cookie)
+        new_status = "LIVE" if is_live else "DIE"
+        self.profile_repo.update(profile_id, status=new_status)
+        self.refresh_profiles()
+        InfoBar.success(
+            title="Kiểm Tra Cookie",
+            content=f"Hồ sơ #{profile_id}: Trạng thái hiện tại là {new_status}.",
+            position=InfoBarPosition.TOP,
+            parent=self,
+        )
+
+    def _on_change_profile_status(self, profile_id: int, status: str) -> None:
+        self.profile_repo.update(profile_id, status=status)
+        self.refresh_profiles()
+        InfoBar.info(
+            title="Đổi Trạng Thái",
+            content=f"Hồ sơ #{profile_id} đã chuyển sang trạng thái: {status}.",
+            position=InfoBarPosition.TOP,
+            parent=self,
+        )
+
+    def _on_soft_delete_profiles(self, profile_ids: list[int]) -> None:
+        for p_id in profile_ids:
+            self.profile_repo.soft_delete(p_id)
+        self.refresh_profiles()
+        InfoBar.info(
+            title="Thùng Rác",
+            content=f"Đã chuyển {len(profile_ids)} hồ sơ vào thùng rác.",
+            position=InfoBarPosition.TOP,
+            parent=self,
+        )
+
+    def _on_open_trash(self) -> None:
+        dlg = TrashDialog(profile_repo=self.profile_repo, parent=self)
+        dlg.exec()
+        self.refresh_profiles()
+
+    def _on_upload_single_video(self, row_index: int) -> None:
+        selected_profiles = self.profile_table.get_selected_profile_ids()
+        if not selected_profiles:
+            InfoBar.warning(
+                title="Chưa chọn tài khoản",
+                content="Vui lòng chọn 1 tài khoản ở bảng trên để đăng video này.",
+                position=InfoBarPosition.TOP,
+                parent=self,
+            )
+            return
+
+        available_videos = self.video_repo.list_available()
+        if row_index < len(available_videos):
+            video = available_videos[row_index]
+            worker = UploadWorker(
+                video_id=video["id"],
+                profile_id=selected_profiles[0],
+                upload_service=self.upload_service,
+                signal_bus=self.signal_bus,
+            )
+            self.thread_pool.dispatch(worker)
+            InfoBar.info(
+                title="Bắt Đầu Đăng",
+                content=f"Đang đăng video '{video.get('file_name')}'...",
+                position=InfoBarPosition.TOP,
+                parent=self,
+            )
+
+    def _on_delete_selected_videos(self, rows: list[int]) -> None:
+        for r in sorted(rows, reverse=True):
+            self.video_table.removeRow(r)
+        self.lbl_video_header.setText(f"Bảng video Đã chọn 0 / {self.video_table.rowCount()}")
 
     def _on_clear_video_table(self) -> None:
         self.video_table.setRowCount(0)

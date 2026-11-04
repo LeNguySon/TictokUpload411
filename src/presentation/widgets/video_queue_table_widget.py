@@ -4,10 +4,10 @@ Video Queue Table Widget displaying video queue items with progress bars and Flu
 
 from typing import Any
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import QHBoxLayout, QHeaderView, QTableWidgetItem, QWidget
-from qfluentwidgets import ProgressBar, TableWidget
+from qfluentwidgets import Action, ProgressBar, RoundMenu, TableWidget
 
 from src.presentation.widgets.table_helpers import (
     format_duration_string,
@@ -20,6 +20,9 @@ class VideoQueueTableWidget(TableWidget):
     """
     Fluent UI Table for managing video upload pipeline matching SSMATool parity.
     """
+
+    upload_now_requested = pyqtSignal(int)
+    delete_video_requested = pyqtSignal(list)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -153,3 +156,27 @@ class VideoQueueTableWidget(TableWidget):
             int_pct = int(min(100.0, max(0.0, percentage)))
             pbar.setValue(int_pct)
             pbar.setCustomText(f"{int_pct}%")
+
+    def get_selected_video_ids(self) -> list[int]:
+        """Returns list of selected video IDs."""
+        selected_rows = {index.row() for index in self.selectedIndexes()}
+        return list(selected_rows)
+
+    def contextMenuEvent(self, event) -> None:
+        selected_rows = self.get_selected_video_ids()
+        if not selected_rows:
+            return
+
+        menu = RoundMenu(parent=self)
+
+        act_upload = Action("🚀 Đăng Ngay Video Này", self)
+        act_upload.triggered.connect(lambda: self.upload_now_requested.emit(selected_rows[0]))
+        menu.addAction(act_upload)
+
+        menu.addSeparator()
+
+        act_delete = Action("🗑 Xóa Khỏi Bảng", self)
+        act_delete.triggered.connect(lambda: self.delete_video_requested.emit(selected_rows))
+        menu.addAction(act_delete)
+
+        menu.exec(event.globalPos())
