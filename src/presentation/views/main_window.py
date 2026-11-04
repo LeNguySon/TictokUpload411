@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from PyQt6.QtCore import QPoint, QSettings, QSize, Qt, QTimer, QUrl
-from PyQt6.QtGui import QColor, QDesktopServices, QKeySequence, QShortcut
+from PyQt6.QtGui import QDesktopServices, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QCheckBox,
     QFileDialog,
@@ -173,9 +173,9 @@ class TikTokManagerMainWindow(QMainWindow):
         self.scheduler_timer.timeout.connect(self._check_scheduled_queue)
         self.scheduler_timer.start()
 
-        # Real-time Profile Runtime Status Sync Timer (Every 3s)
+        # Real-time Profile Runtime Status Sync Timer (Every 1.5s for instant responsive sync)
         self.profile_status_timer = QTimer(self)
-        self.profile_status_timer.setInterval(3000)
+        self.profile_status_timer.setInterval(1500)
         self.profile_status_timer.timeout.connect(self._sync_active_profile_statuses)
         self.profile_status_timer.start()
 
@@ -436,9 +436,10 @@ class TikTokManagerMainWindow(QMainWindow):
                     prof["status"] = "running"
                     self._update_profile_status_cell(row, "running")
                 elif not is_running and current_status == "running":
-                    self.profile_repo.update(p_id, status="stopped")
-                    prof["status"] = "stopped"
-                    self._update_profile_status_cell(row, "stopped")
+                    new_status = "LIVE" if (prof.get("cookie") or prof.get("username_on_tiktok")) else "stopped"
+                    self.profile_repo.update(p_id, status=new_status)
+                    prof["status"] = new_status
+                    self._update_profile_status_cell(row, new_status)
                     # Trigger passive cookie inspection in background
                     try:
                         worker = MetricsSyncWorker(
@@ -452,7 +453,19 @@ class TikTokManagerMainWindow(QMainWindow):
         except Exception as e:
             logger.debug("Error in _sync_active_profile_statuses: %s", e)
 
+    def _find_profile_row_by_id(self, profile_id: int) -> int:
+        """Finds table row index corresponding to database profile id."""
+        total_rows = self.profile_table.rowCount()
+        for r in range(total_rows):
+            it = self.profile_table.item(r, 0)
+            if it:
+                data = it.data(Qt.ItemDataRole.UserRole)
+                if isinstance(data, dict) and data.get("id") == profile_id:
+                    return r
+        return -1
+
     def _update_profile_status_cell(self, row: int, status: str) -> None:
+        """Updates Column 12 with StatusBadgeDelegate data for instant redraw."""
         item = self.profile_table.item(row, 12)
         if not item:
             item = QTableWidgetItem(status)
@@ -460,32 +473,8 @@ class TikTokManagerMainWindow(QMainWindow):
             self.profile_table.setItem(row, 12, item)
 
         item.setText(status)
+        item.setData(Qt.ItemDataRole.UserRole, status)
         item.setToolTip(f"Trạng thái hoạt động: {status}")
-        if status == "running":
-            item.setForeground(QColor("#0078D4"))
-            font = item.font()
-            font.setBold(True)
-            item.setFont(font)
-        elif status == "LIVE":
-            item.setForeground(QColor("#107C41"))
-            font = item.font()
-            font.setBold(False)
-            item.setFont(font)
-        elif status == "DIE":
-            item.setForeground(QColor("#D83B01"))
-            font = item.font()
-            font.setBold(False)
-            item.setFont(font)
-        elif status == "CHECKPOINT":
-            item.setForeground(QColor("#CA5010"))
-            font = item.font()
-            font.setBold(False)
-            item.setFont(font)
-        elif status == "stopped":
-            item.setForeground(QColor("#605E5C"))
-            font = item.font()
-            font.setBold(False)
-            item.setFont(font)
 
     def refresh_videos(self) -> None:
         project_id = self.project_combo.currentData()
@@ -750,6 +739,12 @@ class TikTokManagerMainWindow(QMainWindow):
             parent=self,
         )
 
+        # Immediately mark selected rows as 'launching' in UI for instant responsiveness
+        for p_id in target_ids:
+            r = self._find_profile_row_by_id(p_id)
+            if r >= 0:
+                self._update_profile_status_cell(r, "launching")
+
         worker = OrbitaLaunchWorker(
             profile_ids=target_ids,
             profile_repo=self.profile_repo,
@@ -758,14 +753,31 @@ class TikTokManagerMainWindow(QMainWindow):
             orbita_launcher=self.orbita_launcher,
             daemon_supervisor=self.daemon_supervisor,
         )
+        worker.signals.profile_started.connect(self._on_orbita_profile_starting)
         worker.signals.profile_launched.connect(self._on_orbita_profile_launched)
+        worker.signals.profile_failed.connect(self._on_orbita_profile_failed)
         worker.signals.batch_completed.connect(self._on_orbita_batch_completed)
         self.thread_pool.dispatch(worker)
+
+    def _on_orbita_profile_starting(self, profile_id: int, profile_name: str) -> None:
+        row = self._find_profile_row_by_id(profile_id)
+        if row >= 0:
+            self._update_profile_status_cell(row, "launching")
+
+    def _on_orbita_profile_failed(self, profile_id: int, profile_name: str, error_msg: str) -> None:
+        logger.warning("Orbita launch failed for profile %s (#%d): %s", profile_name, profile_id, error_msg)
+        row = self._find_profile_row_by_id(profile_id)
+        if row >= 0:
+            self._update_profile_status_cell(row, "error")
 
     def _on_orbita_profile_launched(self, profile_id: int, profile_name: str, cdp_or_pid: str) -> None:
         logger.info("Orbita profile launched: %s (ID: %d) -> %s", profile_name, profile_id, cdp_or_pid)
         self.profile_repo.update(profile_id, status="running")
-        self.refresh_profiles()
+        row = self._find_profile_row_by_id(profile_id)
+        if row >= 0:
+            self._update_profile_status_cell(row, "running")
+        else:
+            self.refresh_profiles()
 
     def _on_orbita_batch_completed(self, success_count: int, total_count: int) -> None:
         if success_count == 1:
@@ -799,7 +811,11 @@ class TikTokManagerMainWindow(QMainWindow):
             target = p if p else p_id
             if self.orbita_launcher.close_profile(target):
                 closed_count += 1
-            self.profile_repo.update(p_id, status="stopped")
+            new_status = "LIVE" if (p and (p.get("cookie") or p.get("username_on_tiktok"))) else "stopped"
+            self.profile_repo.update(p_id, status=new_status)
+            row = self._find_profile_row_by_id(p_id)
+            if row >= 0:
+                self._update_profile_status_cell(row, new_status)
 
         self.refresh_profiles()
 

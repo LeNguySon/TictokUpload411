@@ -10,6 +10,7 @@ from PyQt6.QtWidgets import QApplication, QHeaderView, QTableWidgetItem
 from qfluentwidgets import Action, FluentIcon, RoundMenu, TableWidget
 
 from src.presentation.delegates.circular_avatar_delegate import CircularAvatarDelegate
+from src.presentation.delegates.status_badge_delegate import StatusBadgeDelegate
 from src.presentation.widgets.table_helpers import (
     NumericTableWidgetItem,
     format_mmo_metric,
@@ -50,6 +51,7 @@ class ProfileTableWidget(TableWidget):
         self.setHorizontalHeaderLabels(self.headers)
 
         self.setItemDelegateForColumn(1, CircularAvatarDelegate(self))
+        self.setItemDelegateForColumn(12, StatusBadgeDelegate(self))
 
         self.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         self.horizontalHeader().setStretchLastSection(False)
@@ -79,7 +81,7 @@ class ProfileTableWidget(TableWidget):
         self.setColumnWidth(9, 85)  # T.Views
         self.setColumnWidth(10, 60)  # T.Video
         self.setColumnWidth(11, 140)  # Email
-        self.setColumnWidth(12, 115)  # Tình trạng
+        self.setColumnWidth(12, 125)  # Tình trạng (Pill Badge)
         self.setColumnWidth(13, 110)  # Cookie
         self.setColumnWidth(14, 75)  # $Earned
         self.setColumnWidth(15, 75)  # $Balance
@@ -209,22 +211,10 @@ class ProfileTableWidget(TableWidget):
             # Col 11: Email
             self.setItem(row_idx, 11, make_item(p.get("email", "")))
 
-            # Col 12: Tình trạng
+            # Col 12: Tình trạng (Rendered via StatusBadgeDelegate)
             status_item = make_item(status, Qt.AlignmentFlag.AlignCenter)
+            status_item.setData(Qt.ItemDataRole.UserRole, status)
             status_item.setToolTip(f"Trạng thái hoạt động: {status}")
-            if status == "running":
-                status_item.setForeground(QColor("#0078D4"))
-                font = status_item.font()
-                font.setBold(True)
-                status_item.setFont(font)
-            elif status == "LIVE":
-                status_item.setForeground(QColor("#107C41"))
-            elif status == "DIE":
-                status_item.setForeground(QColor("#D83B01"))
-            elif status == "CHECKPOINT":
-                status_item.setForeground(QColor("#CA5010"))
-            elif status == "stopped":
-                status_item.setForeground(QColor("#605E5C"))
             self.setItem(row_idx, 12, status_item)
 
             # Col 13: Cookie (Masked)

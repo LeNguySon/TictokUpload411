@@ -184,10 +184,13 @@ def test_main_window_refresh_profiles_auto_reconciliation(isolated_db, app_insta
 
 
 def test_profile_table_widget_column_width_and_no_truncation(app_instance):
-    """Verifies that Status Column 12 has adequate width (>= 115px) and tooltip styling."""
+    """Verifies that Status Column 12 has StatusBadgeDelegate, adequate width (>= 125px), and UserRole data."""
+    from src.presentation.delegates.status_badge_delegate import StatusBadgeDelegate
+
     table = ProfileTableWidget()
-    # Check column width >= 115px
-    assert table.columnWidth(12) >= 115
+    # Check column width >= 125px and StatusBadgeDelegate attached
+    assert table.columnWidth(12) >= 125
+    assert isinstance(table.itemDelegateForColumn(12), StatusBadgeDelegate)
 
     # Check status rendering & tooltip
     profiles = [
@@ -198,16 +201,15 @@ def test_profile_table_widget_column_width_and_no_truncation(app_instance):
     table.load_profiles(profiles)
 
     item_running = table.item(0, 12)
-    assert item_running.text() == "running"
-    assert item_running.font().bold() is True
+    assert item_running.data(Qt.ItemDataRole.UserRole) == "running"
     assert "running" in item_running.toolTip()
 
     item_stopped = table.item(1, 12)
-    assert item_stopped.text() == "stopped"
+    assert item_stopped.data(Qt.ItemDataRole.UserRole) == "stopped"
     assert "stopped" in item_stopped.toolTip()
 
     item_live = table.item(2, 12)
-    assert item_live.text() == "LIVE"
+    assert item_live.data(Qt.ItemDataRole.UserRole) == "LIVE"
 
 
 def test_orbita_launcher_sdk_session_running_and_port_probe():

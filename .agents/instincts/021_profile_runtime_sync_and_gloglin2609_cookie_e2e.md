@@ -31,3 +31,4 @@
   - Tested `118.70.171.85:46796` and `118.70.171.101:50266`.
   - Both proxy endpoints are listening on HTTP protocol and returned `407 Proxy Authentication Required` (proxy server requires IP whitelist registration or credentials update on provider dashboard).
   - Saved credentials securely into `WindowsCredentialVault`.
+
