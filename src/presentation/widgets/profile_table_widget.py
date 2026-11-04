@@ -23,11 +23,13 @@ class ProfileTableWidget(TableWidget):
     """
 
     open_orbita_requested = pyqtSignal(list)
+    close_orbita_requested = pyqtSignal(list)
     check_cookie_requested = pyqtSignal(list)
     sync_metrics_requested = pyqtSignal(list)
     add_video_requested = pyqtSignal(list)
     update_proxy_requested = pyqtSignal(list)
     change_project_requested = pyqtSignal(list)
+    bulk_edit_requested = pyqtSignal(list)
     edit_profile_requested = pyqtSignal(int)
     open_web_profile_requested = pyqtSignal(str)
     open_folder_requested = pyqtSignal(str)
@@ -51,6 +53,8 @@ class ProfileTableWidget(TableWidget):
         self.setEditTriggers(TableWidget.EditTrigger.NoEditTriggers)
         self.setWordWrap(False)
         self.setSortingEnabled(True)
+        self.setSelectRightClickedRow(True)
+        self.itemSelectionChanged.connect(self.updateSelectedRows)
         self.cellDoubleClicked.connect(self._on_cell_double_clicked)
 
         # Optimize default column widths
@@ -282,6 +286,16 @@ class ProfileTableWidget(TableWidget):
         if id_item and id_item.text().isdigit():
             self.open_orbita_requested.emit([int(id_item.text())])
 
+    def mousePressEvent(self, e) -> None:
+        super().mousePressEvent(e)
+        if e.buttons() & Qt.MouseButton.LeftButton:
+            self.updateSelectedRows()
+
+    def mouseMoveEvent(self, e) -> None:
+        super().mouseMoveEvent(e)
+        if e.buttons() & Qt.MouseButton.LeftButton:
+            self.updateSelectedRows()
+
     def contextMenuEvent(self, event) -> None:
         pos = event.pos()
         item = self.itemAt(pos)
@@ -305,14 +319,24 @@ class ProfileTableWidget(TableWidget):
 
         menu = RoundMenu(parent=self)
 
-        # --- Section 1: Browser & Sync Operations ---
+        # --- Section 1: Browser Operations ---
         orbita_title = (
-            f"Mở Browser ({count} hồ sơ Orbita Antidetect)" if count > 1 else "Mở Browser (Orbita Antidetect)"
+            f"Mở Trình Duyệt ({count} hồ sơ Orbita)" if count > 1 else "Mở Trình Duyệt (Orbita Antidetect)"
         )
         act_orbita = Action(FluentIcon.GLOBE, orbita_title, self)
         act_orbita.triggered.connect(lambda: self.open_orbita_requested.emit(selected_ids))
         menu.addAction(act_orbita)
 
+        close_title = (
+            f"Đóng Trình Duyệt ({count} hồ sơ)" if count > 1 else "Đóng Trình Duyệt"
+        )
+        act_close = Action(FluentIcon.POWER_BUTTON, close_title, self)
+        act_close.triggered.connect(lambda: self.close_orbita_requested.emit(selected_ids))
+        menu.addAction(act_close)
+
+        menu.addSeparator()
+
+        # --- Section 2: Account Health & Content ---
         cookie_title = f"Kiểm Tra Cookie LIVE / DIE ({count} hồ sơ)" if count > 1 else "Kiểm Tra Cookie LIVE / DIE"
         act_cookie = Action(FluentIcon.CERTIFICATE, cookie_title, self)
         act_cookie.triggered.connect(lambda: self.check_cookie_requested.emit(selected_ids))
@@ -329,20 +353,24 @@ class ProfileTableWidget(TableWidget):
 
         menu.addSeparator()
 
-        # --- Section 2: Network & Project Categorization ---
-        proxy_title = f"Cập Nhật / Gán Proxy ({count} hồ sơ)..." if count > 1 else "Cập Nhật / Gán Proxy..."
+        # --- Section 3: Proxy & Bulk Metadata Operations ---
+        proxy_title = f"Cập Nhật / Thêm Proxy Hàng Loạt ({count} hồ sơ)..." if count > 1 else "Cập Nhật / Gán Proxy..."
         act_proxy = Action(FluentIcon.WIFI, proxy_title, self)
         act_proxy.triggered.connect(lambda: self.update_proxy_requested.emit(selected_ids))
         menu.addAction(act_proxy)
+
+        bulk_title = f"Cập Nhật Thông Tin Hàng Loạt ({count} hồ sơ)..." if count > 1 else "Chỉnh Sửa Thông Tin Hồ Sơ..."
+        act_bulk = Action(FluentIcon.EDIT, bulk_title, self)
+        if count > 1:
+            act_bulk.triggered.connect(lambda: self.bulk_edit_requested.emit(selected_ids))
+        else:
+            act_bulk.triggered.connect(lambda: self.edit_profile_requested.emit(int(first_id or 0)))
+        menu.addAction(act_bulk)
 
         project_title = f"Chuyển Vào Dự Án / Chiến Dịch ({count} hồ sơ)..." if count > 1 else "Chuyển Vào Dự Án..."
         act_project = Action(FluentIcon.FOLDER, project_title, self)
         act_project.triggered.connect(lambda: self.change_project_requested.emit(selected_ids))
         menu.addAction(act_project)
-
-        act_edit = Action(FluentIcon.EDIT, "Chỉnh Sửa Thông Tin Hồ Sơ...", self)
-        act_edit.triggered.connect(lambda: self.edit_profile_requested.emit(int(first_id or 0)))
-        menu.addAction(act_edit)
 
         menu.addSeparator()
 

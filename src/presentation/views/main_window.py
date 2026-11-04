@@ -58,6 +58,7 @@ from src.presentation.dialogs.api_cookie_dialog import ApiCookieDialog
 from src.presentation.dialogs.assign_project_dialog import AssignProjectDialog
 from src.presentation.dialogs.assign_proxy_dialog import AssignProxyDialog
 from src.presentation.dialogs.bulk_add_profile_dialog import BulkAddProfileDialog
+from src.presentation.dialogs.bulk_edit_profile_dialog import BulkEditProfileDialog
 from src.presentation.dialogs.permissions_dialog import PermissionsDialog
 from src.presentation.dialogs.project_dialog import ProjectManagerDialog
 from src.presentation.dialogs.proxy_dialog import ProxyManagerDialog
@@ -290,11 +291,13 @@ class TikTokManagerMainWindow(QMainWindow):
 
         # Context Menu Events on Profile Table
         self.profile_table.open_orbita_requested.connect(self._on_launch_orbita)
+        self.profile_table.close_orbita_requested.connect(self._on_close_orbita)
         self.profile_table.check_cookie_requested.connect(self._on_check_single_cookie)
         self.profile_table.sync_metrics_requested.connect(self._on_sync_selected_metrics)
         self.profile_table.add_video_requested.connect(self._on_add_video_for_profiles)
         self.profile_table.update_proxy_requested.connect(self._on_update_profiles_proxy)
         self.profile_table.change_project_requested.connect(self._on_change_profiles_project)
+        self.profile_table.bulk_edit_requested.connect(self._on_bulk_edit_profiles)
         self.profile_table.edit_profile_requested.connect(self._on_edit_profile)
         self.profile_table.open_web_profile_requested.connect(self._on_open_tiktok_web)
         self.profile_table.open_folder_requested.connect(self._on_open_profile_folder)
@@ -642,6 +645,30 @@ class TikTokManagerMainWindow(QMainWindow):
                 parent=self,
             )
 
+    def _on_close_orbita(self, profile_ids: list[int]) -> None:
+        if not profile_ids:
+            return
+        closed_count = 0
+        for p_id in profile_ids:
+            p = self.profile_repo.get_by_id(p_id)
+            target = p if p else p_id
+            if self.orbita_launcher.close_profile(target):
+                closed_count += 1
+
+        count = len(profile_ids)
+        title = "Đóng Trình Duyệt"
+        content = (
+            f"Đã đóng trình duyệt cho {count} hồ sơ."
+            if count > 1
+            else f"Đã đóng trình duyệt cho hồ sơ #{profile_ids[0]}."
+        )
+        InfoBar.info(
+            title=title,
+            content=content,
+            position=InfoBarPosition.TOP,
+            parent=self,
+        )
+
     def _on_sync_gologin_profiles(self) -> None:
         try:
             count = self.gologin_sync_service.sync_from_local_gologin()
@@ -874,6 +901,33 @@ class TikTokManagerMainWindow(QMainWindow):
             logger.error("AssignProjectDialog error: %s", e)
             InfoBar.error(
                 title="Lỗi Chuyển Dự Án",
+                content=str(e),
+                position=InfoBarPosition.TOP,
+                parent=self,
+            )
+
+    def _on_bulk_edit_profiles(self, profile_ids: list[int]) -> None:
+        if not profile_ids:
+            return
+        try:
+            dlg = BulkEditProfileDialog(
+                profile_ids=profile_ids,
+                profile_repo=self.profile_repo,
+                project_repo=self.project_repo,
+                parent=self,
+            )
+            if dlg.exec():
+                self.refresh_profiles()
+                InfoBar.success(
+                    title="Cập Nhật Thành Công",
+                    content=f"Đã cập nhật thông tin hàng loạt cho {len(profile_ids)} hồ sơ.",
+                    position=InfoBarPosition.TOP,
+                    parent=self,
+                )
+        except Exception as e:
+            logger.error("BulkEditProfileDialog error: %s", e)
+            InfoBar.error(
+                title="Lỗi Cập Nhật Hàng Loạt",
                 content=str(e),
                 position=InfoBarPosition.TOP,
                 parent=self,

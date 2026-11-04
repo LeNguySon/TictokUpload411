@@ -13,7 +13,10 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QContextMenuEvent
 from PyQt6.QtWidgets import QApplication
 from src.infrastructure.database.migrations.runner import run_all_migrations
+from src.infrastructure.database.repositories.profile_repository import ProfileRepository
+from src.infrastructure.database.repositories.project_repository import ProjectRepository
 from src.infrastructure.database.repositories.proxy_repository import ProxyRepository
+from src.presentation.dialogs.bulk_edit_profile_dialog import BulkEditProfileDialog
 from src.presentation.dialogs.proxy_dialog import ProxyManagerDialog
 from src.presentation.widgets.profile_table_widget import ProfileTableWidget
 from src.presentation.widgets.video_queue_table_widget import VideoQueueTableWidget
@@ -83,12 +86,22 @@ def test_profile_table_context_menu_and_signals(qapp, monkeypatch):
 
     # Check generated actions
     action_texts = [act.text() for act in captured_actions if not act.isSeparator()]
-    assert any("Mở Browser" in t for t in action_texts)
+    assert any("Mở Trình Duyệt" in t for t in action_texts)
+    assert any("Đóng Trình Duyệt" in t for t in action_texts)
     assert any("Kiểm Tra Cookie" in t for t in action_texts)
     assert any("Đồng Bộ Số Liệu" in t for t in action_texts)
-    assert any("Cập Nhật / Gán Proxy" in t for t in action_texts)
+    assert any("Proxy" in t for t in action_texts)
     assert any("Chuyển Vào Dự Án" in t for t in action_texts)
     assert any("Chuyển Vào Thùng Rác" in t for t in action_texts)
+
+    # Test multi-selection context menu
+    widget.selectAll()
+    widget.contextMenuEvent(event)
+    multi_texts = [act.text() for act in captured_actions if not act.isSeparator()]
+    assert any("Mở Trình Duyệt (2 hồ sơ" in t for t in multi_texts)
+    assert any("Đóng Trình Duyệt (2 hồ sơ)" in t for t in multi_texts)
+    assert any("Cập Nhật / Thêm Proxy Hàng Loạt (2 hồ sơ)" in t for t in multi_texts)
+    assert any("Cập Nhật Thông Tin Hàng Loạt (2 hồ sơ)" in t for t in multi_texts)
 
 
 def test_profile_table_signal_emissions(qapp):
@@ -99,23 +112,31 @@ def test_profile_table_signal_emissions(qapp):
 
     # Mock signal receivers
     mock_orbita = MagicMock()
+    mock_close_orbita = MagicMock()
     mock_proxy = MagicMock()
+    mock_bulk_edit = MagicMock()
     mock_status = MagicMock()
     mock_delete = MagicMock()
 
     widget.open_orbita_requested.connect(mock_orbita)
+    widget.close_orbita_requested.connect(mock_close_orbita)
     widget.update_proxy_requested.connect(mock_proxy)
+    widget.bulk_edit_requested.connect(mock_bulk_edit)
     widget.change_status_requested.connect(mock_status)
     widget.soft_delete_requested.connect(mock_delete)
 
     # Emit signals
     widget.open_orbita_requested.emit([42])
+    widget.close_orbita_requested.emit([42])
     widget.update_proxy_requested.emit([42])
+    widget.bulk_edit_requested.emit([42])
     widget.change_status_requested.emit([42], "LIVE")
     widget.soft_delete_requested.emit([42])
 
     mock_orbita.assert_called_once_with([42])
+    mock_close_orbita.assert_called_once_with([42])
     mock_proxy.assert_called_once_with([42])
+    mock_bulk_edit.assert_called_once_with([42])
     mock_status.assert_called_once_with([42], "LIVE")
     mock_delete.assert_called_once_with([42])
 
@@ -229,3 +250,52 @@ def test_tables_prevent_arbitrary_in_place_editing(qapp):
     pw.open_orbita_requested.connect(mock_orbita)
     pw._on_cell_double_clicked(0, 0)
     mock_orbita.assert_called_once_with([1])
+
+
+def test_bulk_edit_profile_dialog(qapp, tmp_path: Path):
+    db_file = tmp_path / "test_bulk_edit.db"
+    run_all_migrations(db_file)
+
+    profile_repo = ProfileRepository(db_file)
+    project_repo = ProjectRepository(db_file)
+
+    p1 = profile_repo.create({"name": "Profile 1", "status": "DIE", "qg": "VN"})
+    p2 = profile_repo.create({"name": "Profile 2", "status": "DIE", "qg": "VN"})
+
+    proj_id = project_repo.create("Alpha Project", "Description")
+
+    dlg = BulkEditProfileDialog(
+        profile_ids=[p1, p2],
+        profile_repo=profile_repo,
+        project_repo=project_repo,
+    )
+
+    # Check status and set to LIVE
+    dlg.chk_status.setChecked(True)
+    dlg.combo_status.setCurrentIndex(dlg.combo_status.findData("LIVE"))
+
+    # Check qg and set to US
+    dlg.chk_qg.setChecked(True)
+    dlg.input_qg.setText("US")
+
+    # Check project and set to Alpha Project
+    dlg.chk_project.setChecked(True)
+    dlg.combo_project.setCurrentIndex(dlg.combo_project.findData(proj_id))
+
+    # Apply
+    dlg._on_apply()
+
+    # Verify both profiles updated in DB
+    prof1 = profile_repo.get_by_id(p1)
+    prof2 = profile_repo.get_by_id(p2)
+
+    assert prof1["status"] == "LIVE"
+    assert prof1["country"] == "US"
+    assert prof1["project_id"] == proj_id
+
+    assert prof2["status"] == "LIVE"
+    assert prof2["country"] == "US"
+    assert prof2["project_id"] == proj_id
+
+    dlg.close()
+

@@ -29,6 +29,7 @@ class OrbitaLauncher:
 
     def __init__(self, executable_path: str | Path | None = None) -> None:
         self.executable_path = Path(executable_path) if executable_path else self._find_browser_executable()
+        self._active_processes: dict[int, subprocess.Popen] = {}
 
     def _find_browser_executable(self) -> Path:
         for p in self.DEFAULT_ORBITA_PATHS:
@@ -110,7 +111,45 @@ class OrbitaLauncher:
         )
 
         logger.info("Launching Orbita browser for profile: %s with args: %s", profile_data.get("name"), args)
-        return subprocess.Popen(args, shell=False)
+        proc = subprocess.Popen(args, shell=False)
+        profile_id = profile_data.get("id")
+        if profile_id is not None:
+            self._active_processes[profile_id] = proc
+        return proc
+
+    def close_profile(self, profile_data: dict[str, Any] | int) -> bool:
+        """Closes browser process and GoLogin session for a specific profile."""
+        if isinstance(profile_data, int):
+            p_id = profile_data
+            uuid_val = None
+        else:
+            p_id = profile_data.get("id")
+            uuid_val = profile_data.get("uuid")
+
+        closed = False
+        # 1. Stop via GoLogin SDK if UUID available
+        if uuid_val:
+            try:
+                self.stop_via_gologin_sdk(str(uuid_val))
+                closed = True
+            except Exception as e:
+                logger.warning("Error stopping via GoLogin SDK for %s: %s", uuid_val, e)
+
+        # 2. Terminate tracked subprocess Popen if active
+        if p_id is not None and p_id in self._active_processes:
+            proc = self._active_processes.pop(p_id)
+            try:
+                proc.terminate()
+                closed = True
+            except Exception as e:
+                logger.warning("Error terminating process for profile %s: %s", p_id, e)
+                try:
+                    proc.kill()
+                    closed = True
+                except Exception:
+                    pass
+
+        return closed
 
     def launch_via_gologin_sdk(
         self,

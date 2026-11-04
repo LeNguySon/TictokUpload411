@@ -88,6 +88,44 @@ def test_assign_proxy_dialog_ui(qapp, test_db_path: Path) -> None:
     dialog.close()
 
 
+def test_assign_proxy_dialog_bulk_paste_ui(qapp, test_db_path: Path) -> None:
+    """Verifies AssignProxyDialog Tab 2 batch parses proxy list and sequentially assigns 1:1."""
+    profile_repo = ProfileRepository(test_db_path)
+    proxy_repo = ProxyRepository(test_db_path)
+
+    p1 = profile_repo.create({"name": "Profile 1"})
+    p2 = profile_repo.create({"name": "Profile 2"})
+
+    dialog = AssignProxyDialog(
+        profile_ids=[p1, p2],
+        profile_repo=profile_repo,
+        proxy_repo=proxy_repo,
+    )
+
+    # Switch to Tab 2
+    dialog.tabs.setCurrentIndex(1)
+    proxy_text = "10.0.0.1:8080:user1:pass1\n10.0.0.2:9090:user2:pass2"
+    dialog.txt_bulk_proxies.setPlainText(proxy_text)
+
+    # Apply
+    dialog._on_apply()
+
+    # Verify both profiles got distinct proxies
+    prof1 = profile_repo.get_by_id(p1)
+    prof2 = profile_repo.get_by_id(p2)
+
+    assert prof1 is not None and prof1["proxy_id"] is not None
+    assert prof2 is not None and prof2["proxy_id"] is not None
+    assert prof1["proxy_id"] != prof2["proxy_id"]
+
+    px1 = proxy_repo.get_by_id(prof1["proxy_id"])
+    px2 = proxy_repo.get_by_id(prof2["proxy_id"])
+    assert px1["host"] == "10.0.0.1"
+    assert px2["host"] == "10.0.0.2"
+
+    dialog.close()
+
+
 def test_profile_table_widget_has_proxy_signal(qapp) -> None:
     """Verifies that ProfileTableWidget defines the update_proxy_requested signal."""
     table = ProfileTableWidget()

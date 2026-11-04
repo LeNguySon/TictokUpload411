@@ -41,6 +41,16 @@ class ProfileRepository:
         elif "cookie" in payload:
             payload.pop("cookie")
 
+        if "qg" in payload and "country" not in payload:
+            payload["country"] = payload.pop("qg")
+        elif "qg" in payload:
+            payload.pop("qg")
+
+        if "note" in payload and "notes" not in payload:
+            payload["notes"] = payload.pop("note")
+        elif "note" in payload:
+            payload.pop("note")
+
         with db_session(self.db_path) as conn:
             col_rows = conn.execute("PRAGMA table_info(profiles);").fetchall()
             valid_cols = {r["name"] for r in col_rows}
@@ -125,6 +135,35 @@ class ProfileRepository:
             cur = conn.execute(sql, tuple(params))
             return cur.rowcount
 
+    def bulk_update_fields(self, profile_ids: list[int], fields: dict[str, Any]) -> int:
+        """Atomically updates arbitrary fields for a list of profile IDs."""
+        if not profile_ids or not fields:
+            return 0
+        payload = dict(fields)
+        if "qg" in payload and "country" not in payload:
+            payload["country"] = payload.pop("qg")
+        elif "qg" in payload:
+            payload.pop("qg")
+
+        if "note" in payload and "notes" not in payload:
+            payload["notes"] = payload.pop("note")
+        elif "note" in payload:
+            payload.pop("note")
+
+        with db_session(self.db_path) as conn:
+            col_rows = conn.execute("PRAGMA table_info(profiles);").fetchall()
+            valid_cols = {r["name"] for r in col_rows}
+            clean_payload = {k: v for k, v in payload.items() if k in valid_cols}
+            if not clean_payload:
+                return 0
+
+            set_clauses = [f"{k} = ?" for k in clean_payload.keys()]
+            placeholders = ", ".join("?" for _ in profile_ids)
+            sql = f"UPDATE profiles SET {', '.join(set_clauses)}, updated_at = CURRENT_TIMESTAMP WHERE id IN ({placeholders});"
+            params = list(clean_payload.values()) + profile_ids
+            cur = conn.execute(sql, tuple(params))
+            return cur.rowcount
+
     def soft_delete(self, profile_id: int) -> bool:
         """Soft-deletes a profile by marking is_trashed = 1."""
         with db_session(self.db_path) as conn:
@@ -150,10 +189,25 @@ class ProfileRepository:
         if not payload:
             return False
 
-        cols = [f"{k} = ?" for k in payload.keys()]
-        sql = f"UPDATE profiles SET {', '.join(cols)}, updated_at = CURRENT_TIMESTAMP WHERE id = ?;"
-        params = list(payload.values()) + [profile_id]
+        if "qg" in payload and "country" not in payload:
+            payload["country"] = payload.pop("qg")
+        elif "qg" in payload:
+            payload.pop("qg")
+
+        if "note" in payload and "notes" not in payload:
+            payload["notes"] = payload.pop("note")
+        elif "note" in payload:
+            payload.pop("note")
 
         with db_session(self.db_path) as conn:
+            col_rows = conn.execute("PRAGMA table_info(profiles);").fetchall()
+            valid_cols = {r["name"] for r in col_rows}
+            clean_payload = {k: v for k, v in payload.items() if k in valid_cols}
+            if not clean_payload:
+                return False
+
+            cols = [f"{k} = ?" for k in clean_payload.keys()]
+            sql = f"UPDATE profiles SET {', '.join(cols)}, updated_at = CURRENT_TIMESTAMP WHERE id = ?;"
+            params = list(clean_payload.values()) + [profile_id]
             cur = conn.execute(sql, tuple(params))
             return cur.rowcount > 0

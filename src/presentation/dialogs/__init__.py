@@ -10,6 +10,7 @@ from src.presentation.dialogs.bulk_add_profile_dialog import (
     BulkAddProfileDialog,
     parse_bulk_profile_line,
 )
+from src.presentation.dialogs.bulk_edit_profile_dialog import BulkEditProfileDialog
 from src.presentation.dialogs.permissions_dialog import PermissionsDialog
 from src.presentation.dialogs.project_dialog import ProjectManagerDialog
 from src.presentation.dialogs.proxy_dialog import ProxyManagerDialog
@@ -32,6 +33,7 @@ __all__ = [
     "ProxyManagerDialog",
     "AssignProxyDialog",
     "AssignProjectDialog",
+    "BulkEditProfileDialog",
     "AddProfileDialog",
     "BulkAddProfileDialog",
     "TrashDialog",
