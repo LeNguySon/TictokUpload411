@@ -20,3 +20,4 @@
    Khi tab đã ở `tiktok.com`, `window.fetch()` tự động phân giải đường dẫn tương đối thành URL tuyệt đối `https://www.tiktok.com/...`, tự động gắn cookie phiên đăng nhập và kích hoạt các hook của ByteDance Web SDK để tạo chữ ký hợp lệ.
 3. **Truyền tham số `schedule_time` vào `post_payload`**:
    Đóng gói epoch timestamp của lịch hẹn vào `post_common_info["schedule_time"]` và chuyển `post_type` sang chế độ scheduled post.
+

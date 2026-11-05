@@ -34,9 +34,10 @@ class LazyActiveSession:
     Ensures safe shutdown and resource cleanup via close().
     """
 
-    def __init__(self, session: AntidetectSession, headless: bool = True) -> None:
+    def __init__(self, session: AntidetectSession, headless: bool = True, cookie_raw: str | None = None) -> None:
         self._session = session
         self._headless = headless
+        self._cookie_raw = cookie_raw
 
     def _ensure_active(self) -> None:
         if not getattr(self._session, "_cdp", None):
@@ -46,6 +47,34 @@ class LazyActiveSession:
                 self._headless,
             )
             self._session.start(headless=self._headless)
+            if self._cookie_raw:
+                try:
+                    from src.infrastructure.browser.cookie_injector import BrowserCookieInjector
+
+                    cookie_items = BrowserCookieInjector.parse_cookie_string(self._cookie_raw, domain=".tiktok.com")
+                    if cookie_items:
+                        self._session.cdp.send("Network.enable", {})
+                        cdp_cookies = []
+                        for it in cookie_items:
+                            cdp_cookies.append(
+                                {
+                                    "name": it["name"],
+                                    "value": it["value"],
+                                    "domain": it["domain"],
+                                    "path": it.get("path", "/"),
+                                    "secure": it.get("secure", True),
+                                    "httpOnly": it.get("httpOnly", False),
+                                    "expires": it.get("expirationDate", 2000000000),
+                                }
+                            )
+                        self._session.cdp.send("Network.setCookies", {"cookies": cdp_cookies})
+                        logger.info(
+                            "Injected %d cookies via CDP Network.setCookies for profile %s",
+                            len(cdp_cookies),
+                            getattr(self._session, "profile_id", "?"),
+                        )
+                except Exception as ce:
+                    logger.debug("CDP cookie injection notice: %s", ce)
 
     @property
     def cdp(self) -> Any:
@@ -116,7 +145,10 @@ def _default_session_factory(
     engine = AntidetectEngine(profiles_dir=OrbitaLauncher.DAEMON_PROFILES_DIR)
     raw_sess = engine.session(profile_id=target_profile_uuid)
     if lazy:
-        return LazyActiveSession(raw_sess, headless=True)  # type: ignore[return-value]
+        cookie_str = None
+        if prof:
+            cookie_str = prof.get("cookies_browser") or prof.get("cookies_json")
+        return LazyActiveSession(raw_sess, headless=True, cookie_raw=cookie_str)  # type: ignore[return-value]
     return raw_sess
 
 
