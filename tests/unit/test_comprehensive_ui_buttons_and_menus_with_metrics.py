@@ -357,8 +357,8 @@ def test_video_queue_context_menu_actions_and_metrics(populated_db, app_instance
         win = TikTokManagerMainWindow(db_path=db_file)
         assert win.video_table.rowCount() == 3
 
-        # Select a profile in profile_table so video upload action is enabled
-        win.profile_table.selectRow(0)
+        # Select a proxied profile so the upload passes the Strict Proxy Gate (row 0 is KR, unproxied)
+        win.profile_table.selectRow(win.profile_table.row_for_profile_id(populated_db["profiles"][0]))
 
         selected_vid = win.video_table.get_selected_videos()
         if not selected_vid:

@@ -38,6 +38,10 @@ def env(tmp_path: Path):
     adapter.upload_video.return_value = UploadResult(success=True, draft_id="d1", publish_id="7400000000000000001")
     service = UploadService(profile_repo=profiles, video_repo=videos, tiktok_adapter=adapter)
     pid = profiles.create({"name": "Uploader", "uuid": "uuid-up-0001", "status": "LIVE"})
+    # Strict Proxy Gate (4b522b6): uploads/syncs require a proxied profile
+    from src.infrastructure.database.repositories.proxy_repository import ProxyRepository
+
+    profiles.update(pid, proxy_id=ProxyRepository(db).create(host="10.0.0.10", port=8080))
 
     folder = tmp_path / "raw"
     folder.mkdir()

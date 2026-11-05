@@ -27,6 +27,8 @@ class ProfileRepository:
             payload["name"] = f"Profile_{payload['uuid'][:8]}"
         if "storage_dir" not in payload:
             payload["storage_dir"] = f"profiles/{payload['name']}"
+        # Unknown until synced from TikTok (schema default 1 would claim "private").
+        payload.setdefault("privacy", None)
         if "user_agent" not in payload:
             payload["user_agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/130.0.0.0"
 

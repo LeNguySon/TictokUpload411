@@ -99,6 +99,10 @@ def test_upload_service_propagates_schedule_time_to_adapter(test_db: Path, tmp_p
     """Verifies UploadService.execute_upload propagates schedule_time to the TikTok adapter."""
     prof_repo = ProfileRepository(test_db)
     prof_id = prof_repo.create({"uuid": "u-sched-test", "name": "Studio Tester", "storage_dir": "/p"})
+    # Strict Proxy Gate (4b522b6): uploads/syncs require a proxied profile
+    from src.infrastructure.database.repositories.proxy_repository import ProxyRepository
+
+    prof_repo.update(prof_id, proxy_id=ProxyRepository(test_db).create(host="10.0.0.12", port=8080))
 
     video_repo = VideoRepository(test_db)
     v_file = tmp_path / "test_clip.mp4"

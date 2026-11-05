@@ -37,11 +37,11 @@ def test_main_window_creation_and_layout(qapp):
         assert window.profile_table.horizontalHeaderItem(12).text() == "Tình trạng"
 
         # Check bottom table (Videos)
-        assert window.video_table.columnCount() == 15
+        assert window.video_table.columnCount() == 16  # 16 columns since b6eb013 (Source -> Tiến trình + Nhật Ký Upload)
         assert window.video_table.horizontalHeaderItem(0).text() == "STT"
         assert window.video_table.horizontalHeaderItem(1).text() == "Tiêu đề"
         assert window.video_table.horizontalHeaderItem(2).text() == "Dự Án"
-        assert window.video_table.horizontalHeaderItem(10).text() == "Source"
+        assert window.video_table.horizontalHeaderItem(10).text() == "Tiến trình"
 
         # Check default project dropdown has item
         assert window.project_combo.count() >= 1

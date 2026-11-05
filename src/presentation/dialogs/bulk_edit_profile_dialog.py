@@ -110,8 +110,9 @@ class BulkEditProfileDialog(QDialog):
         # 4. Privacy
         self.chk_privacy = CheckBox("Chế độ hiển thị:", self)
         self.combo_privacy = ComboBox(self)
-        for priv in ("PUBLIC", "PRIVATE", "FRIENDS"):
-            self.combo_privacy.addItem(priv, userData=priv)
+        # Account privacy as stored by the collectors: 0 = public, 1 = private.
+        for label, value in (("Công khai", 0), ("Riêng tư", 1)):
+            self.combo_privacy.addItem(label, userData=value)
         self.combo_privacy.setEnabled(False)
         self.chk_privacy.toggled.connect(self.combo_privacy.setEnabled)
         form.addRow(self.chk_privacy, self.combo_privacy)

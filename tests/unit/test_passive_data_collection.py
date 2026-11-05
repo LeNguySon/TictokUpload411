@@ -354,6 +354,10 @@ def test_metrics_sync_worker_triggers_passive_service(test_env, monkeypatch):
     signal_bus: AppSignalBus = test_env["signal_bus"]
 
     p_id = profile_repo.create({"name": "WorkerTestProfile", "username_on_tiktok": "test_user"})
+    # Strict Proxy Gate (4b522b6): uploads/syncs require a proxied profile
+    from src.infrastructure.database.repositories.proxy_repository import ProxyRepository
+
+    profile_repo.update(p_id, proxy_id=ProxyRepository(profile_repo.db_path).create(host="10.0.0.13", port=8080))
 
     # Track emitted signals
     emitted_profiles = []

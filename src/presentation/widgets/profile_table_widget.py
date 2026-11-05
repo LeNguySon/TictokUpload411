@@ -20,6 +20,20 @@ from src.presentation.widgets.table_helpers import (
 )
 
 
+def privacy_label(value: Any, synced_at: Any = None) -> str:
+    """Account privacy as stored by the collectors: 0 = public, 1 = private (TikTok privateAccount),
+    NULL = unknown. Legacy string values are accepted. A 1 on a never-synced profile is only the old
+    schema default, not a fact, so it is shown as unknown."""
+    if value is None or value == "":
+        return "—"
+    text = str(value).strip().upper()
+    if text in ("0", "PUBLIC", "FALSE"):
+        return "Công khai"
+    if text in ("1", "PRIVATE", "TRUE", "SELF_ONLY"):
+        return "Riêng tư" if (synced_at or not text.isdigit()) else "—"
+    return str(value)
+
+
 def _pick(p: dict[str, Any], *keys: str, default: Any = None) -> Any:
     """First non-empty value among ``keys``: the real `profiles` column first, then legacy aliases
     (t_follows, qg, kyc, ...) that older callers still pass."""
@@ -321,7 +335,7 @@ class ProfileTableWidget(FastTableWidget):
         self.setItem(row_idx, 21, make_item(_pick(p, "date_reapply", "re_apply", default=""), Qt.AlignmentFlag.AlignCenter))
 
         # Col 22: PRIVACY
-        self.setItem(row_idx, 22, make_item(p.get("privacy", "PUBLIC"), Qt.AlignmentFlag.AlignCenter))
+        self.setItem(row_idx, 22, make_item(privacy_label(p.get("privacy"), p.get("statistic_date_update")), Qt.AlignmentFlag.AlignCenter))
 
         # Col 23: VAT
         self.setItem(row_idx, 23, make_item(p.get("vat", "No"), Qt.AlignmentFlag.AlignCenter))

@@ -36,7 +36,7 @@ def test_db(tmp_path: Path) -> Path:
 def test_video_table_headers_include_project_column():
     """Verifies get_video_table_headers contains 'Dự Án' at column index 2."""
     headers = get_video_table_headers()
-    assert len(headers) == 15
+    assert len(headers) == 16  # 16 columns since b6eb013 (Source -> Tiến trình + Nhật Ký Upload)
     assert headers[0] == "STT"
     assert headers[1] == "Tiêu đề"
     assert headers[2] == "Dự Án"
@@ -70,7 +70,7 @@ def test_video_repository_list_available_returns_project_name(test_db: Path):
 def test_video_queue_table_renders_project_column(qapp, test_db: Path):
     """Verifies VideoQueueTableWidget populates column 2 with the project name or source directory."""
     table = VideoQueueTableWidget()
-    assert table.columnCount() == 15
+    assert table.columnCount() == 16  # 16 columns since b6eb013 (Source -> Tiến trình + Nhật Ký Upload)
     assert table.horizontalHeaderItem(2).text() == "Dự Án"
 
     videos = [

@@ -37,6 +37,10 @@ def isolated_upload_env(tmp_path: Path):
             "status": "LIVE",
         }
     )
+    # Strict Proxy Gate (4b522b6): uploads/syncs require a proxied profile
+    from src.infrastructure.database.repositories.proxy_repository import ProxyRepository
+
+    prof_repo.update(p_id, proxy_id=ProxyRepository(db_file).create(host="10.0.0.14", port=8080))
 
     vid_repo = VideoRepository(db_file)
 

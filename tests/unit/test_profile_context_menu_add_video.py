@@ -116,8 +116,9 @@ def test_video_repository_list_available_includes_reserved_videos(temp_db: Path,
     reserved = video_repo.try_reserve(vid_id, p_id)
     assert reserved is True
 
-    # Check that list_available still returns this video so it is visible in the UI table
-    items = video_repo.list_available()
+    # The queue table lists reserved videos too (only_available=False); the default (True) feeds the
+    # upload dispatcher, which must only see available ones.
+    items = video_repo.list_available(only_available=False)
     assert len(items) == 1
     assert items[0]["id"] == vid_id
     assert items[0]["status"] == "reserved"

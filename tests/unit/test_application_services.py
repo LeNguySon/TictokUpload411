@@ -93,6 +93,10 @@ def test_upload_service_orchestration(service_context):
             "status": "LIVE",
         }
     )
+    # Strict Proxy Gate (4b522b6): uploads/syncs require a proxied profile
+    from src.infrastructure.database.repositories.proxy_repository import ProxyRepository
+
+    profile_repo.update(profile_id, proxy_id=ProxyRepository(profile_repo.db_path).create(host="10.0.0.11", port=8080))
 
     # Create dummy video file
     with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as f:

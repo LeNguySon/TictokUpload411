@@ -320,12 +320,12 @@ def test_metric_tiktok_studio_schedule_rounding_and_window_bounds():
 # ---------------------------------------------------------------------------
 # 6. VideoQueueTableWidget 15 Columns & Numerical Sorting Metrics
 # ---------------------------------------------------------------------------
-def test_metric_video_queue_table_widget_15_columns_and_sorting(qapp):
-    """Verifies VideoQueueTableWidget exact 15-column schema and numeric sort stability."""
+def test_metric_video_queue_table_widget_16_columns_and_sorting(qapp):
+    """Verifies VideoQueueTableWidget exact 16-column schema and numeric sort stability."""
     table = VideoQueueTableWidget()
     headers = get_video_table_headers()
-    assert len(headers) == 15
-    assert table.columnCount() == 15
+    assert len(headers) == 16  # 16 columns since b6eb013 (Source -> Tiến trình + Nhật Ký Upload)
+    assert table.columnCount() == 16
 
     expected_headers = [
         "STT",
@@ -338,7 +338,8 @@ def test_metric_video_queue_table_widget_15_columns_and_sorting(qapp):
         "Lên lịch",
         "Upload To",
         "Tình trạng",
-        "Source",
+        "Tiến trình",
+        "Nhật Ký Upload",
         "Link gốc",
         "ID Video",
         "PVF URL",

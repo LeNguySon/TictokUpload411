@@ -26,5 +26,8 @@ Kiểm toán offline (không gọi TikTok). Test: `tests/unit/test_data_collecti
 - `curl_cffi` (khai báo trong requirements) **chưa cài trong `.venv`** tại thời điểm kiểm toán: mọi lời gọi Creator API
   (`GoLoginTikTokClient.request_api`, moderation) ném `ModuleNotFoundError`, bị bắt và chỉ log `debug` ⇒ đồng bộ sâu
   âm thầm không chạy. Kiểm tra `pip show curl_cffi` khi thấy số liệu không cập nhật.
-- Quy ước `privacy` chưa thống nhất: bộ thu thập ghi 1 = riêng tư / 0 = công khai, schema mặc định 1, dialog sửa
-  hàng loạt ghi chuỗi "PUBLIC"/"PRIVATE".
+- **Quy ước `privacy` (hồ sơ)**: `0` = công khai, `1` = riêng tư (cờ `privateAccount` của TikTok), `NULL` = chưa biết.
+  Hồ sơ mới tạo `privacy = NULL` (`ProfileRepository.create`); bảng hiển thị qua `privacy_label()` — giá trị `1` trên
+  hồ sơ chưa từng đồng bộ chỉ là mặc định schema cũ nên hiện "—". Dialog sửa hàng loạt ghi 0/1 (không có FRIENDS —
+  đó là thiết lập của video). Test: `tests/unit/test_profile_privacy_convention.py`.
+- Đã cài đủ `requirements.txt` vào `.venv` (curl_cffi 0.17.0, cryptography, geoip2, aiohttp...). Bộ test xanh 381/381.
