@@ -10,7 +10,7 @@ Kiểm toán offline luồng upload (không upload thật). Test: `tests/unit/te
 - `result.success` mà không có `publish_id` vẫn là **published** (cookie hybrid / hẹn giờ có thể không trả id). Ghi `failed` sẽ mời người dùng đăng lại ⇒ trùng video.
 - `result.is_ambiguous` (đã gửi nhưng chưa xác nhận) ⇒ giữ `uploading`, không tự thử lại; cần đối soát trên TikTok.
 - `list_available(only_available=False)` (bảng hàng đợi) hiển thị cả `failed` để có thể thử lại; scheduler và "Bắt đầu đăng" chỉ lấy `available` (không tự lặp video lỗi).
-- `mark_error` hiện **không lưu** `error_message` (bảng `video_registry` không có cột) — thông báo lỗi chỉ sống trong log/UI phiên hiện tại.
+- `video_registry.error_message` (migration `ADD COLUMN` trong `runner.py`): `mark_error` lưu lý do đã **che dữ liệu nhạy cảm** bằng `RedactionFilter.redact` và cắt còn `MAX_ERROR_MESSAGE_CHARS` (1000); `claim_for_upload` và `mark_published` xóa về NULL. Bảng hàng đợi đọc sẵn cột này (cột 11). Test: `tests/unit/test_video_error_message_column.py`.
 
 ## 2. Hẹn giờ gốc của TikTok
 - SDK gửi mọi `schedule_time` với `post_type=1`. TikTok chỉ nhận lịch **15 phút .. 10 ngày** tới. `tiktok_schedule_or_none()` (upload_policy) chỉ chuyển thời gian hợp lệ; thời gian đã tới hạn (scheduler của app dispatch đúng giờ) hoặc quá xa ⇒ đăng ngay.

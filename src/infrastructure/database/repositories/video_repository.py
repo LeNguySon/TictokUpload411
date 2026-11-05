@@ -9,10 +9,14 @@ from pathlib import Path
 from typing import Any
 
 from src.infrastructure.database.connection import DEFAULT_DB_PATH, db_session
+from src.infrastructure.logging.redaction_logger import RedactionFilter
 
 
 class VideoRepository:
     """Repository for managing the `video_registry` table."""
+
+    # Upper bound for stored upload error reasons (SDK errors can embed whole HTTP bodies).
+    MAX_ERROR_MESSAGE_CHARS = 1000
 
     def __init__(self, db_path: Path | str | None = None) -> None:
         self.db_path = db_path or DEFAULT_DB_PATH
@@ -85,7 +89,8 @@ class VideoRepository:
             cur = conn.execute(
                 """
                 UPDATE video_registry
-                SET status = 'uploading', assigned_profile_id = ?, updated_at = CURRENT_TIMESTAMP
+                SET status = 'uploading', assigned_profile_id = ?, error_message = NULL,
+                    updated_at = CURRENT_TIMESTAMP
                 WHERE id = ?
                   AND (status IN ('available', 'failed') OR (status = 'reserved' AND assigned_profile_id = ?));
                 """,
@@ -121,6 +126,7 @@ class VideoRepository:
                     published_profile_id = ?,
                     tiktok_video_id = ?,
                     published_at = CURRENT_TIMESTAMP,
+                    error_message = NULL,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = ?;
                 """,
@@ -129,15 +135,19 @@ class VideoRepository:
             return cur.rowcount > 0
 
     def mark_error(self, video_id: int, error_message: str | None = None) -> bool:
-        """Marks video as failed and increments retry count."""
+        """Marks video as failed, increments retry count and stores the (redacted, truncated) reason."""
+        reason = None
+        if error_message:
+            reason = RedactionFilter.redact(str(error_message)).strip()[: self.MAX_ERROR_MESSAGE_CHARS] or None
         with db_session(self.db_path) as conn:
             cur = conn.execute(
                 """
                 UPDATE video_registry
-                SET status = 'failed', retry_count = retry_count + 1, updated_at = CURRENT_TIMESTAMP
+                SET status = 'failed', retry_count = retry_count + 1, error_message = ?,
+                    updated_at = CURRENT_TIMESTAMP
                 WHERE id = ?;
                 """,
-                (video_id,),
+                (reason, video_id),
             )
             return cur.rowcount > 0
 

@@ -363,6 +363,7 @@ CREATE TABLE IF NOT EXISTS video_registry (
     tiktok_video_id TEXT,
     published_at TIMESTAMP,
     retry_count INTEGER DEFAULT 0,
+    error_message TEXT DEFAULT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

@@ -22,6 +22,9 @@ def run_all_migrations(db_path: Path | str | None = None) -> list[str]:
         vr_cols = [r[1] for r in vr_info]
         if vr_cols and "schedule_time" not in vr_cols:
             conn.execute("ALTER TABLE video_registry ADD COLUMN schedule_time TEXT DEFAULT NULL;")
+        if vr_cols and "error_message" not in vr_cols:
+            # Reason of the last failed upload (redacted, truncated) - survives table reloads.
+            conn.execute("ALTER TABLE video_registry ADD COLUMN error_message TEXT DEFAULT NULL;")
 
         # Pre-migration: check if projects exists and needs video_folder
         proj_info = conn.execute("PRAGMA table_info(projects);").fetchall()
