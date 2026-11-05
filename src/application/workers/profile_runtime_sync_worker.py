@@ -70,7 +70,8 @@ class ProfileRuntimeSyncWorker(BaseWorker):
             if is_running and current_status != "running":
                 deltas[p_id] = "running"
             elif not is_running and current_status == "running":
-                new_status = "LIVE" if (p.get("cookie") or p.get("username_on_tiktok")) else "stopped"
+                has_session = p.get("cookies_browser") or p.get("cookies_json") or p.get("cookie")
+                new_status = "LIVE" if (has_session or p.get("username_on_tiktok")) else "stopped"
                 deltas[p_id] = new_status
 
         if deltas and not self.is_cancelled:

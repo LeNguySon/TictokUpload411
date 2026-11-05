@@ -151,7 +151,14 @@ class AddProfileDialog(QDialog):
                 self.proxy_combo.setCurrentIndex(i)
                 break
 
-        self.cookie_input.setPlainText(self.profile_data.get("cookie", "") or "")
+        # Stored cookies live in cookies_browser / cookies_json (there is no "cookie" column).
+        self._original_cookie = str(
+            self.profile_data.get("cookies_browser")
+            or self.profile_data.get("cookies_json")
+            or self.profile_data.get("cookie")
+            or ""
+        )
+        self.cookie_input.setPlainText(self._original_cookie)
 
     def _on_save(self) -> None:
         name = self.name_input.text().strip()
@@ -170,9 +177,13 @@ class AddProfileDialog(QDialog):
                 "name": name,
                 "project_id": project_id,
                 "proxy_id": proxy_id,
-                "cookie": cookie if cookie else None,
             }
-            if cookie or token:
+            # Only write cookies when the user actually changed them ("cookie" is not a column and
+            # was silently dropped before; an untouched field must not overwrite stored cookies).
+            cookie_changed = cookie != getattr(self, "_original_cookie", "").strip()
+            if cookie_changed:
+                update_payload["cookies_json"] = cookie if cookie else None
+            if (cookie_changed and cookie) or token:
                 update_payload["status"] = "LIVE"
             self.profile_repo.update(profile_id, update_payload)
 

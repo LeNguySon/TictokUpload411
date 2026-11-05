@@ -20,6 +20,16 @@ from src.presentation.widgets.table_helpers import (
 )
 
 
+def _pick(p: dict[str, Any], *keys: str, default: Any = None) -> Any:
+    """First non-empty value among ``keys``: the real `profiles` column first, then legacy aliases
+    (t_follows, qg, kyc, ...) that older callers still pass."""
+    for key in keys:
+        value = p.get(key)
+        if value is not None and value != "":
+            return value
+    return default
+
+
 class ProfileTableWidget(FastTableWidget):
     """
     Fluent UI Table for managing TikTok profiles with 28 columns matching SSMATool parity.
@@ -134,7 +144,8 @@ class ProfileTableWidget(FastTableWidget):
     def _populate_row(self, row_idx: int, p: dict[str, Any], *, stt: int) -> None:
         """Builds all cells of one profile row (shared by full load and single-row patches)."""
         status = p.get("status", "stopped")
-        logged_in = bool(p.get("cookie") or p.get("logged", False))
+        cookie_raw = str(_pick(p, "cookies_browser", "cookies_json", "cookie", default="") or "")
+        logged_in = bool(cookie_raw or p.get("state_loggin_browser") or p.get("logged", False))
 
         # Helper to create non-editable items
         def make_item(
@@ -205,8 +216,8 @@ class ProfileTableWidget(FastTableWidget):
             row_idx,
             7,
             make_num_item(
-                p.get("views_30d", 0),
-                format_mmo_metric(p.get("views_30d", 0)),
+                _pick(p, "views_month", "views_30d", default=0),
+                format_mmo_metric(_pick(p, "views_month", "views_30d", default=0)),
                 Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
             ),
         )
@@ -216,8 +227,8 @@ class ProfileTableWidget(FastTableWidget):
             row_idx,
             8,
             make_num_item(
-                p.get("t_follows", 0),
-                format_mmo_metric(p.get("t_follows", 0)),
+                _pick(p, "total_followers", "t_follows", default=0),
+                format_mmo_metric(_pick(p, "total_followers", "t_follows", default=0)),
                 Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
             ),
         )
@@ -227,14 +238,14 @@ class ProfileTableWidget(FastTableWidget):
             row_idx,
             9,
             make_num_item(
-                p.get("t_views", 0),
-                format_mmo_metric(p.get("t_views", 0)),
+                _pick(p, "total_views", "t_views", default=0),
+                format_mmo_metric(_pick(p, "total_views", "t_views", default=0)),
                 Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
             ),
         )
 
         # Col 10: T.Video
-        self.setItem(row_idx, 10, make_num_item(p.get("t_video", 0)))
+        self.setItem(row_idx, 10, make_num_item(_pick(p, "total_videos", "t_video", default=0)))
 
         # Col 11: Email
         self.setItem(row_idx, 11, make_item(p.get("email", "")))
@@ -246,8 +257,7 @@ class ProfileTableWidget(FastTableWidget):
         self.setItem(row_idx, 12, status_item)
 
         # Col 13: Cookie (Masked)
-        raw_cookie = p.get("cookie", "")
-        masked_cookie = (raw_cookie[:14] + "...") if len(raw_cookie) > 14 else raw_cookie
+        masked_cookie = (cookie_raw[:14] + "...") if len(cookie_raw) > 14 else cookie_raw
         self.setItem(row_idx, 13, make_item(masked_cookie))
 
         # Col 14: $Earned
@@ -255,8 +265,8 @@ class ProfileTableWidget(FastTableWidget):
             row_idx,
             14,
             make_num_item(
-                p.get("earned", 0.0),
-                format_money_string(p.get("earned", 0.0)),
+                _pick(p, "money_earned", "earned", default=0.0),
+                format_money_string(_pick(p, "money_earned", "earned", default=0.0)),
                 Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
             ),
         )
@@ -299,16 +309,16 @@ class ProfileTableWidget(FastTableWidget):
         )
 
         # Col 18: QG
-        self.setItem(row_idx, 18, make_item(p.get("qg", ""), Qt.AlignmentFlag.AlignCenter))
+        self.setItem(row_idx, 18, make_item(_pick(p, "country", "qg", default=""), Qt.AlignmentFlag.AlignCenter))
 
         # Col 19: KYC
-        self.setItem(row_idx, 19, make_item(p.get("kyc", "No"), Qt.AlignmentFlag.AlignCenter))
+        self.setItem(row_idx, 19, make_item(_pick(p, "state_kyc", "kyc", default="No"), Qt.AlignmentFlag.AlignCenter))
 
         # Col 20: Note
-        self.setItem(row_idx, 20, make_item(p.get("note", "")))
+        self.setItem(row_idx, 20, make_item(_pick(p, "notes", "note", default="")))
 
         # Col 21: Re.Apply
-        self.setItem(row_idx, 21, make_item(p.get("re_apply", ""), Qt.AlignmentFlag.AlignCenter))
+        self.setItem(row_idx, 21, make_item(_pick(p, "date_reapply", "re_apply", default=""), Qt.AlignmentFlag.AlignCenter))
 
         # Col 22: PRIVACY
         self.setItem(row_idx, 22, make_item(p.get("privacy", "PUBLIC"), Qt.AlignmentFlag.AlignCenter))

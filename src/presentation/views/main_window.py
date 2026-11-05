@@ -953,7 +953,8 @@ class TikTokManagerMainWindow(QMainWindow):
                     launcher.close_profile(p if p else p_id)
                 except Exception as e:
                     logger.warning("Close Orbita failed for profile %s: %s", p_id, e)
-                new_status = "LIVE" if (p and (p.get("cookie") or p.get("username_on_tiktok"))) else "stopped"
+                has_session = p and (p.get("cookies_browser") or p.get("cookies_json") or p.get("cookie"))
+                new_status = "LIVE" if (p and (has_session or p.get("username_on_tiktok"))) else "stopped"
                 repo.update(p_id, status=new_status)
                 statuses[p_id] = new_status
             return statuses

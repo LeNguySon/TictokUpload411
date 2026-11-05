@@ -16,7 +16,7 @@ Benchmark tái lập: `scratch/perf/bench_p0.py` (offscreen, 500 dòng × 29 c�
 ## 3. `profile_updated` → vá dòng, không reload bảng
 - `main_window._on_profile_updated` chỉ xếp hàng patch; `_flush_profile_patches` (QTimer single-shot 250 ms) gộp và gọi `profile_table.update_profile_row()` (~1 ms/dòng thay vì ~270 ms reload + DB + quét psutil).
 - Fallback 1 lần `refresh_profiles()` khi profile chưa hiển thị, bị trash hoặc chuyển project.
-- Lưu ý (lỗi có sẵn, chưa sửa): bảng đọc `t_follows/t_views/t_video/earned/qg/kyc` trong khi DB/emitter dùng `total_followers/total_views/total_videos/money_earned/country/state_kyc` ⇒ các cột đó luôn hiển thị 0.
+- **Đã sửa — đọc đúng cột DB**: bảng Profile từng đọc key không tồn tại trong schema (`t_follows/t_views/t_video/views_30d/earned/qg/kyc/note/re_apply/cookie`) nên các cột luôn 0/trống. `_populate_row` dùng `_pick(p, "<cột DB>", "<alias cũ>")`: **luôn đọc tên cột thật trong `profiles` trước**, alias chỉ để tương thích. Không có cột `cookie`: cookie nằm ở `cookies_browser` / `cookies_json` (dialog sửa hồ sơ từng hiện trống và âm thầm bỏ cookie mới nhập; giờ chỉ ghi `cookies_json` khi người dùng thực sự đổi). Test: `tests/unit/test_profile_table_db_columns.py`. Chưa rõ nghĩa nên chưa map: MP, TS, PRIVACY (DB là INTEGER).
 
 ## 4. Không ghi SQLite trong slot GUI
 - `writer_lock` dùng chung theo DB: slot GUI ghi DB khi worker upload đang giữ giao dịch sẽ block tới `busy_timeout` (đo được ~1 s). Ghi ở worker (`ProfileRuntimeSyncWorker._persist_deltas`, gom theo status bằng `bulk_update_fields`), slot chỉ cập nhật ô.
