@@ -33,7 +33,14 @@ def global_exception_hook(exctype, value, tb):
 sys.excepthook = global_exception_hook
 
 
+def ensure_portable_workdir() -> None:
+    """Packaged exe: data/, logs/ and profiles/ live next to the exe, whatever folder it is started from."""
+    if getattr(sys, "frozen", False):
+        os.chdir(Path(sys.executable).resolve().parent)
+
+
 def main() -> None:
+    ensure_portable_workdir()
     # 0. Windows Console UTF-8 Encoding & Taskbar AppUserModelID Hook
     if sys.platform == "win32":
         try:

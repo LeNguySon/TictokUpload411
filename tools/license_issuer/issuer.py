@@ -67,10 +67,36 @@ def _load_private(home: Path, kid: str) -> Ed25519PrivateKey:
 
 def keygen(home: Path, kid: str | None = None) -> tuple[str, str]:
     """Creates a signing key; returns (kid, public key) to put in src/infrastructure/licensing/trusted_keys.py."""
-    kid = kid or datetime.now().strftime("k%Y%m%d")
+    kid = kid or next_kid(home)
     sk = Ed25519PrivateKey.generate()
     _save_private(home, kid, sk)
     return kid, public_key_b64(sk)
+
+
+def list_kids(home: Path) -> list[str]:
+    folder = Path(home) / "signing_keys"
+    return sorted(p.stem for p in folder.glob("*.key")) if folder.is_dir() else []
+
+
+def next_kid(home: Path) -> str:
+    """``k<YYYYMMDD>``, with a letter suffix when a key was already created that day."""
+    base = datetime.now().strftime("k%Y%m%d")
+    existing = set(list_kids(home))
+    if base not in existing:
+        return base
+    for suffix in "abcdefghijklmnopqrstuvwxyz":
+        if base + suffix not in existing:
+            return base + suffix
+    raise ValueError("Too many signing keys created today")
+
+
+def read_ledger(home: Path) -> list[dict[str, str]]:
+    """Issued licenses, newest first."""
+    ledger = Path(home) / "issued_licenses.csv"
+    if not ledger.exists():
+        return []
+    with ledger.open(encoding="utf-8", newline="") as fh:
+        return list(reversed(list(csv.DictReader(fh))))
 
 
 def public_key(home: Path, kid: str) -> str:
