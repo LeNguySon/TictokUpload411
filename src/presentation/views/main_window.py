@@ -13,6 +13,7 @@ from PyQt6.QtCore import QPoint, QSettings, QSize, Qt, QTimer, QUrl
 from PyQt6.QtGui import QDesktopServices, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QApplication,
+    QDialog,
     QFileDialog,
     QHBoxLayout,
     QLabel,
@@ -42,17 +43,19 @@ from qfluentwidgets import (
 )
 
 from src.application.services.gologin_sync_service import GoLoginSyncService
+from src.application.services.license_service import LicenseService
 from src.application.services.profile_service import ProfileService
 from src.application.services.proxy_service import ProxyService
 from src.application.services.upload_service import UploadService
 from src.application.signals.app_signals import AppSignalBus
-from src.presentation.app_icon import get_app_icon
 from src.application.workers.metrics_sync_worker import MetricsSyncWorker
 from src.application.workers.orbita_launch_worker import OrbitaLaunchWorker
 from src.application.workers.task_worker import run_task
 from src.application.workers.thread_pool_manager import ThreadPoolManager
 from src.application.workers.upload_worker import UploadWorker
 from src.application.workers.video_import_worker import VideoImportWorker
+from src.domain.licensing import entitlements
+from src.domain.licensing.plans import PLAN_DISPLAY_NAMES, Feature, upgrade_hint
 from src.infrastructure.browser.orbita_launcher import OrbitaLauncher
 from src.infrastructure.browser.sammonny_daemon_manager import SamMonnyDaemonSupervisor
 from src.infrastructure.credentials.windows_vault import WindowsCredentialVault
@@ -62,6 +65,7 @@ from src.infrastructure.database.repositories.proxy_repository import ProxyRepos
 from src.infrastructure.database.repositories.video_repository import VideoRepository
 from src.infrastructure.tiktok.passive_sync_service import PassiveTikTokSyncService
 from src.infrastructure.tiktok.sammonny_adapter import SamMonnyTikTokAdapter
+from src.presentation.app_icon import get_app_icon
 from src.presentation.delegates.circular_avatar_delegate import forget_avatar
 from src.presentation.dialogs.add_profile_dialog import AddProfileDialog
 from src.presentation.dialogs.api_cookie_dialog import ApiCookieDialog
@@ -71,6 +75,7 @@ from src.presentation.dialogs.batch_folder_upload_dialog import BatchFolderUploa
 from src.presentation.dialogs.bulk_add_profile_dialog import BulkAddProfileDialog
 from src.presentation.dialogs.bulk_edit_profile_dialog import BulkEditProfileDialog
 from src.presentation.dialogs.channel_radar_dialog import ChannelRadarDialog
+from src.presentation.dialogs.license_activation_dialog import LicenseActivationDialog
 from src.presentation.dialogs.permissions_dialog import PermissionsDialog
 from src.presentation.dialogs.project_dialog import ProjectManagerDialog
 from src.presentation.dialogs.proxy_dialog import ProxyManagerDialog
@@ -83,6 +88,7 @@ from src.presentation.dialogs.video_metadata_dialog import VideoMetadataDialog
 from src.presentation.widgets.fluent_compat import apply_fluent_compat_patches
 from src.presentation.widgets.profile_table_widget import ProfileTableWidget
 from src.presentation.widgets.video_queue_table_widget import VideoQueueTableWidget
+from src.version import __version__
 
 PROFILE_PATCH_COALESCE_MS = 250
 PROFILE_SEARCH_WIDTH = 340
@@ -102,8 +108,12 @@ class TikTokManagerMainWindow(QMainWindow):
         self,
         db_path: Path | str | None = None,
         parent=None,
+        license_service: LicenseService | None = None,
     ) -> None:
         super().__init__(parent)
+        # Validated license (main.py). None in tests: no runtime lock timer, entitlements set by fixtures.
+        self.license_service = license_service
+        self._license_locked = False
         apply_fluent_compat_patches()  # before any SpinBox is created/laid out
         self.db_path = db_path
         try:
@@ -222,6 +232,19 @@ class TikTokManagerMainWindow(QMainWindow):
         self.profile_status_timer.setInterval(3000)
         self.profile_status_timer.timeout.connect(self._sync_active_profile_statuses)
         self.profile_status_timer.start()
+
+        self._apply_license()
+        if self.license_service is not None:
+            # Expiry while the app stays open locks it (cheap, no I/O).
+            self.license_timer = QTimer(self)
+            self.license_timer.setInterval(60_000)
+            self.license_timer.timeout.connect(self._check_license)
+            self.license_timer.start()
+            # Clock-rollback guard: persist the latest time seen (file I/O, off the GUI thread).
+            self.license_clock_timer = QTimer(self)
+            self.license_clock_timer.setInterval(30 * 60_000)
+            self.license_clock_timer.timeout.connect(lambda: run_task(self.license_service.record_seen_time))
+            self.license_clock_timer.start()
 
     def _init_ui(self) -> None:
         central_widget = QWidget(self)
@@ -371,7 +394,7 @@ class TikTokManagerMainWindow(QMainWindow):
         # 3. Footer / Status Bar
         footer = QHBoxLayout()
         self.lbl_footer_status = QLabel(
-            "Xin chào user | Thời gian hết hạn: 07-08-2026 | Gói: Goepro | Version: 1.5.5.2",
+            "",
             self,
         )
         self.lbl_footer_status.setStyleSheet("color: #605E5C; font-size: 11px;")
@@ -727,11 +750,11 @@ class TikTokManagerMainWindow(QMainWindow):
         act_send_recv.triggered.connect(self._on_send_recv)
         self.settings_menu.addAction(act_send_recv)
 
-        act_radar = Action(FluentIcon.SPEED_HIGH, "Radar Đánh Giá Kênh & Cảnh Báo...", self)
+        act_radar = self.act_radar = Action(FluentIcon.SPEED_HIGH, "Radar Đánh Giá Kênh & Cảnh Báo...", self)
         act_radar.triggered.connect(lambda: self._on_open_channel_radar())
         self.settings_menu.addAction(act_radar)
 
-        act_health = Action(FluentIcon.HEART, "Kiểm Tra Sức Khỏe Kênh & Gậy Vi Phạm...", self)
+        act_health = self.act_health = Action(FluentIcon.HEART, "Kiểm Tra Sức Khỏe Kênh & Gậy Vi Phạm...", self)
         act_health.triggered.connect(lambda: self._on_open_account_health())
         self.settings_menu.addAction(act_health)
 
@@ -745,6 +768,10 @@ class TikTokManagerMainWindow(QMainWindow):
         act_clean = Action(FluentIcon.BRUSH, "Dọn dẹp trình duyệt & Giải phóng RAM", self)
         act_clean.triggered.connect(self._on_clean_browser)
         self.settings_menu.addAction(act_clean)
+
+        act_license = Action(FluentIcon.CERTIFICATE, "Bản quyền (Kích hoạt / Gia hạn)", self)
+        act_license.triggered.connect(self._on_open_license)
+        self.settings_menu.addAction(act_license)
 
         act_guide = Action(FluentIcon.HELP, "Hướng dẫn sử dụng (Documentation)", self)
         act_guide.triggered.connect(self._on_guide)
@@ -1486,6 +1513,8 @@ class TikTokManagerMainWindow(QMainWindow):
         dlg.exec()
 
     def _on_open_channel_radar(self, profile_id: int | None = None) -> None:
+        if not self._feature_allowed(Feature.CHANNEL_HEALTH):
+            return
         target_id = profile_id
         if target_id is None or target_id <= 0:
             selected = self.profile_table.get_selected_profile_ids()
@@ -1509,6 +1538,8 @@ class TikTokManagerMainWindow(QMainWindow):
         dlg.exec()
 
     def _on_open_account_health(self, profile_id: int | None = None) -> None:
+        if not self._feature_allowed(Feature.CHANNEL_HEALTH):
+            return
         target_id = profile_id
         if target_id is None or target_id <= 0:
             selected = self.profile_table.get_selected_profile_ids()
@@ -1564,6 +1595,8 @@ class TikTokManagerMainWindow(QMainWindow):
             )
 
     def _on_add_video_for_profiles(self, profile_ids: list[int]) -> None:
+        if not self._feature_allowed(Feature.UPLOAD):
+            return
         if not profile_ids:
             return
 
@@ -1729,6 +1762,8 @@ class TikTokManagerMainWindow(QMainWindow):
         return ""
 
     def _on_pick_video_files(self) -> None:
+        if not self._feature_allowed(Feature.UPLOAD):
+            return
         start_dir = self._get_initial_video_pick_folder()
         files, _ = QFileDialog.getOpenFileNames(
             self,
@@ -1768,6 +1803,8 @@ class TikTokManagerMainWindow(QMainWindow):
             )
 
     def _on_open_batch_folder_upload(self) -> None:
+        if not self._feature_allowed(Feature.UPLOAD):
+            return
         proj_id = self.project_combo.currentData()
         proj_name = self.project_combo.currentText() if proj_id is not None else None
         dlg = BatchFolderUploadDialog(
@@ -1791,6 +1828,8 @@ class TikTokManagerMainWindow(QMainWindow):
                 self._on_start_upload_queue()
 
     def _on_schedule_videos(self) -> None:
+        if not self._feature_allowed(Feature.UPLOAD):
+            return
         available_videos = self.video_repo.list_available()
         if not available_videos:
             InfoBar.warning(
@@ -1845,6 +1884,8 @@ class TikTokManagerMainWindow(QMainWindow):
             )
 
     def _on_schedule_videos_from_table(self, selected_ids_or_rows: list[int]) -> None:
+        if not self._feature_allowed(Feature.UPLOAD):
+            return
         if not selected_ids_or_rows:
             return
 
@@ -1889,6 +1930,8 @@ class TikTokManagerMainWindow(QMainWindow):
 
     def _check_scheduled_queue(self) -> None:
         """Periodically scans for scheduled videos that have reached their upload time."""
+        if not entitlements.has(Feature.UPLOAD):
+            return  # plan without automatic upload
         try:
             now_iso = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             due_videos = self.video_repo.list_scheduled_due(max_time_iso=now_iso)
@@ -1992,6 +2035,8 @@ class TikTokManagerMainWindow(QMainWindow):
         QDesktopServices.openUrl(QUrl(url))
 
     def _on_start_upload_queue(self) -> None:
+        if not self._feature_allowed(Feature.UPLOAD):
+            return
         selected_profiles = self.profile_table.get_selected_profile_ids()
         available_videos = self.video_repo.list_available(only_available=True)
 
@@ -2303,6 +2348,67 @@ class TikTokManagerMainWindow(QMainWindow):
                 parent=self,
             )
 
+    def _feature_allowed(self, feature: Feature) -> bool:
+        if entitlements.has(feature):
+            return True
+        InfoBar.warning(
+            title="Cần nâng cấp gói",
+            content=upgrade_hint(feature),
+            position=InfoBarPosition.TOP,
+            parent=self,
+        )
+        return False
+
+    def _apply_license(self) -> None:
+        """Footer and per-plan availability come from the validated license (no hard-coded text)."""
+        claims = entitlements.current()
+        if claims is not None:
+            expiry = datetime.fromtimestamp(claims.exp).strftime("%d-%m-%Y")
+            text = (
+                f"Xin chào {claims.sub} | Hết hạn: {expiry} | Gói: {PLAN_DISPLAY_NAMES[claims.plan]}"
+                f" | Version: {__version__}"
+            )
+        else:
+            text = f"Chưa kích hoạt bản quyền | Version: {__version__}"
+        self.lbl_footer_status.setText(text)
+
+        if not hasattr(self, "_base_tooltips"):
+            self._base_tooltips: dict[int, str] = {}
+        upload = entitlements.has(Feature.UPLOAD)
+        for btn in (self.btn_batch_upload, self.btn_pick_pc, self.btn_schedule, self.btn_start_upload):
+            base = self._base_tooltips.setdefault(id(btn), btn.toolTip())
+            btn.setEnabled(upload)
+            btn.setToolTip(base if upload else upgrade_hint(Feature.UPLOAD))
+        health = entitlements.has(Feature.CHANNEL_HEALTH)
+        for act in (self.act_radar, self.act_health):
+            act.setEnabled(health)
+
+    def _check_license(self) -> None:
+        """Locks the whole app when the license stops being valid (e.g. expires while running)."""
+        if self.license_service is None or self._license_locked:
+            return
+        state = self.license_service.runtime_check()
+        if state.ok:
+            return
+        self._license_locked = True
+        self.hide()
+        dlg = LicenseActivationDialog(self.license_service, state)
+        accepted = dlg.exec() == QDialog.DialogCode.Accepted
+        self._license_locked = False
+        if accepted:
+            self._apply_license()
+            self.show()
+            return
+        self.close()
+        QApplication.quit()
+
+    def _on_open_license(self) -> None:
+        if self.license_service is None:
+            self.license_service = LicenseService()
+            self.license_service.validate()
+        if LicenseActivationDialog(self.license_service, parent=self).exec() == QDialog.DialogCode.Accepted:
+            self._apply_license()
+
     def _settings(self) -> QSettings:
         """Single access point to persisted UI preferences (tests point it at a temp ini file)."""
         return QSettings("TAVM", "TikTokManager")
@@ -2350,6 +2456,9 @@ class TikTokManagerMainWindow(QMainWindow):
                 self.scheduler_timer.stop()
             if hasattr(self, "profile_status_timer") and self.profile_status_timer.isActive():
                 self.profile_status_timer.stop()
+            for name in ("license_timer", "license_clock_timer"):
+                if hasattr(self, name):
+                    getattr(self, name).stop()
         except Exception:
             pass
 

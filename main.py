@@ -11,11 +11,13 @@ from pathlib import Path
 
 import sammonny
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtWidgets import QApplication, QDialog
+from src.application.services.license_service import LicenseService
 from src.infrastructure.database.connection import DEFAULT_DB_PATH
 from src.infrastructure.database.migrations.runner import run_all_migrations
 from src.infrastructure.logging.redaction_logger import configure_app_logger
 from src.presentation.app_icon import get_app_icon
+from src.presentation.dialogs.license_activation_dialog import LicenseActivationDialog
 from src.presentation.views.main_window import TikTokManagerMainWindow
 from src.presentation.widgets.fluent_compat import apply_fluent_compat_patches
 
@@ -83,11 +85,18 @@ def main() -> None:
     font.setPointSize(9)
     app.setFont(font)
 
-    # 4. Instantiate and display Fluent Windows 11 Main Window
-    window = TikTokManagerMainWindow(db_path=DEFAULT_DB_PATH)
+    # 4. License gate: offline Ed25519 key bound to this machine. Without a valid one the app stays locked.
+    license_service = LicenseService()
+    state = license_service.validate()
+    if not state.ok and LicenseActivationDialog(license_service, state).exec() != QDialog.DialogCode.Accepted:
+        logger.info("No valid license (%s); exiting.", license_service.state.status.value)
+        sys.exit(0)
+
+    # 5. Instantiate and display Fluent Windows 11 Main Window
+    window = TikTokManagerMainWindow(db_path=DEFAULT_DB_PATH, license_service=license_service)
     window.show()
 
-    # 5. Clean exit hook
+    # 6. Clean exit hook
     exit_code = app.exec()
 
     try:

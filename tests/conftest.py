@@ -46,6 +46,28 @@ def never_kill_real_browsers(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def test_license(monkeypatch, tmp_path):
+    """Every test runs with a full (Gói 3) license and a temp license file: tests never read or write the
+    developer's real %APPDATA%\\TAVM\\license.dat. Tests about plans/locking set their own entitlements."""
+    import time
+
+    from src.domain.licensing import entitlements
+    from src.domain.licensing.claims import LicenseClaims
+
+    monkeypatch.setenv("TAVM_LICENSE_FILE", str(tmp_path / "license.dat"))
+    now = int(time.time())
+    entitlements.set_current(
+        LicenseClaims.from_dict(
+            {"lid": "test", "sub": "Test", "plan": "pro", "iat": now - 60, "exp": now + 365 * 86400,
+             "mid": "0000-0000-0000-0000"},
+            kid="test",
+        )
+    )
+    yield
+    entitlements.set_current(None)
+
+
+@pytest.fixture(autouse=True)
 def isolated_ui_settings(monkeypatch, tmp_path):
     """Tests must never read/write the developer's real UI settings (Windows registry) and must not
     run the real exit cache cleanup on whatever `profiles/` dirs exist: every test gets a temp ini

@@ -10,6 +10,8 @@ from datetime import datetime
 from src.application.services.upload_service import UploadService
 from src.application.signals.app_signals import AppSignalBus
 from src.application.workers.base_worker import BaseWorker
+from src.domain.licensing import entitlements
+from src.domain.licensing.plans import Feature, upgrade_hint
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +91,11 @@ class UploadWorker(BaseWorker):
 
     def execute(self) -> None:
         if self.is_cancelled:
+            return
+        if not entitlements.has(Feature.UPLOAD):  # Gói 2+; also catches expiry while queued
+            message = upgrade_hint(Feature.UPLOAD)
+            self._emit_log("ERROR", message, "ERROR")
+            self._safe_emit(self.signal_bus.upload_failed, self.video_id, message)
             return
 
         logger.info("Starting upload worker for video %s on profile %s", self.video_id, self.profile_id)

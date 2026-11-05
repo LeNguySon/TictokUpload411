@@ -17,6 +17,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from src.domain.licensing import entitlements
+from src.domain.licensing.plans import Feature
 from src.infrastructure.database.connection import get_db_connection
 from src.infrastructure.tiktok.gologin_tiktok_client import (
     GoLoginTikTokClient,
@@ -100,6 +102,7 @@ class TikTokModerationService:
         Fetches official TikTok account standing and accumulated community strikes.
         Endpoints: https://www.tiktok.com/api/creator/account/standing/?aid=1988
         """
+        entitlements.require(Feature.CHANNEL_HEALTH)  # Gói 3
         conn = self._get_connection()
         try:
             row = conn.execute("SELECT * FROM profiles WHERE id=?", (profile_id,)).fetchone()
@@ -168,6 +171,7 @@ class TikTokModerationService:
         Fetches penalized videos, originality strikes (ineligible for FYP/Rewards), and copyright mutes.
         Endpoint: https://www.tiktok.com/api/creator/violation/list/?aid=1988&count=20
         """
+        entitlements.require(Feature.CHANNEL_HEALTH)  # Gói 3
         conn = self._get_connection()
         try:
             row = conn.execute("SELECT * FROM profiles WHERE id=?", (profile_id,)).fetchone()
@@ -261,6 +265,7 @@ class TikTokModerationService:
         Updates violateVideos status to 'appealed' and logs a new ticket in accountAppeals.
         Endpoint: https://www.tiktok.com/creator-center/api/violation/appeal
         """
+        entitlements.require(Feature.CHANNEL_HEALTH)  # Gói 3
         conn = self._get_connection()
         try:
             row = conn.execute("SELECT * FROM profiles WHERE id=?", (profile_id,)).fetchone()
@@ -326,6 +331,7 @@ class TikTokModerationService:
         Verifies that date_reapply countdown has reached 0 before allowing re-submission.
         Endpoint: https://www.tiktok.com/creator-center/api/creator/rewards/reapply
         """
+        entitlements.require(Feature.CHANNEL_HEALTH)  # Gói 3
         conn = self._get_connection()
         try:
             row = conn.execute("SELECT * FROM profiles WHERE id=?", (profile_id,)).fetchone()
@@ -378,6 +384,7 @@ class TikTokModerationService:
 
     def check_appeal_status(self, profile_id: int) -> dict[str, Any]:
         """Checks status of pending appeals and reconciles violateVideos & accountAppeals."""
+        entitlements.require(Feature.CHANNEL_HEALTH)  # Gói 3
         conn = self._get_connection()
         try:
             appeals = conn.execute(

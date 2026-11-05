@@ -92,8 +92,25 @@ tools/license_issuer/         cli.py (ngoài gói phát hành)
 
 Ước lượng: L1–L4 ≈ 2–3 phiên làm việc; L5 là dự án riêng (server + triển khai hosting).
 
-## 6. Quyết định cần người dùng chốt
-- **D1**: Offline thuần (A) hay có server kích hoạt (B)? Đề xuất: làm A trước (L1–L4), thiết kế sẵn để nâng lên B.
-- **D2**: Hết hạn thì: (a) chỉ xem dữ liệu, chặn mở trình duyệt/upload — đề xuất; hay (b) khóa toàn bộ app?
-- **D3**: Danh sách gói và giới hạn (tên gói, số hồ sơ, số upload song song, có bản dùng thử bao nhiêu ngày?).
-- **D4**: Một key được dùng trên bao nhiêu máy, cho chuyển máy mấy lần?
+## 6. Quyết định đã chốt (2026-11-05) — đã triển khai L1–L4
+- **D1**: Chỉ offline (chế độ A). Không có server; thu hồi = thêm `lid` vào `REVOKED_LICENSE_IDS` và phát hành bản cập nhật.
+- **D2**: Hết hạn / key không hợp lệ ⇒ **khóa toàn bộ app**: lúc khởi động (`main.py`) và khi đang chạy
+  (kiểm tra mỗi 60 giây; cửa sổ ẩn, hiện dialog kích hoạt; không kích hoạt ⇒ thoát).
+- **D3**: Gói cộng dồn (`src/domain/licensing/plans.py`):
+  - `profile` — Gói 1: hồ sơ, proxy, trình duyệt.
+  - `upload` — Gói 2: Gói 1 + nạp/hẹn lịch/upload video tự động.
+  - `pro` — Gói 3: Gói 2 + kiểm tra gậy vi phạm, sức khỏe kênh/radar, kháng cáo.
+- **D4** (chưa chốt, mặc định): 1 key = 1 máy; chuyển máy = phát hành key mới cho mã máy mới.
+
+## 7. Vận hành (cho nhà phát triển)
+```
+python -m tools.license_issuer.issuer issue --kid k2026a --sub "Tên khách" --plan upload --mid XXXX-XXXX-XXXX-XXXX --days 30
+python -m tools.license_issuer.issuer issue ... --until 2027-12-31
+python -m tools.license_issuer.issuer list
+python -m tools.license_issuer.issuer backup --kid k2026a --out <ổ USB>\k2026a.pem   # NÊN làm ngay
+```
+- Khóa ký `k2026a` nằm ở `%LOCALAPPDATA%\TAVM-Issuer\signing_keys\` (DPAPI, chỉ user Windows hiện tại giải mã được).
+  Mất khóa (cài lại Windows) mà không có backup ⇒ không cấp được key mới cho bản app hiện tại.
+- Khách gửi mã máy (hiện trong dialog "Kích hoạt bản quyền", có nút Sao chép) → chạy `issue` → gửi lại key.
+- Sổ cấp key: `%LOCALAPPDATA%\TAVM-Issuer\issued_licenses.csv` (không chứa key).
+- Thư mục `tools/` không được đóng gói kèm app; app không import nó (có test kiểm tra).

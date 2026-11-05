@@ -132,14 +132,14 @@ def test_account_health_dialog_has_zero_raw_qpushbutton(qapp):
         assert isinstance(btn, (PushButton, PrimaryPushButton)), f"Raw QPushButton found: {btn}"
 
 
-def test_all_19_dialogs_use_fluent_headers_and_margins():
-    """Verifies that all 19 application dialogs follow the unified design standard."""
+def test_all_dialogs_use_fluent_headers_and_margins():
+    """Verifies that all 20 application dialogs (incl. license activation) follow the unified design standard."""
     import glob
     from pathlib import Path
 
     dialog_files = glob.glob("src/presentation/dialogs/*.py")
     dialog_modules = [f for f in dialog_files if not f.endswith("__init__.py") and not f.endswith("dialog_helpers.py")]
-    assert len(dialog_modules) == 19, f"Expected 19 dialog modules, found {len(dialog_modules)}"
+    assert len(dialog_modules) == 20, f"Expected 20 dialog modules, found {len(dialog_modules)}"
 
     for file_path in dialog_modules:
         content = Path(file_path).read_text(encoding="utf-8")
