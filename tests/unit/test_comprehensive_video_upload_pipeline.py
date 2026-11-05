@@ -2,6 +2,7 @@
 Strict ECC TDD: Validates options propagation, UUID resolution, deduplication, and isolation.
 """
 
+from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -16,6 +17,10 @@ from src.infrastructure.tiktok.sammonny_adapter import (
     SamMonnyTikTokAdapter,
     _default_session_factory,
 )
+
+FUTURE_SCHEDULE = (datetime.now() + timedelta(hours=2)).strftime(
+    "%Y-%m-%d %H:%M:%S"
+)  # relative: TikTok only schedules 15 min .. 10 days ahead
 
 
 @pytest.fixture
@@ -98,7 +103,7 @@ def test_upload_service_respects_all_custom_options(isolated_upload_env):
         allow_stitch=False,
         allow_hd=True,
         is_ai_generated=True,
-        schedule_time="2026-11-25 15:30:00",
+        schedule_time=FUTURE_SCHEDULE,
     )
 
     assert res.success is True
@@ -112,7 +117,7 @@ def test_upload_service_respects_all_custom_options(isolated_upload_env):
     assert call_kwargs["allow_stitch"] is False
     assert call_kwargs["allow_hd"] is True
     assert call_kwargs["is_ai_generated"] is True
-    assert call_kwargs["schedule_time"] == "2026-11-25 15:30:00"
+    assert call_kwargs["schedule_time"] == FUTURE_SCHEDULE
 
     # Verify video marked published in repository
     v_row = isolated_upload_env["vid_repo"].get_by_id(v_id)

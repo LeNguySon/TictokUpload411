@@ -3,6 +3,7 @@ Unit and Integration tests for Project-Specific Video Folders and TikTok Studio 
 Strict TDD - Phase RED -> GREEN -> REFACTOR.
 """
 
+from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -15,6 +16,10 @@ from src.infrastructure.database.repositories.profile_repository import ProfileR
 from src.infrastructure.database.repositories.project_repository import ProjectRepository
 from src.infrastructure.database.repositories.video_repository import VideoRepository
 from src.presentation.dialogs.schedule_dialog import ScheduleVideoDialog, round_to_nearest_5_minutes
+
+FUTURE_SCHEDULE = (datetime.now() + timedelta(hours=2)).strftime(
+    "%Y-%m-%d %H:%M:%S"
+)  # relative: TikTok only schedules 15 min .. 10 days ahead
 
 
 @pytest.fixture(scope="session")
@@ -105,19 +110,19 @@ def test_upload_service_propagates_schedule_time_to_adapter(test_db: Path, tmp_p
         file_name="Viral Clip Title",
         file_size=v_file.stat().st_size,
         mtime=v_file.stat().st_mtime,
-        schedule_time="2026-11-05 15:30:00",
+        schedule_time=FUTURE_SCHEDULE,
     )
 
     mock_adapter = MagicMock()
     mock_adapter.upload_video.return_value = MagicMock(success=True, publish_id="tiktok_pub_888", error=None)
 
     svc = UploadService(profile_repo=prof_repo, video_repo=video_repo, tiktok_adapter=mock_adapter)
-    res = svc.execute_upload(video_id=vid_id, profile_id=prof_id, schedule_time="2026-11-05 15:30:00")
+    res = svc.execute_upload(video_id=vid_id, profile_id=prof_id, schedule_time=FUTURE_SCHEDULE)
 
     assert res.success is True
     assert mock_adapter.upload_video.called
     kwargs = mock_adapter.upload_video.call_args.kwargs
-    assert kwargs.get("schedule_time") == "2026-11-05 15:30:00"
+    assert kwargs.get("schedule_time") == FUTURE_SCHEDULE
 
 
 def test_get_initial_video_pick_folder_logic(test_db: Path, tmp_path: Path):

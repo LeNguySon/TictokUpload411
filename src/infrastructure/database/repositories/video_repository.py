@@ -74,6 +74,25 @@ class VideoRepository:
             )
             return cur.rowcount > 0
 
+    def claim_for_upload(self, video_id: int, profile_id: int) -> bool:
+        """Atomically moves a video to 'uploading' for ``profile_id``.
+
+        Claimable: 'available', 'failed' (explicit retry), or 'reserved' for this same profile (the
+        auto-dispatch scheduler reserves before handing the video to a worker). A video already
+        'uploading' or 'published', or reserved for another profile, is never taken.
+        """
+        with db_session(self.db_path) as conn:
+            cur = conn.execute(
+                """
+                UPDATE video_registry
+                SET status = 'uploading', assigned_profile_id = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                  AND (status IN ('available', 'failed') OR (status = 'reserved' AND assigned_profile_id = ?));
+                """,
+                (profile_id, video_id, profile_id),
+            )
+            return cur.rowcount > 0
+
     def release_reservation(self, video_id: int) -> bool:
         """Releases a reserved video back to 'available' pool."""
         with db_session(self.db_path) as conn:
@@ -259,7 +278,12 @@ class VideoRepository:
         project_id: int | None = None,
         only_available: bool = True,
     ) -> list[dict[str, Any]]:
-        status_clause = "v.status = 'available'" if only_available else "v.status IN ('available', 'reserved', 'uploading')"
+        # The queue table (only_available=False) also shows failed videos so they can be retried.
+        status_clause = (
+            "v.status = 'available'"
+            if only_available
+            else "v.status IN ('available', 'reserved', 'uploading', 'failed')"
+        )
         with db_session(self.db_path, write=False) as conn:
             if project_id is not None:
                 query = f"""

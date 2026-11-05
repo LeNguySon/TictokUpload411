@@ -217,13 +217,20 @@ def test_clean_browser_runs_off_gui_thread(main_window, qtbot):
     assert _off_gui(spy.calls)
 
 
-def test_upload_completed_isolation_runs_off_gui_thread(main_window, qtbot):
+def test_upload_completed_auto_advance_runs_off_gui_thread(main_window, qtbot):
+    """UploadService isolates the file itself; the GUI handler only reads the queue (off-GUI) to auto-advance."""
     win, _, _ = main_window
-    spy = _recorder(result=None)
-    with patch.object(win.upload_service, "isolate_video_file", side_effect=spy):
+    win.switch_auto.setChecked(True)
+    win.profile_table.selectRow(0)
+    spy = _recorder(result=[])
+    with (
+        patch.object(win.video_repo, "list_available", side_effect=spy),
+        patch.object(win.upload_service, "isolate_video_file") as isolate,
+    ):
         win._on_upload_completed(1, "pub-1")
         qtbot.waitUntil(lambda: bool(spy.calls), timeout=WAIT_MS)
     assert _off_gui(spy.calls)
+    isolate.assert_not_called()
 
 
 def test_batch_dialog_folder_count_runs_off_gui_thread(qtbot, tmp_path: Path):

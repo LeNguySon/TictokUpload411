@@ -13,6 +13,7 @@ import logging
 import random
 import re
 import threading
+from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
@@ -102,3 +103,38 @@ def calculate_stall_timeout(file_size_mb: float) -> float:
     Min 60.0s, Max 180.0s (3 minutes).
     """
     return max(60.0, min(180.0, 60.0 + float(file_size_mb) * 0.4))
+
+
+VIDEO_FILE_EXTENSIONS = (".mp4", ".mov", ".mkv", ".webm", ".avi")
+# TikTok only accepts scheduled posts in this window; outside it the app's own scheduler decides.
+TIKTOK_SCHEDULE_MIN_LEAD = timedelta(minutes=15)
+TIKTOK_SCHEDULE_MAX_AHEAD = timedelta(days=10)
+SCHEDULE_FORMAT = "%Y-%m-%d %H:%M:%S"
+
+
+def caption_from_file_name(caption: str) -> str:
+    """A caption that is just a file name ("clip.mp4") loses its extension; real captions are kept."""
+    text = (caption or "").strip()
+    lowered = text.lower()
+    for ext in VIDEO_FILE_EXTENSIONS:
+        if lowered.endswith(ext) and len(text) > len(ext):
+            return text[: -len(ext)].rstrip()
+    return text
+
+
+def tiktok_schedule_or_none(schedule_time: str | None, now: datetime | None = None) -> str | None:
+    """Returns ``schedule_time`` only if TikTok can natively schedule it (15 min .. 10 days ahead).
+
+    A due/past time (the app's scheduler dispatches at the due time) or a time too far ahead must be
+    published immediately instead of being sent as an invalid scheduled post.
+    """
+    if not schedule_time:
+        return None
+    try:
+        when = datetime.strptime(schedule_time.strip(), SCHEDULE_FORMAT)
+    except ValueError:
+        return None
+    now = now or datetime.now()
+    if now + TIKTOK_SCHEDULE_MIN_LEAD <= when <= now + TIKTOK_SCHEDULE_MAX_AHEAD:
+        return schedule_time.strip()
+    return None

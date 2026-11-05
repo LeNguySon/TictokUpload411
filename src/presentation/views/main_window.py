@@ -2021,20 +2021,14 @@ class TikTokManagerMainWindow(QMainWindow):
         self.video_table.append_log(video_id, "", "SUCCESS", f"Xuất bản thành công: {publish_id}", "SUCCESS")
         self._queue_upload_notice(self._upload_notice_done, video_id, publish_id)
 
-        # Isolation moves the file into _posted/ (a full copy across drives) and auto-advance
-        # reads the queue: both run off the GUI thread (T7).
+        # UploadService already isolated the file into _posted/ under the profile lock; only the
+        # auto-advance queue read remains, off the GUI thread (T7).
         auto_advance = self.switch_auto.isChecked()
         selected = self.profile_table.get_selected_profile_ids() if auto_advance else []
         jump_step = max(1, self.spin_jump.value() + 1)
-        upload_service, video_repo = self.upload_service, self.video_repo
+        video_repo = self.video_repo
 
         def _post_upload() -> dict[str, Any] | None:
-            try:
-                isolated_path = upload_service.isolate_video_file(video_id)
-                if isolated_path:
-                    logger.info("Video #%s physically isolated to %s", video_id, isolated_path)
-            except Exception as e:
-                logger.warning("Failed to physically isolate video #%s: %s", video_id, e)
             if auto_advance and selected:
                 avail = video_repo.list_available()
                 if avail:

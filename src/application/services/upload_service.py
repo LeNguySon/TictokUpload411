@@ -14,9 +14,11 @@ from sammonny import UploadResult
 
 from src.domain.policies.retry_policy import RetryPolicy
 from src.domain.policies.upload_policy import (
+    caption_from_file_name,
     clamp_caption,
     get_profile_upload_lock,
     spin_caption,
+    tiktok_schedule_or_none,
 )
 from src.domain.policies.video_validation_policy import VideoValidationPolicy
 from src.infrastructure.database.repositories.profile_repository import ProfileRepository
@@ -416,42 +418,50 @@ class UploadService:
 
         lock = get_profile_upload_lock(profile_id)
         with lock:
-            # 1. Atomic reservation to eliminate concurrency double-upload race
-            reserved = self.video_repo.try_reserve(video_id=video_id, assigned_profile_id=profile_id)
-            if not reserved:
-                _safe_log("RESERVE", f"Thất bại: Video #{video_id} đã được khóa bởi tiến trình khác", "ERROR")
-                raise RuntimeError(f"Video {video_id} is already reserved or not in pending status")
-
-            _safe_log("RESERVE", f"Đã khóa draft Video #{video_id} thành công cho Profile #{profile_id}")
-
-            # 2. Verify Profile existence and status
+            # 1. Profile must exist before anything is written (a bogus id would also violate the FK).
             profile_row = self.profile_repo.get_by_id(profile_id)
             if not profile_row:
                 _safe_log("PROFILE", f"Không tìm thấy hồ sơ #{profile_id}", "ERROR")
                 raise ValueError(f"Profile {profile_id} does not exist")
 
-            p_title = profile_row.get("channel_title") or profile_row.get("account_name") or f"Profile #{profile_id}"
-            _safe_log("PROFILE", f"Xác thực Kênh TikTok: {p_title} (Trạng thái: {profile_row.get('status', 'ACTIVE')})")
+            # 2. Atomic claim -> 'uploading'. Honours the scheduler's reservation for this profile and
+            #    allows an explicit retry of a failed video; never steals an in-flight/published one.
+            if not self.video_repo.claim_for_upload(video_id=video_id, profile_id=profile_id):
+                _safe_log("RESERVE", f"Thất bại: Video #{video_id} đã được khóa bởi tiến trình khác", "ERROR")
+                raise RuntimeError(f"Video {video_id} is already being uploaded, published or reserved")
 
-            if profile_row.get("status") in ("DIE", "CHECKPOINT"):
-                _safe_log(
-                    "PROFILE",
-                    f"Kênh #{profile_id} đang ở trạng thái không thể đăng: {profile_row.get('status')}",
-                    "ERROR",
-                )
-                raise RuntimeError(f"Profile {profile_id} is in non-uploadable state: {profile_row.get('status')}")
+            _safe_log("RESERVE", f"Đã khóa draft Video #{video_id} thành công cho Profile #{profile_id}")
 
-            video_row = self.video_repo.get_by_id(video_id)
-            if not video_row:
-                _safe_log("VALIDATE", f"Không tìm thấy thông tin video #{video_id}", "ERROR")
-                raise ValueError(f"Video {video_id} not found")
-
-            # 3. Publish via SamMonny Adapter with clamped caption
+            # From here on we own the video: every failure must leave it 'failed', never stuck.
             try:
-                raw_caption = video_row["file_name"]
+                p_title = (
+                    profile_row.get("channel_title") or profile_row.get("account_name") or f"Profile #{profile_id}"
+                )
+                _safe_log(
+                    "PROFILE", f"Xác thực Kênh TikTok: {p_title} (Trạng thái: {profile_row.get('status', 'ACTIVE')})"
+                )
+                if profile_row.get("status") in ("DIE", "CHECKPOINT"):
+                    _safe_log(
+                        "PROFILE",
+                        f"Kênh #{profile_id} đang ở trạng thái không thể đăng: {profile_row.get('status')}",
+                        "ERROR",
+                    )
+                    raise RuntimeError(f"Profile {profile_id} is in non-uploadable state: {profile_row.get('status')}")
+
+                video_row = self.video_repo.get_by_id(video_id)
+                if not video_row:
+                    _safe_log("VALIDATE", f"Không tìm thấy thông tin video #{video_id}", "ERROR")
+                    raise ValueError(f"Video {video_id} not found")
+
+                # 3. Publish via SamMonny Adapter with clamped caption
+                raw_caption = caption_from_file_name(video_row["file_name"])
                 clamped_title = clamp_caption(raw_caption, max_chars=2200)
                 tags = [w for w in clamped_title.split() if w.startswith("#")]
-                effective_schedule = schedule_time if schedule_time is not None else video_row.get("schedule_time")
+                requested_schedule = schedule_time if schedule_time is not None else video_row.get("schedule_time")
+                # Past/due times (auto-dispatch) or times outside TikTok's window publish immediately.
+                effective_schedule = tiktok_schedule_or_none(requested_schedule)
+                if requested_schedule and not effective_schedule:
+                    _safe_log("SCHEDULE", f"Lịch {requested_schedule} đã tới hạn/ngoài khung TikTok: đăng ngay")
 
                 eff_privacy = privacy or video_row.get("privacy") or "PUBLIC_TO_EVERYONE"
                 eff_comment = allow_comment if allow_comment is not None else video_row.get("allow_comment", True)
@@ -479,34 +489,46 @@ class UploadService:
                     progress_callback=progress_callback,
                     cancel_token=cancel_token,
                 )
-
-                if result.success and result.publish_id:
-                    logger.info("Upload succeeded! Video %s published as %s", video_id, result.publish_id)
-                    self.video_repo.mark_published(
-                        video_id=video_id,
-                        published_profile_id=profile_id,
-                        tiktok_video_id=result.publish_id,
-                    )
-                    _safe_log(
-                        "ISOLATE", f"Đã xuất bản thành công (ID: {result.publish_id}). Tiến hành cách ly video..."
-                    )
-                    try:
-                        self.isolate_video_file(video_id)
-                        _safe_log("ISOLATE", "Cách ly vật lý video vào thư mục _posted/ hoàn tất")
-                    except Exception as iso_err:
-                        logger.warning("Failed to auto-isolate video %s post-upload: %s", video_id, iso_err)
-                        _safe_log("ISOLATE", f"Cảnh báo cách ly video: {iso_err}", "WARNING")
-                else:
-                    logger.warning("Upload failed for video %s: %s", video_id, result.error)
-                    self.video_repo.mark_error(video_id=video_id, error_message=result.error or "Unknown failure")
-                    _safe_log("ERROR", f"Tải lên thất bại: {result.error or 'Lỗi không xác định'}", "ERROR")
-
-                return result
-
             except Exception as e:
                 logger.error("Exception during upload of video %s: %s", video_id, e)
                 self.video_repo.mark_error(video_id=video_id, error_message=str(e))
                 raise
+
+            if result.success:
+                # Some modes (cookie hybrid, native scheduling) succeed without returning an id; it is
+                # still published - recording it as failed would invite a duplicate re-upload.
+                logger.info("Upload succeeded! Video %s published as %s", video_id, result.publish_id)
+                self.video_repo.mark_published(
+                    video_id=video_id,
+                    published_profile_id=profile_id,
+                    tiktok_video_id=result.publish_id or "",
+                )
+                _safe_log(
+                    "ISOLATE",
+                    f"Đã xuất bản thành công (ID: {result.publish_id or 'chưa trả về'}). Tiến hành cách ly video...",
+                )
+                try:
+                    self.isolate_video_file(video_id)
+                    _safe_log("ISOLATE", "Cách ly vật lý video vào thư mục _posted/ hoàn tất")
+                except Exception as iso_err:
+                    logger.warning("Failed to auto-isolate video %s post-upload: %s", video_id, iso_err)
+                    _safe_log("ISOLATE", f"Cảnh báo cách ly video: {iso_err}", "WARNING")
+            elif result.is_ambiguous:
+                # Sent but not confirmed (e.g. timeout after the upload): keep it 'uploading' so it is not
+                # retried automatically; it needs reconciliation, otherwise a retry may post it twice.
+                logger.warning("Upload of video %s is ambiguous, left 'uploading': %s", video_id, result.error)
+                _safe_log(
+                    "ERROR",
+                    f"Chưa xác nhận được kết quả đăng ({result.error or 'không rõ'}). "
+                    "Video giữ trạng thái 'uploading' để tránh đăng trùng - hãy kiểm tra trên TikTok.",
+                    "WARNING",
+                )
+            else:
+                logger.warning("Upload failed for video %s: %s", video_id, result.error)
+                self.video_repo.mark_error(video_id=video_id, error_message=result.error or "Unknown failure")
+                _safe_log("ERROR", f"Tải lên thất bại: {result.error or 'Lỗi không xác định'}", "ERROR")
+
+            return result
 
     def isolate_video_file(self, video_id: int, subfolder_name: str = "_posted") -> Path | None:
         """
@@ -524,10 +546,7 @@ class UploadService:
             return None
 
         new_path = move_video_to_posted_folder(src_path, subfolder_name=subfolder_name)
-        self.video_repo.update_metadata(
-            video_id=video_id,
-            file_name=new_path.name,
-            file_path=str(new_path),
-        )
+        # Only the path changes: file_name holds the caption and must survive isolation.
+        self.video_repo.update_metadata(video_id=video_id, file_path=str(new_path))
         logger.info("Video %s successfully isolated to %s and repository updated", video_id, new_path)
         return new_path
