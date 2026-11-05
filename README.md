@@ -72,6 +72,9 @@ python -m ruff check src tests main.py
 # 4. Khởi chạy ứng dụng giao diện Fluent Windows 11
 python main.py
 ```
+
+> **SamMonny SDK** là thư viện nội bộ, không có trên PyPI. Bản wheel `sammonny-1.8.1` được đóng gói sẵn trong [`vendor/`](vendor/README.md); `requirements.txt` tự lấy từ đó qua `--find-links ./vendor`, vì vậy hãy chạy `pip` **từ thư mục gốc repo**.
+
 ---
 ## 🚦 Trạng Thái Dự Án (Project Status & Gateways)
 - **Quy mô (Right-Sizing Tier):** **Tier 4 — Large** (Quy trình ECC khép kín).

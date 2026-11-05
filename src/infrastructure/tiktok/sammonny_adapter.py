@@ -27,6 +27,20 @@ from src.infrastructure.credentials.windows_vault import WindowsCredentialVault
 logger = logging.getLogger(__name__)
 
 
+def format_proxy_url(proxy_data: dict[str, Any] | None) -> str | None:
+    """Formats proxy dictionary into RFC-compliant proxy URI string."""
+    if not proxy_data or not proxy_data.get("host") or not proxy_data.get("port"):
+        return None
+    proto = str(proxy_data.get("protocol") or "http").lower()
+    host = proxy_data["host"]
+    port = proxy_data["port"]
+    user = proxy_data.get("username")
+    pwd = proxy_data.get("password")
+    if user and pwd:
+        return f"{proto}://{user}:{pwd}@{host}:{port}"
+    return f"{proto}://{host}:{port}"
+
+
 class LazyActiveSession:
     """
     Fluent wrapper around AntidetectSession that lazily starts the browser profile
@@ -34,10 +48,20 @@ class LazyActiveSession:
     Ensures safe shutdown and resource cleanup via close().
     """
 
-    def __init__(self, session: AntidetectSession, headless: bool = True, cookie_raw: str | None = None) -> None:
+    def __init__(
+        self,
+        session: AntidetectSession,
+        headless: bool = True,
+        cookie_raw: str | None = None,
+        proxy_url: str | None = None,
+    ) -> None:
         self._session = session
         self._headless = headless
         self._cookie_raw = cookie_raw
+        self.proxy_url = proxy_url
+        self.proxies: dict[str, str] | None = None
+        if proxy_url:
+            self.proxies = {"http": proxy_url, "https": proxy_url}
 
     def _ensure_active(self) -> None:
         if not getattr(self._session, "_cdp", None):
@@ -120,6 +144,7 @@ def _default_session_factory(
 
     from src.infrastructure.browser.orbita_launcher import OrbitaLauncher
     from src.infrastructure.database.repositories.profile_repository import ProfileRepository
+    from src.infrastructure.database.repositories.proxy_repository import ProxyRepository
 
     target_profile_uuid = str(profile_id)
     prof = None
@@ -131,6 +156,24 @@ def _default_session_factory(
                 target_profile_uuid = prof["uuid"]
         except Exception as e:
             logger.warning("Could not resolve profile_id %s to UUID: %s", profile_id, e)
+
+    proxy_data = None
+    proxy_url = None
+    if prof and prof.get("proxy_id"):
+        try:
+            px_repo = ProxyRepository(db_path=db_path)
+            proxy_data = px_repo.get_by_id(int(prof["proxy_id"]))
+            if proxy_data:
+                OrbitaLauncher().sync_daemon_profile_proxy(target_profile_uuid, proxy_data)
+                proxy_url = format_proxy_url(proxy_data)
+                logger.info(
+                    "Synchronized proxy %s to profile %s preferences (URL: %s)",
+                    proxy_data.get("id"),
+                    target_profile_uuid,
+                    proxy_url,
+                )
+        except Exception as pe:
+            logger.warning("Failed syncing proxy to profile %s: %s", target_profile_uuid, pe)
 
     # Pre-inject latest cookies into Chromium SQLite store if available
     if prof and (prof.get("cookies_browser") or prof.get("cookies_json")):
@@ -148,7 +191,12 @@ def _default_session_factory(
         cookie_str = None
         if prof:
             cookie_str = prof.get("cookies_browser") or prof.get("cookies_json")
-        return LazyActiveSession(raw_sess, headless=True, cookie_raw=cookie_str)  # type: ignore[return-value]
+        return LazyActiveSession(
+            raw_sess,
+            headless=True,
+            cookie_raw=cookie_str,
+            proxy_url=proxy_url,
+        )  # type: ignore[return-value]
     return raw_sess
 
 

@@ -15,3 +15,4 @@
   1. Ghi tệp SQLite Chromium `Network/Cookies` tại thư mục profile.
   2. Gửi lệnh CDP `Network.setCookies` ngay sau khi phiên trình duyệt mở cổng kết nối.
   Điều này bảo đảm session đăng nhập của tài khoản luôn sẵn sàng 100% trên cả tab và các service worker ngầm.
+

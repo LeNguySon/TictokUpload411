@@ -35,6 +35,8 @@ python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
+> **SamMonny SDK** là thư viện nội bộ, không có trên PyPI. Bản wheel `sammonny-1.8.1` được đóng gói sẵn trong [`vendor/`](../../vendor/README.md); `requirements.txt` tự lấy từ đó qua `--find-links ./vendor`, vì vậy hãy chạy `pip` **từ thư mục gốc repo**.
+
 ---
 
 ## 3. Khởi Tạo Cơ Sở Dữ Liệu Ban Đầu
