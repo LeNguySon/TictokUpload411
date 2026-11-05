@@ -35,3 +35,4 @@ Khi tích hợp xuất bản video lên TikTok bằng mô hình Tri-Modal Hybrid
      document.querySelector('div[class*="captcha"]'))
   ```
 - Nếu phát hiện, lập tức ghi log cảnh báo và không treo ngầm tiến trình.
+

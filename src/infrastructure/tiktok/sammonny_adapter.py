@@ -278,12 +278,15 @@ class SamMonnyTikTokAdapter:
             "cover_timestamp_ms": cover_timestamp_ms,
         }
 
-        # Dynamic mode resolution if not forced
-        if not self.preferred_mode:
+        # Resolve effective upload mode without mutating self.publisher state (eliminates race condition)
+        effective_mode = self.preferred_mode
+        if not effective_mode:
             if token:
-                self.publisher.preferred_mode = UploadMode.OFFICIAL_DIRECT_POST
+                effective_mode = UploadMode.OFFICIAL_DIRECT_POST
             elif self.session_factory:
-                self.publisher.preferred_mode = UploadMode.COOKIE_API_HYBRID
+                effective_mode = UploadMode.COOKIE_API_HYBRID
+            else:
+                effective_mode = UploadMode.HEADLESS_STUDIO
 
         draft = self.publisher.create_draft(video_path=video_path, metadata=metadata)
         logger.info(
@@ -291,20 +294,8 @@ class SamMonnyTikTokAdapter:
             draft.draft_id,
             profile_id,
             draft.file_size_bytes,
-            self.publisher.preferred_mode,
+            effective_mode,
         )
-
-        active_session: Any = None
-
-        def tracking_session_factory(pid: str) -> Any:
-            nonlocal active_session
-            s = self.session_factory(pid)
-            active_session = s
-            return s
-
-        orig_sf = self.publisher.session_factory
-        if orig_sf:
-            self.publisher.session_factory = tracking_session_factory
 
         try:
             return self.publisher.upload(
@@ -312,14 +303,9 @@ class SamMonnyTikTokAdapter:
                 account_id=str(profile_id),
                 progress_callback=progress_callback,
                 cancel_token=cancel_token,
+                preferred_mode=effective_mode,
             )
         finally:
-            self.publisher.session_factory = orig_sf
-            if active_session and hasattr(active_session, "close"):
-                try:
-                    active_session.close()
-                except Exception as ce:
-                    logger.warning("Error closing session after upload: %s", ce)
             try:
                 from sammonny.system.memory import MemoryManager
 
