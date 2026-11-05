@@ -4,7 +4,6 @@ Base Worker Class for QRunnable background tasks with cooperative cancellation a
 
 import logging
 
-import sammonny
 from PyQt6.QtCore import QObject, QRunnable, pyqtSignal
 
 logger = logging.getLogger(__name__)
@@ -76,11 +75,9 @@ class BaseWorker(QRunnable):
                 self.signals.finished.emit()
             except RuntimeError:
                 pass
-            # Trim working set RAM to ensure desktop responsiveness
-            try:
-                sammonny.MemoryManager.trim_working_set()
-            except Exception:
-                pass
+            # No working-set trim here: sammonny.MemoryManager has no trim_working_set method (the old call
+            # always failed silently), and trimming the whole app after every worker - status sync
+            # runs every 3 s - would page the GUI out. Uploads trim once in SamMonnyTikTokAdapter.
 
     def execute(self) -> None:
         """Subclasses override this method to perform actual background work."""

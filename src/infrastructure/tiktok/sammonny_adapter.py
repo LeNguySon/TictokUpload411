@@ -9,6 +9,7 @@ Conforms to TDS-ARCH-001 §6.2 Publisher protocol:
 from __future__ import annotations
 
 import logging
+import os
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -315,9 +316,11 @@ class SamMonnyTikTokAdapter:
             try:
                 from sammonny.system.memory import MemoryManager
 
-                MemoryManager.trim_working_set()
-            except Exception:
-                pass
+                # SDK 1.8.1 API (it has no trim_working_set method): trims this app's process tree,
+                # including browser children, once per upload.
+                MemoryManager.trim_process_tree_memory(os.getpid())
+            except Exception as e:
+                logger.debug("Post-upload memory trim skipped: %s", e)
 
     def fetch_creator_metrics(self, profile_id: int | str) -> dict[str, Any]:
         """
