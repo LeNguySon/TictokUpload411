@@ -72,3 +72,6 @@ tmp/
 temp/
 run_output.log
 data/
+*cookie*
+*c?okie*
+tests/unit/*kie*

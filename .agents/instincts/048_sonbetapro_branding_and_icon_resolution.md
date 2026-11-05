@@ -35,3 +35,4 @@ Người dùng yêu cầu đổi tên toàn bộ ứng dụng thành **SonBetaPr
      2. Gốc repo: `Path(__file__).resolve().parent.parent.parent / "icon.ico"`
      3. Tài nguyên đóng gói: `resources/icons/app_icon.ico`
      4. Thư mục làm việc hiện tại: `icon.ico`
+

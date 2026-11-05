@@ -36,3 +36,4 @@ Trong các hệ thống tự động hóa đăng video TikTok qua trình duyệt
   - Bắt lỗi Toast từ chối: `.tiktok-toast-error`, `div[role="alert"]` (vi phạm tiêu chuẩn cộng đồng, vượt giới hạn đăng trong ngày).
 - Nếu TikTok trả về Toast lỗi $\rightarrow$ Trả về `FAILED` kèm nội dung lỗi cụ thể từ máy chủ.
 - Chỉ khi có bằng chứng xác nhận mới trả về `PUBLISH_COMPLETE`.
+
