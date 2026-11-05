@@ -279,10 +279,14 @@ class PassiveTikTokSyncService:
         except Exception as de:
             logger.debug("DOM hydration check error on profile %s: %s", profile_id, de)
 
-        # 3. Pull latest row from DB to compile complete update payload
+        # 3. Record sync attempt timestamp in database
+        now_str = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
+        self.profile_repo.update(profile_id, statistic_date_update=now_str)
+
+        # 4. Pull latest row from DB to compile complete update payload
         row = self.profile_repo.get_by_id(profile_id) or {}
 
-        # 4. Emit signal to GUI
+        # 5. Emit signal to GUI
         if self.signal_bus:
             self.signal_bus.profile_updated.emit(profile_id, row)
 

@@ -18,3 +18,4 @@ Trong các hệ thống quản trị tài khoản TikTok MMO quy mô lớn, vi�
    - Kiểm tra `leak_detected` ngay tại đầu vào `_fetch_url_content`, từ chối tạo `urllib.request.build_opener()` nếu proxy bị tainted.
 4. **Tầng Worker (`MetricsSyncWorker`)**:
    - Sử dụng `_safe_emit` bọc mọi lệnh phát tín hiệu Qt (`profile_updated`, `progress`), triệt tiêu `RuntimeError` khi đóng ứng dụng.
+
