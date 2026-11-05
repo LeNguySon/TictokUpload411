@@ -501,7 +501,7 @@ class TikTokManagerMainWindow(QMainWindow):
 
     def refresh_videos(self) -> None:
         project_id = self.project_combo.currentData()
-        available = self.video_repo.list_available(project_id=project_id)
+        available = self.video_repo.list_available(project_id=project_id, only_available=False)
         self.video_table.load_videos(available)
         self.lbl_video_header.setText(f"Bảng video Đã chọn 0 / {len(available)}")
 
@@ -1809,7 +1809,7 @@ class TikTokManagerMainWindow(QMainWindow):
 
     def _on_start_upload_queue(self) -> None:
         selected_profiles = self.profile_table.get_selected_profile_ids()
-        available_videos = self.video_repo.list_available()
+        available_videos = self.video_repo.list_available(only_available=True)
 
         if not selected_profiles:
             InfoBar.warning(

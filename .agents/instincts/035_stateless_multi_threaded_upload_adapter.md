@@ -32,3 +32,4 @@ Trong ứng dụng PyQt6 đa luồng, khi nhiều worker thread (`UploadWorker`)
           session.close()
   ```
 - Loại bỏ hoàn toàn mọi cơ chế monkey-patching bên ngoài.
+

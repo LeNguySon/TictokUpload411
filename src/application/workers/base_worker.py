@@ -58,15 +58,24 @@ class BaseWorker(QRunnable):
 
     def run(self) -> None:
         """Template method wrapping execute() in try-except and lifecycle signals."""
-        self.signals.started.emit()
+        try:
+            self.signals.started.emit()
+        except RuntimeError:
+            pass
         try:
             if not self.is_cancelled:
                 self.execute()
         except Exception as e:
             logger.error("Unhandled worker exception: %s", e, exc_info=True)
-            self.signals.error.emit(str(e))
+            try:
+                self.signals.error.emit(str(e))
+            except RuntimeError:
+                pass
         finally:
-            self.signals.finished.emit()
+            try:
+                self.signals.finished.emit()
+            except RuntimeError:
+                pass
             # Trim working set RAM to ensure desktop responsiveness
             try:
                 sammonny.MemoryManager.trim_working_set()

@@ -254,26 +254,31 @@ class VideoRepository:
             cur = conn.execute(f"DELETE FROM video_registry WHERE id IN ({placeholders});", tuple(video_ids))
             return cur.rowcount
 
-    def list_available(self, project_id: int | None = None) -> list[dict[str, Any]]:
+    def list_available(
+        self,
+        project_id: int | None = None,
+        only_available: bool = True,
+    ) -> list[dict[str, Any]]:
+        status_clause = "v.status = 'available'" if only_available else "v.status IN ('available', 'reserved', 'uploading')"
         with db_session(self.db_path, write=False) as conn:
             if project_id is not None:
-                query = """
+                query = f"""
                 SELECT v.*, p.name AS assigned_profile_name, pr.name AS project_name
                 FROM video_registry v
                 LEFT JOIN profiles p ON v.assigned_profile_id = p.id
                 LEFT JOIN projects pr ON p.project_id = pr.id
-                WHERE v.status IN ('available', 'reserved', 'uploading')
+                WHERE {status_clause}
                   AND (v.assigned_profile_id IS NULL OR p.project_id = ?)
                 ORDER BY v.id ASC;
                 """
                 rows = conn.execute(query, (project_id,)).fetchall()
             else:
-                query = """
+                query = f"""
                 SELECT v.*, p.name AS assigned_profile_name, pr.name AS project_name
                 FROM video_registry v
                 LEFT JOIN profiles p ON v.assigned_profile_id = p.id
                 LEFT JOIN projects pr ON p.project_id = pr.id
-                WHERE v.status IN ('available', 'reserved', 'uploading')
+                WHERE {status_clause}
                 ORDER BY v.id ASC;
                 """
                 rows = conn.execute(query).fetchall()
