@@ -12,7 +12,7 @@ from typing import Any
 from PyQt6.QtCore import QPoint, QSettings, QSize, Qt, QTimer, QUrl
 from PyQt6.QtGui import QDesktopServices, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
-    QCheckBox,
+    QApplication,
     QFileDialog,
     QHBoxLayout,
     QLabel,
@@ -24,6 +24,7 @@ from PyQt6.QtWidgets import (
 )
 from qfluentwidgets import (
     Action,
+    CheckBox,
     ComboBox,
     CompactSpinBox,
     FluentIcon,
@@ -45,6 +46,7 @@ from src.application.services.profile_service import ProfileService
 from src.application.services.proxy_service import ProxyService
 from src.application.services.upload_service import UploadService
 from src.application.signals.app_signals import AppSignalBus
+from src.presentation.app_icon import get_app_icon
 from src.application.workers.metrics_sync_worker import MetricsSyncWorker
 from src.application.workers.orbita_launch_worker import OrbitaLaunchWorker
 from src.application.workers.task_worker import run_task
@@ -158,7 +160,7 @@ class TikTokManagerMainWindow(QMainWindow):
         self.thread_pool.executor.submit(self.daemon_supervisor.ensure_daemon_running)
 
         # UI Preferences & Persistent Settings
-        settings = QSettings("TAVM", "TikTokManager")
+        settings = self._settings()
         saved_hidden = settings.value("hidden_profile_columns", "")
         self.hidden_columns: set[int] = set()
         if saved_hidden:
@@ -167,7 +169,10 @@ class TikTokManagerMainWindow(QMainWindow):
             except (ValueError, TypeError):
                 self.hidden_columns = set()
 
-        self.setWindowTitle("SSMATool Reup Tiktok - TAVM 2026 Windows 11 Edition")
+        self.setWindowTitle("SonBetaPro")
+        app_icon = get_app_icon()
+        if not app_icon.isNull():
+            self.setWindowIcon(app_icon)
         self.resize(1366, 850)
 
         # Generation tokens: only the latest async table load is applied (T5).
@@ -373,8 +378,13 @@ class TikTokManagerMainWindow(QMainWindow):
         footer.addWidget(self.lbl_footer_status)
         footer.addStretch()
 
-        self.chk_clean_exit = QCheckBox("Dọn cache tất cả dự án trước khi thoát", self)
-        self.chk_clean_exit.setChecked(True)
+        self.chk_clean_exit = CheckBox("Dọn cache tất cả dự án trước khi thoát", self)
+        self.chk_clean_exit.setToolTip(
+            "Khi thoát: xóa cache trình duyệt (giữ nguyên cookie, đăng nhập, extension) của mọi hồ sơ "
+            "không đang mở trình duyệt."
+        )
+        self.chk_clean_exit.setChecked(bool(self._settings().value("clean_cache_on_exit", True, type=bool)))
+        self.chk_clean_exit.toggled.connect(self._on_clean_exit_toggled)
         footer.addWidget(self.chk_clean_exit)
         main_layout.addLayout(footer)
 
@@ -1101,18 +1111,9 @@ class TikTokManagerMainWindow(QMainWindow):
                 orphan_pids = supervisor.cleanup_orphan_browsers()
 
                 # 2. Gather profile directories and safely purge cache
-                profile_dirs: list[Path] = []
-                for p in repo.list_all():
-                    s_dir = p.get("storage_dir")
-                    if s_dir and Path(s_dir).is_dir():
-                        profile_dirs.append(Path(s_dir))
-                    else:
-                        uuid_val = p.get("uuid") or p.get("name")
-                        if uuid_val:
-                            candidate = Path("profiles") / str(uuid_val)
-                            if candidate.is_dir():
-                                profile_dirs.append(candidate)
+                from src.infrastructure.browser.cache_cleaner import collect_profile_dirs
 
+                profile_dirs = collect_profile_dirs(repo.list_all())
                 cache_summary = cleaner.clean_cache(profile_dirs)
                 freed_cache_str = cache_summary.get("formatted_freed", "0 B")
 
@@ -1199,7 +1200,7 @@ class TikTokManagerMainWindow(QMainWindow):
                     self.profile_table.setColumnHidden(col_idx, col_idx in self.hidden_columns)
 
                 # Persist to QSettings
-                settings = QSettings("TAVM", "TikTokManager")
+                settings = self._settings()
                 settings.setValue("hidden_profile_columns", ",".join(str(x) for x in self.hidden_columns))
 
                 visible_count = self.profile_table.columnCount() - len(self.hidden_columns)
@@ -2013,7 +2014,9 @@ class TikTokManagerMainWindow(QMainWindow):
             return
 
         # AgentShield Strict Proxy Gate: Filter profiles that have an assigned proxy
-        proxied_profiles = [pid for pid in selected_profiles if (self.profile_repo.get_by_id(pid) or {}).get("proxy_id")]
+        proxied_profiles = [
+            pid for pid in selected_profiles if (self.profile_repo.get_by_id(pid) or {}).get("proxy_id")
+        ]
         skipped_count = len(selected_profiles) - len(proxied_profiles)
 
         if not proxied_profiles:
@@ -2220,7 +2223,9 @@ class TikTokManagerMainWindow(QMainWindow):
             return
 
         # AgentShield Strict Proxy Gate: Filter profiles that have an assigned proxy
-        proxied_profiles = [pid for pid in selected_profiles if (self.profile_repo.get_by_id(pid) or {}).get("proxy_id")]
+        proxied_profiles = [
+            pid for pid in selected_profiles if (self.profile_repo.get_by_id(pid) or {}).get("proxy_id")
+        ]
         if not proxied_profiles:
             InfoBar.error(
                 title="Chặn An Toàn AgentShield",
@@ -2298,6 +2303,37 @@ class TikTokManagerMainWindow(QMainWindow):
                 parent=self,
             )
 
+    def _settings(self) -> QSettings:
+        """Single access point to persisted UI preferences (tests point it at a temp ini file)."""
+        return QSettings("TAVM", "TikTokManager")
+
+    def _on_clean_exit_toggled(self, checked: bool) -> None:
+        settings = self._settings()
+        settings.setValue("clean_cache_on_exit", bool(checked))
+        settings.sync()
+
+    def _clean_cache_on_exit(self) -> None:
+        """Purges browser caches of every profile whose browser is not running (cookies/logins kept).
+
+        The checkbox used to only trim the RAM of the exiting process; no cache was ever cleaned.
+        Profiles with a live browser are skipped so files in use are never deleted.
+        """
+        try:
+            from src.infrastructure.browser.cache_cleaner import BrowserCacheCleaner, collect_profile_dirs
+            from src.infrastructure.browser.process_supervisor import BrowserProcessSupervisor
+
+            self.hide()  # cleaning may take a moment; do not leave a frozen window on screen
+            QApplication.processEvents()
+            supervisor = BrowserProcessSupervisor()
+            dirs = [
+                d for d in collect_profile_dirs(self.profile_repo.list_all()) if not supervisor.is_process_running(d)
+            ]
+            if dirs:
+                summary = BrowserCacheCleaner().clean_cache(dirs) or {}
+                logger.info("Exit cache cleanup: %d profiles, freed %s", len(dirs), summary.get("formatted_freed", "?"))
+        except Exception as e:
+            logger.warning("Exit cache cleanup failed: %s", e)
+
     def closeEvent(self, event) -> None:
         """Cleanup Chromium RAM working set and shutdown daemon before closing application."""
         try:
@@ -2325,14 +2361,7 @@ class TikTokManagerMainWindow(QMainWindow):
             pass
 
         if hasattr(self, "chk_clean_exit") and self.chk_clean_exit.isChecked():
-            try:
-                import os
-
-                import sammonny
-
-                sammonny.MemoryManager.trim_process_tree_memory(os.getpid())
-            except Exception:
-                pass
+            self._clean_cache_on_exit()
         try:
             self.daemon_supervisor.shutdown()
         except Exception:

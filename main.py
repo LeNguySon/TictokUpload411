@@ -15,6 +15,7 @@ from PyQt6.QtWidgets import QApplication
 from src.infrastructure.database.connection import DEFAULT_DB_PATH
 from src.infrastructure.database.migrations.runner import run_all_migrations
 from src.infrastructure.logging.redaction_logger import configure_app_logger
+from src.presentation.app_icon import get_app_icon
 from src.presentation.views.main_window import TikTokManagerMainWindow
 from src.presentation.widgets.fluent_compat import apply_fluent_compat_patches
 
@@ -31,7 +32,7 @@ sys.excepthook = global_exception_hook
 
 
 def main() -> None:
-    # 0. Windows Console UTF-8 Encoding Hook
+    # 0. Windows Console UTF-8 Encoding & Taskbar AppUserModelID Hook
     if sys.platform == "win32":
         try:
             if hasattr(sys.stdout, "reconfigure"):
@@ -41,12 +42,18 @@ def main() -> None:
         except Exception:
             pass
 
+        try:
+            import ctypes
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("SonBetaPro.App.2026")
+        except Exception:
+            pass
+
     # 1. Initialize Structured Logging with Redaction Filter (AgentShield Tier-1)
     logs_dir = Path("logs")
     logs_dir.mkdir(exist_ok=True)
     configure_app_logger(log_file=logs_dir / "app.log")
 
-    logger.info("Initializing TikTok Manager TAVM-2026-WIN...")
+    logger.info("Initializing SonBetaPro TAVM-2026-WIN...")
 
     # 2. Database Migrations (WAL Mode, 24 Tables)
     applied = run_all_migrations(DEFAULT_DB_PATH)
@@ -61,8 +68,14 @@ def main() -> None:
 
     app = QApplication(sys.argv)
     apply_fluent_compat_patches()  # SpinBox value invisible on Qt 6.12 + Fluent 1.11 otherwise
-    app.setApplicationName("SSMATool Reup Tiktok")
+    app.setApplicationName("SonBetaPro")
+    app.setApplicationDisplayName("SonBetaPro")
     app.setOrganizationName("Goepro")
+
+    # Set Application Icon (High-DPI multi-resolution from icon.ico)
+    app_icon = get_app_icon()
+    if not app_icon.isNull():
+        app.setWindowIcon(app_icon)
 
     # Set native Windows 11 Fluent font
     font = app.font()

@@ -27,7 +27,8 @@ def test_main_window_creation_and_layout(qapp):
 
         window = TikTokManagerMainWindow(db_path=db_path)
         assert window is not None
-        assert "SSMATool" in window.windowTitle()
+        assert "SonBetaPro" in window.windowTitle()
+        assert not window.windowIcon().isNull()
 
         # Check top table (Profiles)
         assert window.profile_table.columnCount() == 29

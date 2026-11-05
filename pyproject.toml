@@ -26,6 +26,7 @@ dependencies = [
 
 [tool.pytest.ini_options]
 minversion = "8.0"
+qt_api = "pyqt6"
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]

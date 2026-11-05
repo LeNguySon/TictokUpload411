@@ -26,7 +26,7 @@ USER_GUIDE_CONTENT = {
     "quick_start": """
 # 🚀 HƯỚNG DẪN BẮT ĐẦU NHANH (QUICK START)
 
-Chào mừng bạn đến với **TikTok Manager (TAVM-2026-WIN)** — Hệ thống quản trị và đăng tải video TikTok đa luồng chuẩn Windows 11 Fluent UI!
+Chào mừng bạn đến với **SonBetaPro (TAVM-2026-WIN)** — Hệ thống quản trị và đăng tải video TikTok đa luồng chuẩn Windows 11 Fluent UI!
 
 ### Quy trình 4 bước chuẩn hóa:
 1. **Khởi tạo Dự án & Nhóm**:
@@ -135,7 +135,7 @@ class UserGuideDialog(QDialog):
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Hướng Dẫn Sử Dụng & Vận Hành Hệ Thống TikTok Manager")
+        self.setWindowTitle("Hướng Dẫn Sử Dụng & Vận Hành Hệ Thống SonBetaPro")
         self.resize(800, 600)
         self._init_ui()
 
