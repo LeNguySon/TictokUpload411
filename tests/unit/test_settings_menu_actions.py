@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 from PyQt6.QtWidgets import QApplication, QDialog, QInputDialog
+from src.application.workers.task_worker import drain_ui_tasks
 from src.infrastructure.database.migrations.runner import run_all_migrations
 from src.infrastructure.database.repositories.profile_repository import ProfileRepository
 from src.infrastructure.database.repositories.project_repository import ProjectRepository
@@ -55,4 +56,5 @@ def test_all_settings_menu_actions_execute_without_crash(qapp, monkeypatch):
             # Trigger action directly
             act.trigger()
 
+        drain_ui_tasks()  # background actions must release the temp DB before cleanup
         window.close()

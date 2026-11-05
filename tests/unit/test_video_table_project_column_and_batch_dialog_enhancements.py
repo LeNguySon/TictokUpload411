@@ -106,7 +106,7 @@ def test_video_queue_table_renders_project_column(qapp, test_db: Path):
     assert item_row1.text() == "Korea"
 
 
-def test_batch_folder_upload_dialog_project_banner_and_file_scan_counter(qapp, test_db: Path, tmp_path: Path):
+def test_batch_folder_upload_dialog_project_banner_and_file_scan_counter(qapp, qtbot, test_db: Path, tmp_path: Path):
     """Verifies BatchFolderUploadDialog displays project name and live scanned file count."""
     proj_repo = ProjectRepository(test_db)
     prof_repo = ProfileRepository(test_db)
@@ -137,4 +137,5 @@ def test_batch_folder_upload_dialog_project_banner_and_file_scan_counter(qapp, t
 
     # Check live recursive file counter
     assert hasattr(dlg, "lbl_scan_info")
-    assert "2 video" in dlg.lbl_scan_info.text()
+    # Folder scan is debounced and runs on the UI pool since UI responsiveness P1
+    qtbot.waitUntil(lambda: "2 video" in dlg.lbl_scan_info.text(), timeout=5000)

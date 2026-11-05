@@ -16,6 +16,7 @@ from unittest.mock import MagicMock
 import pytest
 from PyQt6.QtCore import QMimeData, QUrl
 from src.application.services.upload_service import UploadService
+from src.application.workers.task_worker import drain_ui_tasks
 from src.infrastructure.database.migrations.runner import run_all_migrations
 from src.infrastructure.database.repositories.profile_repository import ProfileRepository
 from src.infrastructure.database.repositories.video_repository import VideoRepository
@@ -185,6 +186,7 @@ def test_video_queue_table_widget_drop_ignores_posted_folders(qapp, tmp_path: Pa
     event.mimeData.return_value = mime_data
 
     widget.dropEvent(event)
+    drain_ui_tasks()  # loads/actions run on the UI pool since UI responsiveness P1
     event.acceptProposedAction.assert_called_once()
 
     # Validate that only valid1.mp4 and valid2.mov are collected, ignoring _posted and .posted

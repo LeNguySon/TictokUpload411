@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from PyQt6.QtWidgets import QApplication
 from src.application.services.upload_service import UploadService
+from src.application.workers.task_worker import drain_ui_tasks
 from src.application.workers.video_import_worker import VideoImportWorker
 from src.infrastructure.database.migrations.runner import run_all_migrations
 from src.infrastructure.database.repositories.profile_repository import ProfileRepository
@@ -166,6 +167,7 @@ def test_main_window_on_add_video_for_profiles(temp_db: Path, sample_video_files
                 win._on_add_video_for_profiles([p_id])
 
         win.refresh_videos()
+        drain_ui_tasks()  # loads/actions run on the UI pool since UI responsiveness P1
         assert win.video_table.rowCount() == 1
         # Check that Upload To column shows the profile name
         upload_to_item = win.video_table.item(0, 8)

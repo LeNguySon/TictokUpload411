@@ -12,6 +12,13 @@ from src.application.workers.base_worker import BaseWorker
 logger = logging.getLogger(__name__)
 
 
+# Strong references to dispatched workers until their `finished` signal is handled, independent of
+# the ThreadPoolManager singleton. Workers with autoDelete(False) are owned by Python: if their only
+# owner were a manager instance (dropped by reset_instance()), the garbage collector could delete the
+# C++ QRunnable and its signals while the pool thread is still running/emitting -> access violation.
+_INFLIGHT: dict[int, Any] = {}
+
+
 class ThreadPoolManager(QObject):
     """
     Singleton manager controlling thread pool execution, preventing GUI starvation,
@@ -27,7 +34,9 @@ class ThreadPoolManager(QObject):
             pool = QThreadPool(self)
         self.pool: QThreadPool = pool
         self.pool.setMaxThreadCount(max_threads)
-        self._tracked_workers: list[BaseWorker] = []
+        # Keyed by id(): membership tests on a list compare sip wrappers with ==, which can touch
+        # QRunnables already auto-deleted by the pool (access violation).
+        self._tracked_workers: dict[int, BaseWorker] = {}
 
     @classmethod
     def instance(cls, max_threads: int = 10) -> "ThreadPoolManager":
@@ -64,11 +73,15 @@ class ThreadPoolManager(QObject):
 
     def track_worker(self, worker: BaseWorker) -> None:
         """Adds worker to tracking list for cooperative cancellation."""
-        self._tracked_workers.append(worker)
+        key = id(worker)
+        self._tracked_workers[key] = worker
+        _INFLIGHT[key] = worker
+        tracked = self._tracked_workers
 
         def _cleanup() -> None:
-            if worker in self._tracked_workers:
-                self._tracked_workers.remove(worker)
+            # Must not reference the manager itself (see _INFLIGHT).
+            tracked.pop(key, None)
+            _INFLIGHT.pop(key, None)
 
         if hasattr(worker, "signals") and hasattr(worker.signals, "finished"):
             worker.signals.finished.connect(_cleanup)
@@ -99,7 +112,7 @@ class ThreadPoolManager(QObject):
     def cancel_all(self) -> None:
         """Cooperatively signals all active workers to abort."""
         logger.info("Cancelling %d active background workers", len(self._tracked_workers))
-        for worker in list(self._tracked_workers):
+        for worker in list(self._tracked_workers.values()):
             try:
                 worker.cancel()
             except Exception as e:

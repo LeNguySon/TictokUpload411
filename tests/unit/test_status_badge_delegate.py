@@ -14,6 +14,7 @@ import pytest
 from PyQt6.QtCore import QModelIndex, QRect, QSize, Qt
 from PyQt6.QtGui import QColor, QImage, QPainter, QPalette
 from PyQt6.QtWidgets import QApplication, QStyle, QStyleOptionViewItem
+from src.application.workers.task_worker import drain_ui_tasks
 from src.presentation.delegates.status_badge_delegate import (
     STATUS_THEMES,
     StatusBadgeDelegate,
@@ -173,6 +174,7 @@ def test_main_window_launch_transition_sets_launching(tmp_path, app_instance):
         # Simulate closing
         with patch.object(win.orbita_launcher, "close_profile", return_value=True):
             win._on_close_orbita([p_id])
+            drain_ui_tasks()  # loads/actions run on the UI pool since UI responsiveness P1
         assert win.profile_table.item(row, 12).data(Qt.ItemDataRole.UserRole) == "stopped"
 
         win.scheduler_timer.stop()

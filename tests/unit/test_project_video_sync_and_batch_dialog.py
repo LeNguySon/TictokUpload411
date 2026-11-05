@@ -10,6 +10,7 @@ from unittest.mock import MagicMock
 import pytest
 from PyQt6.QtWidgets import QApplication, QDialog
 from src.application.services.upload_service import UploadService
+from src.application.workers.task_worker import drain_ui_tasks
 from src.infrastructure.database.migrations.runner import run_all_migrations
 from src.infrastructure.database.repositories.profile_repository import ProfileRepository
 from src.infrastructure.database.repositories.project_repository import ProjectRepository
@@ -178,6 +179,7 @@ def test_main_window_project_change_syncs_profiles_and_videos_and_batch_button(
                 break
         assert jp_index > 0
         window.project_combo.setCurrentIndex(jp_index)
+        drain_ui_tasks()  # loads/actions run on the UI pool since UI responsiveness P1
 
         # Profiles and videos should both be filtered to Japan project
         assert window.profile_table.rowCount() == 1

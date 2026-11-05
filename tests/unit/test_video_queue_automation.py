@@ -9,6 +9,7 @@ from unittest.mock import MagicMock
 import pytest
 from PyQt6.QtCore import QMimeData, QUrl
 from PyQt6.QtWidgets import QApplication
+from src.application.workers.task_worker import drain_ui_tasks
 from src.presentation.widgets.video_queue_table_widget import VideoQueueTableWidget
 
 
@@ -49,6 +50,7 @@ def test_video_queue_drag_drop_accepts_video_files(qapp, tmp_path: Path):
     drop_event.mimeData.return_value = mime
     table.dropEvent(drop_event)
     drop_event.acceptProposedAction.assert_called_once()
+    drain_ui_tasks()  # loads/actions run on the UI pool since UI responsiveness P1
 
     # Only vid1 and vid2 should be emitted, non_vid should be filtered out
     assert len(dropped_files) == 2
@@ -80,6 +82,7 @@ def test_video_queue_drag_drop_recursively_scans_folders(qapp, tmp_path: Path):
     drop_event = MagicMock()
     drop_event.mimeData.return_value = mime
     table.dropEvent(drop_event)
+    drain_ui_tasks()  # loads/actions run on the UI pool since UI responsiveness P1
 
     assert len(dropped_files) == 2
     assert str(vid_a) in dropped_files

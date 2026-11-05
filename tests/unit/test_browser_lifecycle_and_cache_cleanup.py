@@ -16,6 +16,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+from src.application.workers.task_worker import drain_ui_tasks
 from src.infrastructure.browser.cache_cleaner import (
     PROTECTED_ITEMS,
     BrowserCacheCleaner,
@@ -249,3 +250,4 @@ def test_main_window_clean_browser_action(qapp, tmp_path, monkeypatch):
 
     # Trigger _on_clean_browser without crash
     mw._on_clean_browser()
+    drain_ui_tasks()  # loads/actions run on the UI pool since UI responsiveness P1

@@ -14,6 +14,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QApplication
+from src.application.workers.task_worker import drain_ui_tasks
 from src.infrastructure.browser.orbita_launcher import OrbitaLauncher
 from src.infrastructure.browser.process_supervisor import BrowserProcessSupervisor
 from src.infrastructure.database.migrations.runner import run_all_migrations
@@ -128,6 +129,7 @@ def test_main_window_orbita_lifecycle_updates_db_and_ui(isolated_db, app_instanc
         mock_proc.poll.return_value = 0
         with patch.object(win.orbita_launcher, "close_profile") as mock_close:
             win._on_close_orbita([p1])
+            drain_ui_tasks()  # loads/actions run on the UI pool since UI responsiveness P1
             assert mock_close.called
 
         # DB must be updated to stopped
@@ -171,6 +173,7 @@ def test_main_window_refresh_profiles_auto_reconciliation(isolated_db, app_insta
 
         with patch.object(win.orbita_launcher, "is_profile_running", side_effect=mock_is_running):
             win.refresh_profiles()
+            drain_ui_tasks()  # loads/actions run on the UI pool since UI responsiveness P1
             win.thread_pool.pool.waitForDone(2000)
             app_instance.processEvents()
 

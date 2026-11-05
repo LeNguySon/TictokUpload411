@@ -9,13 +9,13 @@ from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QDragEnterEvent, QDropEvent
 from PyQt6.QtWidgets import (
     QApplication,
-    QHBoxLayout,
     QHeaderView,
     QTableWidgetItem,
-    QWidget,
 )
-from qfluentwidgets import Action, FluentIcon, ProgressBar, RoundMenu
+from qfluentwidgets import Action, FluentIcon, RoundMenu
 
+from src.application.workers.task_worker import run_task
+from src.presentation.delegates.progress_bar_delegate import PROGRESS_ROLE, ProgressBarDelegate
 from src.presentation.widgets.fast_table import FastTableWidget, RowIndex
 from src.presentation.widgets.table_helpers import (
     NumericTableWidgetItem,
@@ -23,6 +23,31 @@ from src.presentation.widgets.table_helpers import (
     format_mmo_metric,
     get_video_table_headers,
 )
+
+VIDEO_EXTENSIONS = {".mp4", ".mov", ".mkv", ".webm", ".avi"}
+
+
+def collect_video_files(paths: list[str]) -> list[str]:
+    """Expands dropped files/folders into video files, skipping already-posted folders."""
+    found: list[str] = []
+    for raw in paths:
+        fpath = Path(raw)
+        if fpath.is_file() and fpath.suffix.lower() in VIDEO_EXTENSIONS:
+            found.append(str(fpath))
+        elif fpath.is_dir():
+            for vf in fpath.rglob("*"):
+                if any(part in ("_posted", ".posted") for part in vf.parts):
+                    continue
+                if vf.is_file() and vf.suffix.lower() in VIDEO_EXTENSIONS:
+                    found.append(str(vf))
+    return found
+
+
+def _clamp_pct(value: object) -> int:
+    try:
+        return int(min(100.0, max(0.0, float(value))))  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return 0
 
 
 class VideoQueueTableWidget(FastTableWidget):
@@ -65,7 +90,7 @@ class VideoQueueTableWidget(FastTableWidget):
         self.setDragDropMode(FastTableWidget.DragDropMode.DropOnly)
         self.cellDoubleClicked.connect(self._on_cell_double_clicked)
 
-        self._progress_bars: dict[int, ProgressBar] = {}
+        self.setItemDelegateForColumn(10, ProgressBarDelegate(self))
         self._video_logs: dict[int, list[str]] = {}
 
         # Set column widths matching UI snapshot
@@ -100,7 +125,6 @@ class VideoQueueTableWidget(FastTableWidget):
         self.clearSelection()
         self._video_rows.clear()
         self.setRowCount(len(videos))
-        self._progress_bars.clear()
 
         for row_idx, v in enumerate(videos):
             video_id = v.get("id", row_idx + 1)
@@ -203,16 +227,11 @@ class VideoQueueTableWidget(FastTableWidget):
                 status_item.setForeground(QColor("#0078D4"))
             self.setItem(row_idx, 9, status_item)
 
-            # Col 10: Tiến trình (Fluent Progress Bar)
-            progress_pct = int(v.get("download_progress", 100))
-            container = QWidget()
-            layout = QHBoxLayout(container)
-            layout.setContentsMargins(4, 2, 4, 2)
-            pbar = ProgressBar(container)
-            pbar.setValue(progress_pct)
-            layout.addWidget(pbar)
-            self.setCellWidget(row_idx, 10, container)
-            self._progress_bars[video_id] = pbar
+            # Col 10: Tiến trình — painted by ProgressBarDelegate from UserRole (no per-row widget)
+            progress_item = QTableWidgetItem()
+            progress_item.setData(PROGRESS_ROLE, _clamp_pct(v.get("download_progress", 100)))
+            progress_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+            self.setItem(row_idx, 10, progress_item)
 
             # Col 11: Nhật Ký Upload
             log_text = v.get("error_message") or "-"
@@ -234,6 +253,12 @@ class VideoQueueTableWidget(FastTableWidget):
 
             # Col 15: PAF URL
             self.setItem(row_idx, 15, make_item(v.get("paf_url", "")))
+
+    def progress_value(self, video_id: int) -> int | None:
+        """Current progress (0-100) shown for a video, or None if the video is not in the table."""
+        row = self.find_row_by_video_id(video_id)
+        item = self.item(row, 10) if row is not None else None
+        return None if item is None else item.data(PROGRESS_ROLE)
 
     def find_row_by_video_id(self, video_id: int) -> int | None:
         """O(1) lookup of the current table row for a video ID (correct after sorting)."""
@@ -319,14 +344,12 @@ class VideoQueueTableWidget(FastTableWidget):
             status_item.setForeground(QColor("#0078D4"))
 
     def update_progress(self, video_id: int, percentage: float, speed_text: str = "") -> None:
-        """Dynamically updates the Fluent ProgressBar and Status for a specific video row."""
-        if video_id in self._progress_bars:
-            pbar = self._progress_bars[video_id]
-            int_pct = int(min(100.0, max(0.0, percentage)))
-            pbar.setValue(int_pct)
-
+        """Updates the progress cell (repaints only that cell) and the status text for a video row."""
         row = self.find_row_by_video_id(video_id)
         if row is not None:
+            progress_item = self.item(row, 10)
+            if progress_item is not None:
+                progress_item.setData(PROGRESS_ROLE, _clamp_pct(percentage))
             status_item = self.item(row, 9)
             if status_item:
                 current_text = status_item.text().lower()
@@ -509,22 +532,17 @@ class VideoQueueTableWidget(FastTableWidget):
             event.ignore()
 
     def dropEvent(self, event: QDropEvent) -> None:
-        urls = event.mimeData().urls()
-        valid_extensions = {".mp4", ".mov", ".mkv", ".webm", ".avi"}
-        file_paths = []
-        for url in urls:
-            fpath = Path(url.toLocalFile())
-            if fpath.is_file() and fpath.suffix.lower() in valid_extensions:
-                file_paths.append(str(fpath))
-            elif fpath.is_dir():
-                for vf in fpath.rglob("*"):
-                    if any(part in ("_posted", ".posted") for part in vf.parts):
-                        continue
-                    if vf.is_file() and vf.suffix.lower() in valid_extensions:
-                        file_paths.append(str(vf))
-
-        if file_paths:
-            self.files_dropped.emit(file_paths)
-            event.acceptProposedAction()
-        else:
+        """Accepts dropped files/folders at once; recursive folder scanning runs off the GUI thread (T7)."""
+        paths = [url.toLocalFile() for url in event.mimeData().urls() if url.isLocalFile()]
+        if not paths:
             event.ignore()
+            return
+        event.acceptProposedAction()
+        run_task(lambda: collect_video_files(paths), on_result=self._emit_dropped_files)
+
+    def _emit_dropped_files(self, file_paths: list[str]) -> None:
+        if file_paths:
+            try:
+                self.files_dropped.emit(file_paths)
+            except RuntimeError:  # table destroyed while scanning
+                pass

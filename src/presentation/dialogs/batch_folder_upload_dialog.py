@@ -10,7 +10,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from PyQt6.QtCore import Qt, QThreadPool
+from PyQt6.QtCore import Qt, QThreadPool, QTimer
 from PyQt6.QtWidgets import (
     QDialog,
     QFileDialog,
@@ -37,6 +37,7 @@ from qfluentwidgets import (
 
 from src.application.services.upload_service import UploadService
 from src.application.workers.folder_distribution_worker import FolderDistributionWorker
+from src.application.workers.task_worker import run_task
 from src.infrastructure.database.repositories.profile_repository import ProfileRepository
 from src.infrastructure.database.repositories.project_repository import ProjectRepository
 from src.presentation.dialogs.dialog_helpers import (
@@ -46,6 +47,14 @@ from src.presentation.dialogs.dialog_helpers import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+FOLDER_SCAN_DEBOUNCE_MS = 300
+SCANNING_TEXT = "⏳ Đang quét..."
+
+
+def scan_text_for(folder: str, count: int) -> str:
+    return f"📁 {count} video" if folder and count > 0 else ("⚠️ 0 video" if folder else "Chưa chọn")
 
 
 def count_valid_videos_in_folder(folder_path: str) -> int:
@@ -85,6 +94,14 @@ class BatchFolderUploadDialog(QDialog):
         parent=None,
     ) -> None:
         super().__init__(parent)
+        # Folder scans (recursive rglob) run on the UI pool; generations drop stale results (T7).
+        self._scan_gen = 0
+        self._pending_scan_folder = ""
+        self._row_scan_gen: dict[int, int] = {}
+        self._scan_debounce = QTimer(self)
+        self._scan_debounce.setSingleShot(True)
+        self._scan_debounce.setInterval(FOLDER_SCAN_DEBOUNCE_MS)
+        self._scan_debounce.timeout.connect(self._start_folder_scan)
         self.profile_repo = profile_repo
         self.upload_service = upload_service
         self.project_repo = project_repo or ProjectRepository(profile_repo.db_path)
@@ -343,11 +360,8 @@ class BatchFolderUploadDialog(QDialog):
             cell_layout.addWidget(folder_edit, 1)
             cell_layout.addWidget(browse_btn)
 
-            # Col 3: Scanned valid videos count
-            v_count = count_valid_videos_in_folder(folder)
-            scan_item = QTableWidgetItem(
-                f"📁 {v_count} video" if folder and v_count > 0 else ("⚠️ 0 video" if folder else "Chưa chọn")
-            )
+            # Col 3: Scanned valid videos count (filled asynchronously)
+            scan_item = QTableWidgetItem(SCANNING_TEXT if folder else scan_text_for(folder, 0))
             scan_item.setFlags(Qt.ItemFlag.ItemIsEnabled)
 
             # Col 4: Total profiles in project
@@ -359,6 +373,8 @@ class BatchFolderUploadDialog(QDialog):
             self.project_table.setItem(row, 1, name_item)
             self.project_table.setCellWidget(row, 2, cell_widget)
             self.project_table.setItem(row, 3, scan_item)
+            if folder:
+                self._scan_project_row(row, folder)
             self.project_table.setItem(row, 4, prof_item)
 
             # Sync initial folder to txt_folder if matching
@@ -377,11 +393,11 @@ class BatchFolderUploadDialog(QDialog):
 
     def _on_project_folder_text_changed(self, row: int, project_id: int, text: str) -> None:
         folder = text.strip()
-        v_count = count_valid_videos_in_folder(folder)
-        scan_text = f"📁 {v_count} video" if folder and v_count > 0 else ("⚠️ 0 video" if folder else "Chưa chọn")
         item = self.project_table.item(row, 3)
         if item:
-            item.setText(scan_text)
+            item.setText(SCANNING_TEXT if folder else scan_text_for(folder, 0))
+        if folder:
+            self._scan_project_row(row, folder)
         if folder and Path(folder).is_dir():
             try:
                 self.project_repo.update(project_id, video_folder=folder)
@@ -568,32 +584,63 @@ class BatchFolderUploadDialog(QDialog):
 
         return batches
 
+    def _scan_project_row(self, row: int, folder: str) -> None:
+        """Counts videos of one project folder off the GUI thread; only the latest scan per row is shown."""
+        gen = self._row_scan_gen.get(row, 0) + 1
+        self._row_scan_gen[row] = gen
+
+        def _apply(count: int) -> None:
+            if self._row_scan_gen.get(row) != gen:
+                return
+            try:
+                item = self.project_table.item(row, 3)
+                if item:
+                    item.setText(scan_text_for(folder, count))
+            except RuntimeError:  # dialog closed before the scan finished
+                pass
+
+        run_task(lambda: count_valid_videos_in_folder(folder), on_result=_apply)
+
     def _update_scanned_files_count(self, folder_str: str) -> None:
-        """Compatibility helper for scanning a single folder."""
+        """Debounced, asynchronous recursive scan of the selected folder (was rglob per keystroke)."""
+        self._pending_scan_folder = folder_str
         if not folder_str:
+            self._scan_debounce.stop()
+            self._scan_gen += 1
             self.lbl_scan_info.setText("Chưa quét thư mục")
             return
-        p = Path(folder_str)
-        if not p.is_dir():
-            self.lbl_scan_info.setText("⚠️ Thư mục không tồn tại trên máy tính.")
-            return
+        self.lbl_scan_info.setText(SCANNING_TEXT)
+        self._scan_debounce.start()
 
-        valid_exts = {".mp4", ".mov", ".mkv", ".webm", ".avi"}
-        try:
-            count = sum(
-                1
-                for f in p.rglob("*")
-                if f.is_file()
-                and f.suffix.lower() in valid_exts
-                and not any(part in ("_posted", ".posted") for part in f.parts)
-            )
+    def _start_folder_scan(self) -> None:
+        folder_str = self._pending_scan_folder
+        self._scan_gen += 1
+        gen = self._scan_gen
+
+        def _scan() -> str:
+            if not Path(folder_str).is_dir():
+                return "⚠️ Thư mục không tồn tại trên máy tính."
+            count = count_valid_videos_in_folder(folder_str)
             if count > 0:
-                self.lbl_scan_info.setText(f"📁 Đã tìm thấy: {count} video hợp lệ (quét đệ quy toàn bộ thư mục con)")
-            else:
-                self.lbl_scan_info.setText("⚠️ Thư mục này chưa có file video hợp lệ (.mp4, .mov, .mkv, .webm, .avi)")
-        except Exception as e:
-            self.lbl_scan_info.setText(f"Lỗi khi quét thư mục: {e}")
+                return f"📁 Đã tìm thấy: {count} video hợp lệ (quét đệ quy toàn bộ thư mục con)"
+            return "⚠️ Thư mục này chưa có file video hợp lệ (.mp4, .mov, .mkv, .webm, .avi)"
 
+        def _apply(text: str) -> None:
+            if gen != self._scan_gen:
+                return
+            try:
+                self.lbl_scan_info.setText(text)
+            except RuntimeError:
+                pass
+
+        def _failed(msg: str) -> None:
+            if gen == self._scan_gen:
+                try:
+                    self.lbl_scan_info.setText(f"Lỗi khi quét thư mục: {msg}")
+                except RuntimeError:
+                    pass
+
+        run_task(_scan, on_result=_apply, on_error=_failed)
     def _on_cancel_clicked(self) -> None:
         """Cooperative cancel handler terminating worker if active before rejecting."""
         if self.worker and not self.worker.is_cancelled:

@@ -12,6 +12,7 @@ import pytest
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QApplication, QDialog
 from src.application.services.upload_service import UploadService
+from src.application.workers.task_worker import drain_ui_tasks
 from src.infrastructure.database.migrations.runner import run_all_migrations
 from src.infrastructure.database.repositories.profile_repository import ProfileRepository
 from src.infrastructure.database.repositories.project_repository import ProjectRepository
@@ -376,7 +377,7 @@ def test_metric_video_queue_table_widget_15_columns_and_sorting(qapp):
 # ---------------------------------------------------------------------------
 # 7. BatchFolderUploadDialog Live Counter & Banner Metrics
 # ---------------------------------------------------------------------------
-def test_metric_batch_folder_upload_dialog_live_counter_and_banner(qapp, metric_db: Path, tmp_path: Path):
+def test_metric_batch_folder_upload_dialog_live_counter_and_banner(qapp, qtbot, metric_db: Path, tmp_path: Path):
     """Verifies BatchFolderUploadDialog updates file count and displays project badge."""
     prof_repo = ProfileRepository(metric_db)
     proj_repo = ProjectRepository(metric_db)
@@ -405,14 +406,15 @@ def test_metric_batch_folder_upload_dialog_live_counter_and_banner(qapp, metric_
     assert "Dự Án Nhật Bản (Tokyo 2026)" in dlg.lbl_project_badge.text()
 
     # Counter verification
-    assert "3 video" in dlg.lbl_scan_info.text()
+    # Folder scan is debounced and runs on the UI pool since UI responsiveness P1
+    qtbot.waitUntil(lambda: "3 video" in dlg.lbl_scan_info.text(), timeout=5000)
     assert dlg.profile_table.rowCount() == 1  # Only Tokyo Channel loaded
 
     # Update folder dynamically
     empty_folder = tmp_path / "Empty_Folder"
     empty_folder.mkdir()
     dlg.txt_folder.setText(str(empty_folder))
-    assert "chưa có file video" in dlg.lbl_scan_info.text().lower()
+    qtbot.waitUntil(lambda: "chưa có file video" in dlg.lbl_scan_info.text().lower(), timeout=5000)
 
 
 # ---------------------------------------------------------------------------
@@ -470,6 +472,7 @@ def test_metric_main_window_full_synchronization_pipeline(qapp, metric_db: Path,
                 break
         assert jp_idx > 0
         window.project_combo.setCurrentIndex(jp_idx)
+        drain_ui_tasks()  # loads/actions run on the UI pool since UI responsiveness P1
 
         # Verified Metrics for Japan
         assert window.profile_table.rowCount() == 2, (
@@ -485,6 +488,7 @@ def test_metric_main_window_full_synchronization_pipeline(qapp, metric_db: Path,
                 break
         assert kr_idx > 0
         window.project_combo.setCurrentIndex(kr_idx)
+        drain_ui_tasks()  # loads/actions run on the UI pool since UI responsiveness P1
 
         # Verified Metrics for Korea
         assert window.profile_table.rowCount() == 1, (
@@ -494,6 +498,7 @@ def test_metric_main_window_full_synchronization_pipeline(qapp, metric_db: Path,
 
         # Switch back to "Tất cả dự án"
         window.project_combo.setCurrentIndex(0)
+        drain_ui_tasks()  # loads/actions run on the UI pool since UI responsiveness P1
         assert window.profile_table.rowCount() == 3
         assert window.video_table.rowCount() == 4
 

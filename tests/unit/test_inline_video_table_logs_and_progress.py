@@ -41,9 +41,8 @@ def test_video_queue_table_inline_progress_and_log_updates(qapp):
 
     # 1. Update progress for Video 501
     table.update_progress(501, 45.0)
-    pbar = table._progress_bars.get(501)
-    assert pbar is not None
-    assert pbar.value() == 45
+    # Progress is painted by ProgressBarDelegate (no per-row widget) — UI responsiveness T6
+    assert table.progress_value(501) == 45
 
     # 2. Append log for Video 501
     table.append_log(501, "12:00:01", "CHUNK", "Đang gửi chunk 2/5 (45%)", "INFO")

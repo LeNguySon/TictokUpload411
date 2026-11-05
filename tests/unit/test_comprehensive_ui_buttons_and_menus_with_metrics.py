@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 import pytest
 from PyQt6.QtWidgets import QApplication
+from src.application.workers.task_worker import drain_ui_tasks
 from src.infrastructure.database.migrations.runner import run_all_migrations
 from src.infrastructure.database.repositories.profile_repository import ProfileRepository
 from src.infrastructure.database.repositories.project_repository import ProjectRepository
@@ -154,6 +155,7 @@ def test_toolbar_buttons_and_filtering_metrics(populated_db, app_instance):
                 break
         assert jp_index > 0
         win.project_combo.setCurrentIndex(jp_index)
+        drain_ui_tasks()  # loads/actions run on the UI pool since UI responsiveness P1
 
         # After filtering by Japan Group:
         assert win.profile_table.rowCount() == 2
@@ -161,6 +163,7 @@ def test_toolbar_buttons_and_filtering_metrics(populated_db, app_instance):
 
         # Reset to 'Tất cả dự án'
         win.project_combo.setCurrentIndex(0)
+        drain_ui_tasks()  # loads/actions run on the UI pool since UI responsiveness P1
         assert win.profile_table.rowCount() == 3
         assert win.video_table.rowCount() == 3
 
@@ -234,6 +237,7 @@ def test_profile_context_menu_actions_and_database_metrics(populated_db, app_ins
         # 2. act_close (Close browser)
         with patch.object(win.orbita_launcher, "close_profile") as mock_close:
             win.profile_table.close_orbita_requested.emit([prof_j1])
+            drain_ui_tasks()  # loads/actions run on the UI pool since UI responsiveness P1
             assert mock_close.called
 
         # 3. act_cookie (Check Cookie LIVE/DIE)
@@ -263,6 +267,7 @@ def test_profile_context_menu_actions_and_database_metrics(populated_db, app_ins
                 mock_dispatch.side_effect = run_worker_sync
                 win.profile_table.add_video_requested.emit([prof_j1])
         win.refresh_videos()
+        drain_ui_tasks()  # loads/actions run on the UI pool since UI responsiveness P1
         assert win.video_table.rowCount() >= 1
 
         # 6. act_proxy (Update/Assign Proxy)
@@ -274,6 +279,7 @@ def test_profile_context_menu_actions_and_database_metrics(populated_db, app_ins
             # Set proxy_type to rotating
             win.proxy_repo.update(populated_db["proxies"][0], proxy_type="rotating")
             win.profile_table.rotate_proxy_requested.emit([prof_j1])
+            drain_ui_tasks()  # loads/actions run on the UI pool since UI responsiveness P1
             assert mock_rot.called
 
         # 8. act_check_proxy (Check proxy latency)
@@ -321,6 +327,7 @@ def test_profile_context_menu_actions_and_database_metrics(populated_db, app_ins
             win.profile_table.soft_delete_requested.emit([prof_j1])
             p_trashed = win.profile_repo.get_by_id(prof_j1)
             assert p_trashed["is_trashed"] == 1
+            drain_ui_tasks()  # loads/actions run on the UI pool since UI responsiveness P1
             assert win.profile_table.rowCount() == 2
 
         win.scheduler_timer.stop()
@@ -391,6 +398,7 @@ def test_video_queue_context_menu_actions_and_metrics(populated_db, app_instance
         with patch("src.presentation.views.main_window.MessageBox") as mock_mb:
             mock_mb.return_value.exec.return_value = True
             win.video_table.delete_video_requested.emit([vid_id])
+            drain_ui_tasks()  # loads/actions run on the UI pool since UI responsiveness P1
             assert win.video_table.rowCount() == 2
             # DB record should be deleted
             assert win.video_repo.get_by_id(vid_id) is None
@@ -497,6 +505,7 @@ def test_settings_menu_actions_and_system_metrics(populated_db, app_instance):
         ):
             mock_mb_clean.return_value.exec.return_value = True
             win._on_clean_browser()
+            drain_ui_tasks()  # loads/actions run on the UI pool since UI responsiveness P1
 
         # 16. act_guide (User Guide Dialog)
         with patch("src.presentation.dialogs.user_guide_dialog.UserGuideDialog.exec", return_value=True):

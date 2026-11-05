@@ -107,7 +107,7 @@ def test_main_window_remove_proxy_and_vpn_action(qapp, tmp_path: Path):
     assert updated["vpn_config"] is None
 
 
-def test_main_window_rotate_proxy_ip_action(qapp, tmp_path: Path):
+def test_main_window_rotate_proxy_ip_action(qapp, qtbot, tmp_path: Path):
     db_file = tmp_path / "test_mw_rotate.db"
     run_all_migrations(db_file)
 
@@ -135,6 +135,8 @@ def test_main_window_rotate_proxy_ip_action(qapp, tmp_path: Path):
 
     mw._on_rotate_proxy_selected([p_id])
 
+    # Rotation (HTTP) runs on the UI pool since UI responsiveness T7.
+    qtbot.waitUntil(lambda: mw.proxy_service.change_rotating_ip.called, timeout=5000)
     mw.proxy_service.change_rotating_ip.assert_called_once_with(px_id)
 
 

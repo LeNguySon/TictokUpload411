@@ -47,6 +47,7 @@ from src.application.services.upload_service import UploadService
 from src.application.signals.app_signals import AppSignalBus
 from src.application.workers.metrics_sync_worker import MetricsSyncWorker
 from src.application.workers.orbita_launch_worker import OrbitaLaunchWorker
+from src.application.workers.task_worker import run_task
 from src.application.workers.thread_pool_manager import ThreadPoolManager
 from src.application.workers.upload_worker import UploadWorker
 from src.application.workers.video_import_worker import VideoImportWorker
@@ -163,6 +164,10 @@ class TikTokManagerMainWindow(QMainWindow):
         self.setWindowTitle("SSMATool Reup Tiktok - TAVM 2026 Windows 11 Edition")
         self.resize(1366, 850)
 
+        # Generation tokens: only the latest async table load is applied (T5).
+        self._profile_load_gen = 0
+        self._video_load_gen = 0
+
         # Coalesces bursts of profile_updated signals into one row-patch pass (T3).
         self._pending_profile_patches: dict[int, dict[str, Any]] = {}
         self._profile_patch_timer = QTimer(self)
@@ -175,7 +180,7 @@ class TikTokManagerMainWindow(QMainWindow):
         for col_idx in range(self.profile_table.columnCount()):
             self.profile_table.setColumnHidden(col_idx, col_idx in self.hidden_columns)
         self._connect_signals()
-        self.refresh_all_data()
+        self._load_initial_data()
 
         # Real-time Video Schedule Auto-Dispatch Timer (Every 15s)
         self.scheduler_timer = QTimer(self)
@@ -404,10 +409,59 @@ class TikTokManagerMainWindow(QMainWindow):
             self.project_combo.addItem(p["name"], userData=p["id"])
         self.project_combo.blockSignals(False)
 
-    def refresh_profiles(self) -> None:
-        """Loads active profiles from database into table immediately (<0.01s), then triggers async status sync."""
+    def _run_bg(
+        self,
+        fn: Any,
+        *args: Any,
+        on_result: Any = None,
+        on_error: Any = None,
+        **kwargs: Any,
+    ) -> None:
+        """Runs ``fn`` on the UI pool; callbacks run on the GUI thread and are ignored once
+        the window has been destroyed."""
+
+        def _guard(cb: Any) -> Any:
+            if cb is None:
+                return None
+
+            def _wrapped(value: Any) -> None:
+                try:
+                    cb(value)
+                except RuntimeError as e:  # window/widget already deleted
+                    logger.debug("Background callback skipped: %s", e)
+
+            return _wrapped
+
+        def _log_error(msg: str) -> None:
+            logger.warning("Background task %s failed: %s", getattr(fn, "__name__", fn), msg)
+
+        run_task(fn, *args, on_result=_guard(on_result), on_error=_guard(on_error) or _log_error, **kwargs)
+
+    def _load_initial_data(self) -> None:
+        """First load is synchronous so the window never opens with empty tables."""
+        self._refresh_project_dropdown()
         project_id = self.project_combo.currentData()
-        profiles = self.profile_repo.list_active(project_id=project_id)
+        self._profile_load_gen += 1
+        self._apply_profile_load(self._profile_load_gen, self.profile_repo.list_active(project_id=project_id))
+        self._video_load_gen += 1
+        self._apply_video_load(
+            self._video_load_gen, self.video_repo.list_available(project_id=project_id, only_available=False)
+        )
+
+    def refresh_profiles(self) -> None:
+        """Reloads the profile table; the SQLite read runs off the GUI thread (T5)."""
+        self._profile_load_gen += 1
+        gen = self._profile_load_gen
+        project_id = self.project_combo.currentData()
+        self._run_bg(
+            self.profile_repo.list_active,
+            project_id=project_id,
+            on_result=lambda rows: self._apply_profile_load(gen, rows),
+        )
+
+    def _apply_profile_load(self, gen: int, profiles: list[dict[str, Any]]) -> None:
+        if gen != self._profile_load_gen:
+            return  # superseded by a newer refresh
         self.profile_table.load_profiles(profiles)
         self._trigger_async_status_sync(profiles, force=True)
 
@@ -446,10 +500,12 @@ class TikTokManagerMainWindow(QMainWindow):
         try:
             from src.application.workers.profile_runtime_sync_worker import ProfileRuntimeSyncWorker
 
+            # No QObject parent for the worker's signals: if they were children of this window, Qt
+            # would destroy them on window close while the worker thread may still be emitting
+            # (cross-thread use-after-free -> access violation). The worker owns them instead.
             worker = ProfileRuntimeSyncWorker(
                 profiles=profiles,
                 launcher=self.orbita_launcher,
-                parent=self,
                 profile_repo=self.profile_repo,  # deltas are persisted off the GUI thread
             )
             self._active_status_sync_worker = worker
@@ -500,10 +556,22 @@ class TikTokManagerMainWindow(QMainWindow):
         item.setToolTip(f"Trạng thái hoạt động: {status}")
 
     def refresh_videos(self) -> None:
+        """Reloads the video table; the SQLite read runs off the GUI thread (T5)."""
+        self._video_load_gen += 1
+        gen = self._video_load_gen
         project_id = self.project_combo.currentData()
-        available = self.video_repo.list_available(project_id=project_id, only_available=False)
-        self.video_table.load_videos(available)
-        self.lbl_video_header.setText(f"Bảng video Đã chọn 0 / {len(available)}")
+        self._run_bg(
+            self.video_repo.list_available,
+            project_id=project_id,
+            only_available=False,
+            on_result=lambda rows: self._apply_video_load(gen, rows),
+        )
+
+    def _apply_video_load(self, gen: int, videos: list[dict[str, Any]]) -> None:
+        if gen != self._video_load_gen:
+            return
+        self.video_table.load_videos(videos)
+        self.lbl_video_header.setText(f"Bảng video Đã chọn 0 / {len(videos)}")
 
     def _on_project_changed(self) -> None:
         self.refresh_profiles()
@@ -830,32 +898,41 @@ class TikTokManagerMainWindow(QMainWindow):
             )
 
     def _on_close_orbita(self, profile_ids: list[int]) -> None:
+        """Closes browsers off the GUI thread (daemon HTTP + process waits + DB writes) (T7)."""
         if not profile_ids:
             return
-        closed_count = 0
-        for p_id in profile_ids:
-            p = self.profile_repo.get_by_id(p_id)
-            target = p if p else p_id
-            if self.orbita_launcher.close_profile(target):
-                closed_count += 1
-            new_status = "LIVE" if (p and (p.get("cookie") or p.get("username_on_tiktok"))) else "stopped"
-            self.profile_repo.update(p_id, status=new_status)
+        ids = list(profile_ids)
+        launcher, repo = self.orbita_launcher, self.profile_repo
+
+        def _close_all() -> dict[int, str]:
+            statuses: dict[int, str] = {}
+            for p_id in ids:
+                p = repo.get_by_id(p_id)
+                try:
+                    launcher.close_profile(p if p else p_id)
+                except Exception as e:
+                    logger.warning("Close Orbita failed for profile %s: %s", p_id, e)
+                new_status = "LIVE" if (p and (p.get("cookie") or p.get("username_on_tiktok"))) else "stopped"
+                repo.update(p_id, status=new_status)
+                statuses[p_id] = new_status
+            return statuses
+
+        self._run_bg(_close_all, on_result=self._on_orbita_closed)
+
+    def _on_orbita_closed(self, statuses: dict[int, str]) -> None:
+        for p_id, new_status in statuses.items():
             row = self._find_profile_row_by_id(p_id)
             if row >= 0:
                 self._update_profile_status_cell(row, new_status)
-
         self.refresh_profiles()
 
-        count = len(profile_ids)
-        title = "Đóng Trình Duyệt"
-        content = (
-            f"Đã đóng trình duyệt cho {count} hồ sơ."
-            if count > 1
-            else f"Đã đóng trình duyệt cho hồ sơ #{profile_ids[0]}."
-        )
+        ids = list(statuses)
+        count = len(ids)
         InfoBar.info(
-            title=title,
-            content=content,
+            title="Đóng Trình Duyệt",
+            content=(
+                f"Đã đóng trình duyệt cho {count} hồ sơ." if count > 1 else f"Đã đóng trình duyệt cho hồ sơ #{ids[0]}."
+            ),
             position=InfoBarPosition.TOP,
             parent=self,
         )
@@ -863,7 +940,7 @@ class TikTokManagerMainWindow(QMainWindow):
         # Passively inspect cookies and update LIVE/DIE status in background
         try:
             worker = MetricsSyncWorker(
-                profile_ids=profile_ids,
+                profile_ids=ids,
                 profile_service=self.profile_service,
                 signal_bus=self.signal_bus,
             )
@@ -921,47 +998,60 @@ class TikTokManagerMainWindow(QMainWindow):
             )
 
     def _on_clean_browser(self) -> None:
-        try:
+        """Kills orphan browsers and purges caches on the UI pool (disk-heavy) (T7)."""
+        repo = self.profile_repo
+
+        def _clean() -> str:
             import os
 
             from src.infrastructure.browser.cache_cleaner import BrowserCacheCleaner
             from src.infrastructure.browser.process_supervisor import BrowserProcessSupervisor
 
-            supervisor = BrowserProcessSupervisor()
-            cleaner = BrowserCacheCleaner()
+            try:
+                supervisor = BrowserProcessSupervisor()
+                cleaner = BrowserCacheCleaner()
 
-            # 1. Clean lingering orphan/zombie browser processes
-            orphan_pids = supervisor.cleanup_orphan_browsers()
+                # 1. Clean lingering orphan/zombie browser processes
+                orphan_pids = supervisor.cleanup_orphan_browsers()
 
-            # 2. Gather profile directories and safely purge cache
-            profile_dirs: list[Path] = []
-            for p in self.profile_repo.list_all():
-                s_dir = p.get("storage_dir")
-                if s_dir and Path(s_dir).is_dir():
-                    profile_dirs.append(Path(s_dir))
-                else:
-                    uuid_val = p.get("uuid") or p.get("name")
-                    if uuid_val:
-                        candidate = Path("profiles") / str(uuid_val)
-                        if candidate.is_dir():
-                            profile_dirs.append(candidate)
+                # 2. Gather profile directories and safely purge cache
+                profile_dirs: list[Path] = []
+                for p in repo.list_all():
+                    s_dir = p.get("storage_dir")
+                    if s_dir and Path(s_dir).is_dir():
+                        profile_dirs.append(Path(s_dir))
+                    else:
+                        uuid_val = p.get("uuid") or p.get("name")
+                        if uuid_val:
+                            candidate = Path("profiles") / str(uuid_val)
+                            if candidate.is_dir():
+                                profile_dirs.append(candidate)
 
-            cache_summary = cleaner.clean_cache(profile_dirs)
-            freed_cache_str = cache_summary.get("formatted_freed", "0 B")
+                cache_summary = cleaner.clean_cache(profile_dirs)
+                freed_cache_str = cache_summary.get("formatted_freed", "0 B")
 
-            # 3. Trim working set RAM
-            trim_res = supervisor.trim_working_set(os.getpid())
-            freed_ram_mb = trim_res.get("freed_mb", 0.0)
+                # 3. Trim working set RAM
+                trim_res = supervisor.trim_working_set(os.getpid())
+                freed_ram_mb = trim_res.get("freed_mb", 0.0)
 
-            content = (
-                f"Đã diệt {len(orphan_pids)} tiến trình mồ côi | "
-                f"Giải phóng {freed_cache_str} cache rác | "
-                f"Thu hồi {freed_ram_mb} MB RAM (Bảo tồn 100% Cookie)."
-            )
-        except Exception as e:
-            logger.warning("Clean browser warning: %s", e)
-            content = "Đã dọn sạch cache tạm và tối ưu bộ nhớ trình duyệt."
+                return (
+                    f"Đã diệt {len(orphan_pids)} tiến trình mồ côi | "
+                    f"Giải phóng {freed_cache_str} cache rác | "
+                    f"Thu hồi {freed_ram_mb} MB RAM (Bảo tồn 100% Cookie)."
+                )
+            except Exception as e:
+                logger.warning("Clean browser warning: %s", e)
+                return "Đã dọn sạch cache tạm và tối ưu bộ nhớ trình duyệt."
 
+        InfoBar.info(
+            title="Đang Dọn Dẹp",
+            content="Đang dọn cache trình duyệt và RAM trong nền...",
+            position=InfoBarPosition.TOP,
+            parent=self,
+        )
+        self._run_bg(_clean, on_result=self._on_browser_cleaned)
+
+    def _on_browser_cleaned(self, content: str) -> None:
         InfoBar.success(
             title="Dọn Dẹp Trình Duyệt & RAM",
             content=content,
@@ -1151,28 +1241,35 @@ class TikTokManagerMainWindow(QMainWindow):
         )
 
     def _on_rotate_proxy_selected(self, profile_ids: list[int]) -> None:
-        """Triggers IP rotation URL for all rotating proxies associated with selected profiles."""
+        """Triggers IP rotation URLs (HTTP) for the selected profiles' proxies off the GUI thread (T7)."""
         if not profile_ids:
             return
-        rotated_count = 0
-        for p_id in profile_ids:
-            p = self.profile_repo.get_by_id(p_id)
-            if not p or not p.get("proxy_id"):
-                continue
-            px = self.proxy_repo.get_by_id(p["proxy_id"])
-            if px and (px.get("proxy_type") == "rotating" or px.get("change_ip_url")):
-                try:
-                    # Support both rotate_proxy_ip and legacy change_rotating_ip mock interfaces
-                    target_fn = self.proxy_service.rotate_proxy_ip
-                    candidate_change = getattr(self.proxy_service, "change_rotating_ip", None)
-                    if candidate_change and type(candidate_change).__name__ in ("MagicMock", "Mock"):
-                        target_fn = candidate_change
-                    res = target_fn(px["id"])
-                    if res:
-                        rotated_count += 1
-                except Exception as e:
-                    logger.warning("Error rotating proxy for profile %s: %s", p_id, e)
+        ids = list(profile_ids)
+        profile_repo, proxy_repo, proxy_service = self.profile_repo, self.proxy_repo, self.proxy_service
 
+        def _rotate_all() -> int:
+            rotated_count = 0
+            for p_id in ids:
+                p = profile_repo.get_by_id(p_id)
+                if not p or not p.get("proxy_id"):
+                    continue
+                px = proxy_repo.get_by_id(p["proxy_id"])
+                if px and (px.get("proxy_type") == "rotating" or px.get("change_ip_url")):
+                    try:
+                        # Support both rotate_proxy_ip and legacy change_rotating_ip mock interfaces
+                        target_fn = proxy_service.rotate_proxy_ip
+                        candidate_change = getattr(proxy_service, "change_rotating_ip", None)
+                        if candidate_change and type(candidate_change).__name__ in ("MagicMock", "Mock"):
+                            target_fn = candidate_change
+                        if target_fn(px["id"]):
+                            rotated_count += 1
+                    except Exception as e:
+                        logger.warning("Error rotating proxy for profile %s: %s", p_id, e)
+            return rotated_count
+
+        self._run_bg(_rotate_all, on_result=self._on_proxies_rotated)
+
+    def _on_proxies_rotated(self, rotated_count: int) -> None:
         if rotated_count > 0:
             self.refresh_profiles()
             InfoBar.success(
@@ -1879,14 +1976,6 @@ class TikTokManagerMainWindow(QMainWindow):
         self.video_table.update_stage(video_id, stage_text)
 
     def _on_upload_completed(self, video_id: int, publish_id: str) -> None:
-        # Tự động cách ly video đã upload vào thư mục _posted/
-        try:
-            isolated_path = self.upload_service.isolate_video_file(video_id)
-            if isolated_path:
-                logger.info("Video #%s physically isolated to %s", video_id, isolated_path)
-        except Exception as e:
-            logger.warning("Failed to physically isolate video #%s: %s", video_id, e)
-
         self.video_table.append_log(video_id, "", "SUCCESS", f"Xuất bản thành công: {publish_id}", "SUCCESS")
         InfoBar.success(
             title="Upload Hoàn Tất",
@@ -1895,21 +1984,38 @@ class TikTokManagerMainWindow(QMainWindow):
             parent=self,
         )
 
-        # Auto-advance queue if switch is enabled
-        if self.switch_auto.isChecked():
-            avail = self.video_repo.list_available()
-            selected = self.profile_table.get_selected_profile_ids()
-            if avail and selected:
-                next_video = avail[0]
-                jump_step = max(1, self.spin_jump.value() + 1)
-                next_profile = selected[jump_step % len(selected)]
-                worker = UploadWorker(
-                    video_id=next_video["id"],
-                    profile_id=next_profile,
-                    upload_service=self.upload_service,
-                    signal_bus=self.signal_bus,
-                )
-                self.thread_pool.dispatch(worker)
+        # Isolation moves the file into _posted/ (a full copy across drives) and auto-advance
+        # reads the queue: both run off the GUI thread (T7).
+        auto_advance = self.switch_auto.isChecked()
+        selected = self.profile_table.get_selected_profile_ids() if auto_advance else []
+        jump_step = max(1, self.spin_jump.value() + 1)
+        upload_service, video_repo = self.upload_service, self.video_repo
+
+        def _post_upload() -> dict[str, Any] | None:
+            try:
+                isolated_path = upload_service.isolate_video_file(video_id)
+                if isolated_path:
+                    logger.info("Video #%s physically isolated to %s", video_id, isolated_path)
+            except Exception as e:
+                logger.warning("Failed to physically isolate video #%s: %s", video_id, e)
+            if auto_advance and selected:
+                avail = video_repo.list_available()
+                if avail:
+                    return dict(avail[0])
+            return None
+
+        def _advance(next_video: dict[str, Any] | None) -> None:
+            if not next_video or not selected:
+                return
+            worker = UploadWorker(
+                video_id=next_video["id"],
+                profile_id=selected[jump_step % len(selected)],
+                upload_service=self.upload_service,
+                signal_bus=self.signal_bus,
+            )
+            self.thread_pool.dispatch(worker)
+
+        self._run_bg(_post_upload, on_result=_advance)
 
     def _on_upload_failed(self, video_id: int, error: str) -> None:
         self.video_table.set_video_error(video_id, error)

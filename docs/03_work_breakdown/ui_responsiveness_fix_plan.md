@@ -1,6 +1,6 @@
 # Kế Hoạch Vá Lỗi Giao Diện Chậm / Giật / Phản Hồi Trễ (GATE 1)
 
-> Trạng thái: **Chờ phê duyệt** · Ngày khảo sát: 2026-11-05 · Phạm vi: `src/presentation`, `src/application/workers`, `src/infrastructure/browser/orbita_launcher.py`
+> Trạng thái: **P0 đã commit (71376fe) · P1 hoàn tất, chờ GATE 2 · P2 chưa làm** · Ngày khảo sát: 2026-11-05 · Phạm vi: `src/presentation`, `src/application/workers`, `src/infrastructure/browser/orbita_launcher.py`
 
 ## 1. Số liệu đo thực tế (500 profile / 500 video, Qt offscreen)
 
