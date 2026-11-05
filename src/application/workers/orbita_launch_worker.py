@@ -110,10 +110,12 @@ class OrbitaLaunchWorker(QRunnable):
                 except Exception as re_err:
                     logger.debug("Auto rotate proxy notice for profile %d: %s", profile_id, re_err)
 
-            # Pre-launch Proxy Guard (fail closed): never open a profile without a usable proxy/VPN.
+            # Pre-launch Proxy Guard (fail closed): never open a profile without a usable proxy/VPN,
+            # unless the user explicitly chose direct mode (host IP) for this profile.
             refusal = None
-            if not proxy and not p.get("vpn_config"):
-                refusal = "Chưa gán proxy/VPN: chặn mở trình duyệt để bảo vệ IP máy thật"
+            direct = bool(p.get("direct_connection")) and not proxy and not p.get("vpn_config")
+            if not proxy and not p.get("vpn_config") and not direct:
+                refusal = "Chưa gán proxy/VPN: chặn mở trình duyệt để bảo vệ IP máy thật. Nếu cố ý chạy bằng IP máy: chuột phải hồ sơ → Quản Lý Proxy & Mạng → Chạy không proxy (dùng IP máy)"
             elif proxy and proxy.get("status") == "leak_detected":
                 refusal = f"Proxy #{proxy.get('id')} bị gắn cờ LEAK DETECTED: chặn mở trình duyệt"
             elif proxy and not self._check_proxy_alive(proxy):
@@ -122,6 +124,8 @@ class OrbitaLaunchWorker(QRunnable):
                 logger.warning("Launch refused for profile '%s': %s", name, refusal)
                 self.signals.profile_failed.emit(profile_id, name, refusal)
                 continue
+            if direct:
+                logger.warning("Profile '%s' launched WITHOUT proxy (direct mode chosen by user)", name)
 
             try:
                 uuid_val = p.get("uuid")
@@ -134,6 +138,7 @@ class OrbitaLaunchWorker(QRunnable):
                             headless=False,
                             sync=False,
                             db_profile_id=profile_id,
+                            direct_connection=direct,
                         )
                     except Exception as sdk_err:
                         logger.warning(

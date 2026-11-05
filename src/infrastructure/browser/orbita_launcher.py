@@ -331,8 +331,9 @@ class OrbitaLauncher:
             if host and port:
                 proxy_uri = f"{scheme}://{auth}{host}:{port}"
 
-        if not proxy_uri:
-            # Strict Proxy Gate for browsers: never open TikTok from the host IP.
+        if not proxy_uri and not profile_data.get("direct_connection"):
+            # Strict Proxy Gate for browsers: never open TikTok from the host IP, unless the user
+            # explicitly chose direct mode for this profile.
             raise PermissionError(
                 f"Hồ sơ {profile_data.get('id')} chưa có proxy/VPN hợp lệ: chặn mở trình duyệt để bảo vệ IP máy thật."
             )
@@ -466,13 +467,15 @@ class OrbitaLauncher:
         sync: bool = False,
         port: int = 36912,
         db_profile_id: int | None = None,
+        direct_connection: bool = False,
     ) -> str:
         """
         Launches profile through SamMonny GoLogin SDK compatibility layer.
         Ensures proxy is synchronized to Preferences prior to starting.
         Returns debugger address (e.g. '127.0.0.1:port').
         """
-        if proxy_data:
+        if proxy_data or direct_connection:
+            # Direct mode writes mode=none so a stale proxy from an earlier assignment is not reused.
             self.sync_daemon_profile_proxy(profile_id, proxy_data)
 
         from sammonny.gologin.gologin import GoLogin

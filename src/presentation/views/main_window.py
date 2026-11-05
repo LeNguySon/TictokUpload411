@@ -440,6 +440,7 @@ class TikTokManagerMainWindow(QMainWindow):
         self.profile_table.change_status_requested.connect(self._on_change_profile_status)
         self.profile_table.soft_delete_requested.connect(self._on_soft_delete_profiles)
         self.profile_table.remove_proxy_requested.connect(self._on_remove_proxy_selected)
+        self.profile_table.direct_connection_requested.connect(self._on_direct_connection_selected)
         self.profile_table.rotate_proxy_requested.connect(self._on_rotate_proxy_selected)
         self.profile_table.check_proxy_requested.connect(self._on_check_proxy_selected)
         self.profile_table.batch_channel_update_requested.connect(self._on_batch_channel_update)
@@ -1350,6 +1351,27 @@ class TikTokManagerMainWindow(QMainWindow):
         InfoBar.success(
             title="Gỡ Bỏ Cấu Hình Mạng",
             content=msg,
+            position=InfoBarPosition.TOP,
+            parent=self,
+        )
+
+    def _on_direct_connection_selected(self, profile_ids: list[int]) -> None:
+        """Deliberate opt-in: these profiles open the browser from the machine's own IP (no proxy/VPN)."""
+        if not profile_ids:
+            return
+        box = MessageBox(
+            "Chạy không proxy?",
+            f"{len(profile_ids)} hồ sơ sẽ mở trình duyệt bằng IP thật của máy này (gỡ proxy/VPN đang gán).\n\n"
+            "Chỉ dùng khi bạn cố ý không dùng proxy. Gán proxy lại bất cứ lúc nào để tắt chế độ này.",
+            self,
+        )
+        if not box.exec():
+            return
+        self.profile_repo.set_direct_connection(profile_ids)
+        self.refresh_profiles()
+        InfoBar.success(
+            title="Chạy không proxy",
+            content=f"{len(profile_ids)} hồ sơ sẽ mở trình duyệt bằng IP máy.",
             position=InfoBarPosition.TOP,
             parent=self,
         )

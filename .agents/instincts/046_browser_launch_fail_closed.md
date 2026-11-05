@@ -17,3 +17,10 @@ Test: `tests/unit/test_browser_launch_safety.py`.
 
 ## 3. argv dạng list không đi qua shell
 - Không đặt dấu `"` trong giá trị cờ (`--host-resolver-rules="..."` ⇒ Chromium nhận chuỗi có ngoặc, bỏ qua luật chặn DNS).
+
+## Ngoại lệ có chủ đích: chạy không proxy (2026-11-05)
+- Cột `profiles.direct_connection` (0/1). Chỉ hồ sơ = 1 (người dùng xác nhận qua menu "Chạy không proxy (dùng IP máy)"
+  hoặc mục cuối của AssignProxyDialog) mới được mở bằng IP máy; worker + launcher đều kiểm tra.
+- Gán proxy/VPN (`bulk_assign_proxy`, `bulk_update_fields`) tự tắt cờ ⇒ mất proxy sau đó lại bị chặn (không lộ IP âm thầm).
+- Cờ KHÔNG vượt qua proxy chết / `leak_detected`. Khởi chạy qua SDK ở chế độ trực tiếp ghi `proxy.mode=none` vào
+  Preferences daemon để không dùng lại proxy cũ. Test: `tests/unit/test_direct_connection_profiles.py`.

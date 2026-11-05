@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS profiles (
     name TEXT NOT NULL,
     project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL,
     proxy_id INTEGER REFERENCES proxies(id) ON DELETE SET NULL,
+    direct_connection INTEGER DEFAULT 0, -- 1 = user deliberately runs this profile from the host IP
     storage_dir TEXT NOT NULL,
     status TEXT DEFAULT 'stopped' CHECK(status IN ('stopped', 'running', 'error', 'LIVE', 'DIE', 'CHECKPOINT')),
 

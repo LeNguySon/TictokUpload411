@@ -47,6 +47,8 @@ class AssignProxyDialog(QDialog):
     with sequential (1:1) or round-robin allocation to selected profiles.
     """
 
+    DIRECT_CONNECTION = -1  # combo sentinel: deliberately run without proxy (host IP)
+
     def __init__(
         self,
         profile_ids: list[int],
@@ -208,13 +210,21 @@ class AssignProxyDialog(QDialog):
             display_text = f"[{status}] {host}:{port} ({p_type} - {country}) {ping_str}".strip()
             self.combo_proxy.addItem(display_text, userData=px["id"])
 
+        # Last, so it is never picked by accident.
+        self.combo_proxy.addItem(
+            "Chạy bằng IP máy — không proxy, có chủ đích", userData=self.DIRECT_CONNECTION
+        )
+
     def _on_apply(self) -> None:
         current_tab_idx = self.tabs.currentIndex()
 
         if current_tab_idx == 0:
             # Mode 1: Assign single proxy from dropdown
             chosen_proxy_id = self.combo_proxy.currentData()
-            updated_count = self.profile_repo.bulk_assign_proxy(self.profile_ids, chosen_proxy_id)
+            if chosen_proxy_id == self.DIRECT_CONNECTION:
+                updated_count = self.profile_repo.set_direct_connection(self.profile_ids)
+            else:
+                updated_count = self.profile_repo.bulk_assign_proxy(self.profile_ids, chosen_proxy_id)
             if updated_count > 0:
                 self.accept()
             else:

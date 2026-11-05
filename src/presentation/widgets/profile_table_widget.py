@@ -64,6 +64,7 @@ class ProfileTableWidget(FastTableWidget):
     change_status_requested = pyqtSignal(list, str)
     soft_delete_requested = pyqtSignal(list)
     remove_proxy_requested = pyqtSignal(list)
+    direct_connection_requested = pyqtSignal(list)
     rotate_proxy_requested = pyqtSignal(list)
     check_proxy_requested = pyqtSignal(list)
     batch_channel_update_requested = pyqtSignal(list)
@@ -215,6 +216,9 @@ class ProfileTableWidget(FastTableWidget):
         elif p.get("proxy_id"):
             proxy_display = f"Proxy #{p.get('proxy_id')}"
             proxy_type = p.get("proxy_protocol", "http")
+        elif p.get("direct_connection"):
+            proxy_display = "IP máy (không proxy)"
+            proxy_type = "Direct"
         else:
             proxy_display = ""
             proxy_type = ""
@@ -511,6 +515,10 @@ class ProfileTableWidget(FastTableWidget):
         act_remove_proxy = Action(FluentIcon.REMOVE, "Gỡ Bỏ Proxy / WireGuard VPN", self)
         act_remove_proxy.triggered.connect(lambda: self.remove_proxy_requested.emit(selected_ids))
         proxy_menu.addAction(act_remove_proxy)
+
+        act_direct = Action(FluentIcon.GLOBE, "Chạy không proxy (dùng IP máy)", self)
+        act_direct.triggered.connect(lambda: self.direct_connection_requested.emit(selected_ids))
+        proxy_menu.addAction(act_direct)
 
         menu.addMenu(proxy_menu)
 

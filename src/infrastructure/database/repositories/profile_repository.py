@@ -121,7 +121,12 @@ class ProfileRepository:
             return 0
 
         placeholders = ", ".join("?" for _ in profile_ids)
-        sql = f"UPDATE profiles SET proxy_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id IN ({placeholders});"
+        # Assigning a real proxy ends deliberate direct mode, so losing that proxy later is blocked again.
+        direct_sql = ", direct_connection = 0" if proxy_id is not None else ""
+        sql = (
+            f"UPDATE profiles SET proxy_id = ?{direct_sql}, updated_at = CURRENT_TIMESTAMP "
+            f"WHERE id IN ({placeholders});"
+        )
         params = [proxy_id] + profile_ids
 
         with db_session(self.db_path) as conn:
@@ -141,11 +146,19 @@ class ProfileRepository:
             cur = conn.execute(sql, tuple(params))
             return cur.rowcount
 
+    def set_direct_connection(self, profile_ids: list[int]) -> int:
+        """User-confirmed: run these profiles WITHOUT proxy/VPN, from the machine's own IP."""
+        return self.bulk_update_fields(
+            profile_ids, {"proxy_id": None, "vpn_config": None, "direct_connection": 1}
+        )
+
     def bulk_update_fields(self, profile_ids: list[int], fields: dict[str, Any]) -> int:
         """Atomically updates arbitrary fields for a list of profile IDs."""
         if not profile_ids or not fields:
             return 0
         payload = dict(fields)
+        if "direct_connection" not in payload and (payload.get("proxy_id") or payload.get("vpn_config")):
+            payload["direct_connection"] = 0  # a proxy/VPN was assigned: direct mode ends
         if "qg" in payload and "country" not in payload:
             payload["country"] = payload.pop("qg")
         elif "qg" in payload:

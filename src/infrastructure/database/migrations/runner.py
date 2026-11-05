@@ -42,6 +42,8 @@ def run_all_migrations(db_path: Path | str | None = None) -> list[str]:
                 conn.execute("ALTER TABLE profiles ADD COLUMN client_id TEXT DEFAULT NULL;")
             if "cookie_email" not in prof_cols:
                 conn.execute("ALTER TABLE profiles ADD COLUMN cookie_email TEXT DEFAULT NULL;")
+            if "direct_connection" not in prof_cols:
+                conn.execute("ALTER TABLE profiles ADD COLUMN direct_connection INTEGER DEFAULT 0;")
 
         conn.executescript(DDL_BASE_SCHEMAS)
 
