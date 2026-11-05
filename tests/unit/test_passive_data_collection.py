@@ -344,7 +344,8 @@ def test_offline_cookie_extraction_updates_login_state(test_env):
     row = profile_repo.get_by_id(p_id)
     assert row["state_loggin_browser"] == 1
     assert row["status"] == "LIVE"
-    assert "abc123sessiontoken" in (row.get("cookies_json") or "")
+    # Browser-read cookies go to cookies_browser (header string); cookies_json keeps the user's imports.
+    assert "sessionid=abc123sessiontoken" in (row.get("cookies_browser") or "")
 
 
 def test_metrics_sync_worker_triggers_passive_service(test_env, monkeypatch):

@@ -17,6 +17,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from src.infrastructure.database.connection import get_db_connection
 from src.infrastructure.tiktok.gologin_tiktok_client import (
     GoLoginTikTokClient,
     parse_cookies_to_header,
@@ -38,9 +39,9 @@ class TikTokModerationService:
         self.client = GoLoginTikTokClient(db_path=self.db_path)
 
     def _get_connection(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        return conn
+        # Configured connection (busy_timeout 10 s, WAL, foreign keys): a bare sqlite3.connect
+        # waited only 5 s and failed with "database is locked" while uploads were writing.
+        return get_db_connection(self.db_path)
 
     def _request_tiktok_api(
         self,

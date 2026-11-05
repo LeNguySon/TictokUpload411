@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from src.infrastructure.credentials.dpapi import unprotect_text
+from src.infrastructure.database.connection import get_db_connection
 
 logger = logging.getLogger(__name__)
 
@@ -64,9 +65,9 @@ class GoLoginTikTokClient:
         self.db_path = Path(db_path or "data/app.db")
 
     def _get_connection(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        return conn
+        # Configured connection (busy_timeout 10 s, WAL, foreign keys): a bare sqlite3.connect
+        # waited only 5 s and failed with "database is locked" while uploads were writing.
+        return get_db_connection(self.db_path)
 
     def get_profile_cookie_header(self, profile_id: int) -> str:
         """Retrieves and decrypts the Cookie header for the given profile."""

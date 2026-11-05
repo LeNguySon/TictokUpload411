@@ -9,7 +9,6 @@ Updates SQLite profiles table and emits UI signals without requiring OAuth token
 
 from __future__ import annotations
 
-import json
 import logging
 import sqlite3
 import time
@@ -63,7 +62,15 @@ class PassiveTikTokSyncService:
     ) -> None:
         self.profile_repo = profile_repo
         self.proxy_repo = proxy_repo
-        self.db_path = Path(db_path) if db_path else (Path(profile_repo.db_path) if hasattr(profile_repo, "db_path") and profile_repo.db_path else Path("data/app.db"))
+        self.db_path = (
+            Path(db_path)
+            if db_path
+            else (
+                Path(profile_repo.db_path)
+                if hasattr(profile_repo, "db_path") and profile_repo.db_path
+                else Path("data/app.db")
+            )
+        )
         self.sniffer = sniffer or TikTokNetworkSniffer(db_path=self.db_path, signal_bus=signal_bus)
         self.extractor = extractor or TikTokDomHydrationExtractor()
         self.signal_bus = signal_bus or AppSignalBus.instance()
@@ -106,16 +113,23 @@ class PassiveTikTokSyncService:
             # Connect in read-only mode to prevent database locks
             conn = sqlite3.connect(f"file:{target_db.as_posix()}?mode=ro", uri=True)
             cursor = conn.cursor()
+            cols = {r[1] for r in cursor.execute("PRAGMA table_info(cookies)").fetchall()}
+            enc_expr = "encrypted_value" if "encrypted_value" in cols else "NULL"
             rows = cursor.execute(
-                """
-                SELECT name, value, expires_utc FROM cookies
+                f"""
+                SELECT name, value, expires_utc, {enc_expr} FROM cookies
                 WHERE host_key LIKE '%tiktok.com%' OR host_key LIKE '%.tiktok.com';
                 """
             ).fetchall()
             conn.close()
 
-            for name, val, expires_utc in rows:
+            encrypted_only = 0
+            for name, val, expires_utc, enc_val in rows:
                 if not name:
+                    continue
+                if not val and enc_val:
+                    # Chrome/Orbita encrypt cookie values (DPAPI/AES); unreadable offline.
+                    encrypted_only += 1
                     continue
                 # Calculate expiry from Windows LDAP FileTime using microsecond epoch offset
                 is_expired = False
@@ -138,14 +152,27 @@ class PassiveTikTokSyncService:
             if "sessionid" in cookies_found or "sessionid_ss" in cookies_found:
                 is_live = True
 
+            if not is_live and encrypted_only:
+                # The session cookie may well be among the encrypted ones: we cannot tell, so we do
+                # not touch status or cookies (marking DIE here flagged logged-in profiles).
+                logger.info(
+                    "Offline cookie check for profile %s inconclusive: %d encrypted TikTok cookies",
+                    profile_id,
+                    encrypted_only,
+                )
+                return {"ok": False, "is_live": False, "cookies": cookies_found}
+            if not cookies_found:
+                # Fresh/empty browser profile: nothing to conclude.
+                return {"ok": False, "is_live": False, "cookies": {}}
+
             login_state = 1 if is_live else 0
             new_status = "LIVE" if is_live else "DIE"
 
-            updates = {
-                "state_loggin_browser": login_state,
-                "status": new_status,
-                "cookies_json": json.dumps(cookies_found),
-            }
+            # Never overwrite cookies_json: it holds the user's imported cookies (header string).
+            # Browser-read cookies go to cookies_browser, in the same "name=value; ..." format.
+            updates: dict[str, Any] = {"state_loggin_browser": login_state, "status": new_status}
+            if is_live:
+                updates["cookies_browser"] = "; ".join(f"{k}={v}" for k, v in cookies_found.items())
             self.profile_repo.update(profile_id, **updates)
             if self.signal_bus:
                 self.signal_bus.profile_updated.emit(profile_id, updates)
@@ -306,7 +333,9 @@ class PassiveTikTokSyncService:
         try:
             url_items = "https://www.tiktok.com/api/creator/item/list/?count=20"
             resp_items = self.client.request_api(profile_id, url_items, method="GET", timeout=12)
-            if isinstance(resp_items, dict) and any(k in resp_items for k in ("itemList", "items", "item_list", "creator_item_list")):
+            if isinstance(resp_items, dict) and any(
+                k in resp_items for k in ("itemList", "items", "item_list", "creator_item_list")
+            ):
                 if self.sniffer.process_api_response(profile_id, url_items, resp_items):
                     any_success = True
         except Exception as e:
@@ -326,7 +355,9 @@ class PassiveTikTokSyncService:
         try:
             url_viol = "https://www.tiktok.com/api/creator/violation/"
             resp_viol = self.client.request_api(profile_id, url_viol, method="GET", timeout=12)
-            if isinstance(resp_viol, dict) and any(k in resp_viol for k in ("violations", "violation_list", "active_strikes")):
+            if isinstance(resp_viol, dict) and any(
+                k in resp_viol for k in ("violations", "violation_list", "active_strikes")
+            ):
                 if self.sniffer.process_api_response(profile_id, url_viol, resp_viol):
                     any_success = True
         except Exception as e:

@@ -56,6 +56,10 @@ def test_download_and_cache_avatar_success(db_env):
     tmp_path = db_env["tmp_path"]
 
     pid = repo.create({"name": "AvatarUser"})
+    # Strict Proxy Gate: avatars are only downloaded through the profile's proxy.
+    from src.infrastructure.database.repositories.proxy_repository import ProxyRepository
+
+    repo.update(pid, proxy_id=ProxyRepository(db_file).create(host="10.0.0.1", port=8080))
 
     # Create dummy 100x100 PNG bytes
     dummy_img = QImage(100, 100, QImage.Format.Format_RGB32)
@@ -69,7 +73,7 @@ def test_download_and_cache_avatar_success(db_env):
     mock_resp.__enter__.return_value = mock_resp
     mock_resp.read.return_value = valid_bytes
 
-    with patch("urllib.request.urlopen", return_value=mock_resp):
+    with patch("src.infrastructure.tiktok.avatar_cache_service._http_get", return_value=valid_bytes):
         cached_path = download_and_cache_avatar(
             profile_id=pid,
             avatar_url="https://p16.tiktokcdn.com/avatar_test.jpg",

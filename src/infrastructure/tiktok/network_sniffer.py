@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 from datetime import UTC, datetime
 from pathlib import Path
@@ -17,6 +18,9 @@ from src.application.signals.app_signals import AppSignalBus
 from src.infrastructure.database.connection import db_session
 
 logger = logging.getLogger(__name__)
+
+# Name given by ProfileRepository.create() when the user did not choose one.
+_AUTO_PROFILE_NAME = re.compile(r"^Profile_[0-9A-Za-z-]{8}$")  # f"Profile_{uuid[:8]}"
 
 
 class TikTokNetworkSniffer:
@@ -255,7 +259,22 @@ class TikTokNetworkSniffer:
         return handled
 
     def _update_profile_row(self, profile_id: int, updates: dict[str, Any]) -> None:
-        """Atomically updates columns in profiles table."""
+        """Atomically updates columns in profiles table.
+
+        The TikTok handle goes to username_on_tiktok; the profile `name` is the user's own label and is
+        only filled in when it is empty or still the repository's auto-generated "Profile_xxxxxxxx".
+        """
+        if not updates:
+            return
+        if "name" in updates:
+            try:
+                with db_session(self.db_path, write=False) as conn:
+                    row = conn.execute("SELECT name FROM profiles WHERE id = ?;", (profile_id,)).fetchone()
+                current = (row["name"] if row else "") or ""
+            except Exception:
+                current = "?"  # unknown -> do not risk overwriting
+            if current and not _AUTO_PROFILE_NAME.match(current):
+                updates.pop("name")
         if not updates:
             return
         set_clauses = [f"{k} = ?" for k in updates.keys()]

@@ -29,6 +29,49 @@ def get_avatar_cache_path(profile_id: int, storage_dir: str | Path | None = None
     return _DEFAULT_AVATAR_DIR / f"{profile_id}.jpg"
 
 
+def _profile_proxy_url(profile_id: int, db_path: Path | str | None) -> str | None:
+    """Proxy URL of the profile, or None if it has none / it is flagged as leaking."""
+    from src.infrastructure.tiktok.gologin_tiktok_client import GoLoginTikTokClient
+
+    client = GoLoginTikTokClient(db_path=db_path or Path("data/app.db"))
+    proxy = client.get_profile_proxy(profile_id)
+    if not proxy or proxy.get("status") == "leak_detected":
+        return None
+    return client._build_proxy_url(proxy)
+
+
+def _http_get(url: str, proxy_url: str, timeout: float) -> bytes | None:
+    """GET through ``proxy_url`` (curl_cffi when installed, else urllib with a ProxyHandler)."""
+    try:
+        from curl_cffi import requests
+
+        resp = requests.get(
+            url, impersonate="chrome123", timeout=timeout, proxies={"http": proxy_url, "https": proxy_url}
+        )
+        return resp.content if resp.status_code == 200 and resp.content else None
+    except ImportError:
+        pass
+    except Exception as e:
+        logger.debug("Avatar download via curl_cffi failed: %s", e)
+        return None
+
+    if not proxy_url.startswith(("http://", "https://")):
+        return None  # urllib cannot tunnel through SOCKS: never fall back to a direct connection
+    import urllib.request
+
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({"http": proxy_url, "https": proxy_url}))
+    req = urllib.request.Request(
+        url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/123.0.0.0 Safari/537.36"}
+    )
+    try:
+        with opener.open(req, timeout=timeout) as response:
+            status = getattr(response, "status", getattr(response, "code", 200))
+            return response.read() if status == 200 else None
+    except Exception as e:
+        logger.debug("Avatar download via urllib proxy failed: %s", e)
+        return None
+
+
 def download_and_cache_avatar(
     profile_id: int,
     avatar_url: str,
@@ -48,27 +91,13 @@ def download_and_cache_avatar(
         dest_path = get_avatar_cache_path(profile_id, storage_dir)
         dest_path.parent.mkdir(parents=True, exist_ok=True)
 
-        content: bytes | None = None
-        try:
-            from curl_cffi import requests
-
-            resp = requests.get(avatar_url, impersonate="chrome123", timeout=timeout)
-            if resp.status_code == 200 and resp.content:
-                content = resp.content
-        except Exception:
-            pass
-
-        if not content:
-            import urllib.request
-
-            req = urllib.request.Request(
-                avatar_url,
-                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/123.0.0.0 Safari/537.36"},
-            )
-            with urllib.request.urlopen(req, timeout=timeout) as response:
-                status = getattr(response, "status", getattr(response, "code", 200))
-                if status == 200:
-                    content = response.read()
+        # Strict Proxy Gate: TikTok CDN requests must go through the profile's own proxy, never the
+        # host IP (a direct download links every account to the same machine).
+        proxy_url = _profile_proxy_url(profile_id, db_path)
+        if not proxy_url:
+            logger.warning("Avatar download skipped for profile %s: no usable proxy (host IP protected)", profile_id)
+            return None
+        content = _http_get(avatar_url, proxy_url, timeout)
 
         if not content or len(content) < 50:
             logger.warning("Downloaded avatar content is empty or too small for profile %s", profile_id)
