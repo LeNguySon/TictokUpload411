@@ -80,6 +80,28 @@ def test_create_new_signing_key(admin):
         win._on_keygen()
     assert win.cmb_kid.count() == 2
     assert (home / "signing_keys" / f"{win.current_kid()}.key").exists() and win.current_kid() != "t1"
+    # The new key is not in the app build yet: labelled in the list, trusted one is not.
+    assert "app chưa tin" in win.cmb_kid.currentText()
+    assert win.cmb_kid.itemText(win.cmb_kid.findData("t1")) == "t1"
+
+
+def test_create_new_signing_key_needs_confirmation(admin):
+    make, home, _ = admin
+    win = make()
+    with patch("tools.license_issuer.admin_gui.MessageBox") as box:
+        box.return_value.exec.return_value = False  # user clicks Hủy
+        win._on_keygen()
+    assert win.cmb_kid.count() == 1 and win.current_kid() == "t1"
+    assert len(list((home / "signing_keys").glob("*.key"))) == 1
+
+
+def test_untrusted_key_selected_on_start_falls_back_to_trusted(admin):
+    from tools.license_issuer import issuer
+
+    make, home, _ = admin
+    issuer.keygen(home, kid="zz-untrusted")  # sorts after t1
+    win = make()
+    assert win.current_kid() == "t1" and win.btn_issue.isEnabled()
 
 
 def test_backup_and_restore(admin, tmp_path):

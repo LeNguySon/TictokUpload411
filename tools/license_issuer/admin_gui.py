@@ -218,7 +218,8 @@ class IssuerAdminWindow(QWidget):
         self.cmb_kid.blockSignals(True)
         self.cmb_kid.clear()
         for kid in issuer.list_kids(self.home):
-            self.cmb_kid.addItem(kid, userData=kid)
+            label = kid if kid in self.trusted else f"{kid} (app chưa tin)"
+            self.cmb_kid.addItem(label, userData=kid)
         self.cmb_kid.blockSignals(False)
         trusted_kids = [i for i in range(self.cmb_kid.count()) if self.cmb_kid.itemData(i) in self.trusted]
         if select is not None and self.cmb_kid.findData(select) >= 0:
@@ -300,6 +301,17 @@ class IssuerAdminWindow(QWidget):
             self._info("success", "Đã sao chép", "Key đã nằm trong clipboard.")
 
     def _on_keygen(self) -> None:
+        confirm = MessageBox(
+            "Tạo khóa ký mới?",
+            "Thường KHÔNG cần: chỉ tạo khi muốn đổi khóa (vd lộ khóa cũ).\n\n"
+            "Key ký bằng khóa mới chỉ dùng được sau khi bạn thêm khóa vào trusted_keys.py, build lại app và gửi "
+            "bản app mới cho khách. Khách đang dùng key cũ vẫn chạy bình thường.",
+            self,
+        )
+        confirm.yesButton.setText("Tạo khóa mới")
+        confirm.cancelButton.setText("Hủy")
+        if not confirm.exec():
+            return
         kid, pub = issuer.keygen(self.home)
         self._reload_kids(select=kid)
         MessageBox(
