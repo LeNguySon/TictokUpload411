@@ -23,6 +23,8 @@ from sammonny import (
 )
 
 from src.infrastructure.credentials.windows_vault import WindowsCredentialVault
+from src.infrastructure.database.repositories.profile_repository import ProfileRepository
+from src.infrastructure.database.repositories.proxy_repository import ProxyRepository
 
 logger = logging.getLogger(__name__)
 
@@ -214,10 +216,14 @@ class SamMonnyTikTokAdapter:
         session_factory: Callable[[str], AntidetectSession] | None = None,
         preferred_mode: UploadMode | None = None,
         db_path: Path | str | None = None,
+        profile_repo: ProfileRepository | None = None,
+        proxy_repo: ProxyRepository | None = None,
     ) -> None:
         self.vault = vault or WindowsCredentialVault()
         self.direct_client = direct_client or TikTokDirectPostClient()
         self.db_path = db_path
+        self.profile_repo = profile_repo or ProfileRepository(db_path)
+        self.proxy_repo = proxy_repo or ProxyRepository(db_path)
         if session_factory:
             self.session_factory = session_factory
         else:
@@ -316,13 +322,25 @@ class SamMonnyTikTokAdapter:
     def fetch_creator_metrics(self, profile_id: int | str) -> dict[str, Any]:
         """
         Fetches creator profile metrics (username, nickname, avatar, video duration limits)
-        from TikTok Direct Post API using the DPAPI stored token.
+        from TikTok Direct Post API using the DPAPI stored token and profile's assigned proxy.
         """
         token = self._sync_vault_token(profile_id)
         if not token:
             raise ValueError(f"No active access token in Windows Vault for profile {profile_id}")
 
-        return self.direct_client.query_creator_info(token)
+        proxy_url = None
+        if self.profile_repo and self.proxy_repo:
+            prof = self.profile_repo.get_by_id(int(profile_id))
+            if prof and prof.get("proxy_id"):
+                proxy_row = self.proxy_repo.get_by_id(prof["proxy_id"])
+                if proxy_row:
+                    if proxy_row.get("status") == "leak_detected":
+                        raise PermissionError(
+                            f"Proxy #{prof['proxy_id']} is flagged with LEAK DETECTED! Aborting query to protect account."
+                        )
+                    proxy_url = format_proxy_url(proxy_row)
+
+        return self.direct_client.query_creator_info(token, proxy_url=proxy_url)
 
     def reconcile_status(self, publish_id: str, profile_id: int | str | None = None) -> RemoteStatus:
         """Polls authoritative post status from TikTok for ambiguous or pending uploads."""

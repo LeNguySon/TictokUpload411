@@ -28,6 +28,12 @@ class MetricsSyncWorker(BaseWorker):
         self.profile_service = profile_service
         self.signal_bus = signal_bus or AppSignalBus.instance()
 
+    def _safe_emit(self, signal, *args) -> None:
+        try:
+            signal.emit(*args)
+        except RuntimeError:
+            pass
+
     def execute(self) -> None:
         total = len(self.profile_ids)
         if total == 0:
@@ -41,9 +47,9 @@ class MetricsSyncWorker(BaseWorker):
 
             try:
                 metrics = self.profile_service.sync_metrics_from_tiktok(profile_id)
-                self.signal_bus.profile_updated.emit(profile_id, metrics)
+                self._safe_emit(self.signal_bus.profile_updated, profile_id, metrics)
             except Exception as e:
                 logger.warning("Could not sync metrics for profile %s: %s", profile_id, e)
 
             pct = ((idx + 1) / total) * 100.0
-            self.signals.progress.emit(idx + 1, total, pct)
+            self._safe_emit(self.signals.progress, idx + 1, total, pct)

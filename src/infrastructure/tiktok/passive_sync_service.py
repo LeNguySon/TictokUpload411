@@ -227,6 +227,12 @@ class PassiveTikTokSyncService:
 
     def _fetch_url_content(self, url: str, proxy_id: int | None) -> str:
         """Fetches URL content routing through the assigned proxy if present."""
+        if proxy_id and self.proxy_repo:
+            px = self.proxy_repo.get_by_id(proxy_id)
+            if px and px.get("status") == "leak_detected":
+                logger.warning("Proxy %s is flagged with LEAK DETECTED! Aborting DOM scraping.", proxy_id)
+                return ""
+
         opener = urllib.request.build_opener()
         if proxy_id and self.proxy_repo:
             px = self.proxy_repo.get_by_id(proxy_id)
@@ -249,8 +255,12 @@ class PassiveTikTokSyncService:
                 "Accept-Language": "en-US,en;q=0.9",
             },
         )
-        with opener.open(req, timeout=8.0) as resp:
-            return resp.read().decode("utf-8", errors="ignore")
+        try:
+            with opener.open(req, timeout=5.0) as resp:
+                return resp.read().decode("utf-8", errors="ignore")
+        except Exception as e:
+            logger.debug("Failed to fetch DOM content for %s: %s", url, e)
+            return ""
 
     def sync_single_profile(self, profile_id: int) -> dict[str, Any]:
         """
