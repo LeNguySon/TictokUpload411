@@ -93,6 +93,7 @@ def _default_session_factory(
     from src.infrastructure.database.repositories.profile_repository import ProfileRepository
 
     target_profile_uuid = str(profile_id)
+    prof = None
     if str(profile_id).isdigit():
         try:
             repo = ProfileRepository(db_path=db_path)
@@ -101,6 +102,16 @@ def _default_session_factory(
                 target_profile_uuid = prof["uuid"]
         except Exception as e:
             logger.warning("Could not resolve profile_id %s to UUID: %s", profile_id, e)
+
+    # Pre-inject latest cookies into Chromium SQLite store if available
+    if prof and (prof.get("cookies_browser") or prof.get("cookies_json")):
+        try:
+            from src.infrastructure.browser.cookie_injector import BrowserCookieInjector
+            cookie_raw = prof.get("cookies_browser") or prof.get("cookies_json") or ""
+            target_profile_dir = OrbitaLauncher.DAEMON_PROFILES_DIR / target_profile_uuid
+            BrowserCookieInjector.inject_to_chromium_sqlite(target_profile_dir, cookie_raw)
+        except Exception as ce:
+            logger.debug("Failed pre-injecting SQLite cookies: %s", ce)
 
     engine = AntidetectEngine(profiles_dir=OrbitaLauncher.DAEMON_PROFILES_DIR)
     raw_sess = engine.session(profile_id=target_profile_uuid)

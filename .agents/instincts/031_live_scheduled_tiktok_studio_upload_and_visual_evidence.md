@@ -13,3 +13,4 @@
   1. **Staged Queue Image**: Hiển thị video đã nạp vào hàng đợi kèm cột "Lên lịch", trạng thái "Sẵn sàng" và tài khoản đích.
   2. **Completed Upload Image**: Hiển thị thanh tiến trình 100% màu xanh, trạng thái "Xuất bản thành công", và mã `Publish ID`.
   3. **Database & File Isolation Image**: Xác nhận bản ghi SQLite chuyển sang `published` và tệp video vật lý được cách ly an toàn vào thư mục `_posted/`.
+
