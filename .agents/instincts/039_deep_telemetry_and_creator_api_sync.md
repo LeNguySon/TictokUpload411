@@ -25,3 +25,4 @@ Trước đây, module thu thập dữ liệu TikTok chỉ dừng lại ở vi�
 3. **Tính Toán Cửa Sổ 30 Ngày Chuẩn Xác**:
    - `views_month` được tổng hợp dựa trên điều kiện `item.create_time >= now - 30 * 86400`.
    - Lưu trữ tách biệt với `total_views` lũy kế toàn kênh trong `statisticTable` và `profiles`.
+
