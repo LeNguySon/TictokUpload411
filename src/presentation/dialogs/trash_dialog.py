@@ -26,6 +26,7 @@ from src.presentation.dialogs.dialog_helpers import (
     STANDARD_DIALOG_SPACING,
     create_dialog_header,
 )
+from src.presentation.widgets.fast_table import FastTableWidget
 
 
 class TrashDialog(QDialog):
@@ -59,7 +60,7 @@ class TrashDialog(QDialog):
         )
         layout.addWidget(header)
 
-        self.table = TableWidget(self)
+        self.table = FastTableWidget(self)
         self.table.setColumnCount(5)
         self.table.setHorizontalHeaderLabels(["ID", "Tên hồ sơ", "ID Tiktok", "Email", "Trạng thái"])
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)

@@ -3,6 +3,8 @@ Upload Worker executing video publishing on QThreadPool without blocking UI thre
 """
 
 import logging
+import time
+from collections.abc import Callable
 from datetime import datetime
 
 from src.application.services.upload_service import UploadService
@@ -10,6 +12,9 @@ from src.application.signals.app_signals import AppSignalBus
 from src.application.workers.base_worker import BaseWorker
 
 logger = logging.getLogger(__name__)
+
+# Max rate of progress/stage signals per video (chunk callbacks can fire hundreds of times/s).
+PROGRESS_MIN_INTERVAL_S = 0.25
 
 
 class UploadWorker(BaseWorker):
@@ -24,6 +29,7 @@ class UploadWorker(BaseWorker):
         upload_service: UploadService,
         signal_bus: AppSignalBus | None = None,
         schedule_time: str | None = None,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         super().__init__()
         self.video_id = video_id
@@ -32,6 +38,9 @@ class UploadWorker(BaseWorker):
         self.signal_bus = signal_bus or AppSignalBus.instance()
         self.schedule_time = schedule_time
         self._last_reported_milestone = -1
+        self._clock = clock
+        self._last_progress_emit = float("-inf")
+        self._last_progress_pct = -1
 
     def _emit_log(self, stage: str, message: str, level: str = "INFO") -> None:
         """Emits granular per-video log to central signal bus with timestamp."""
@@ -39,12 +48,20 @@ class UploadWorker(BaseWorker):
         self.signal_bus.upload_log.emit(self.video_id, ts, stage, message, level)
 
     def _on_progress(self, uploaded_bytes: int, total_bytes: int, percentage: float) -> None:
-        """Relays progress updates to both local worker signals and the global event bus."""
-        self.signals.progress.emit(uploaded_bytes, total_bytes, percentage)
-        self.signal_bus.upload_progress.emit(self.video_id, uploaded_bytes, total_bytes, percentage)
+        """Relays progress to the UI, rate-limited to PROGRESS_MIN_INTERVAL_S per video.
 
+        The final 100% update is always delivered; the 25% milestone logs below are unaffected.
+        """
         int_pct = int(percentage)
-        self.signal_bus.upload_stage_changed.emit(self.video_id, f"Đang gửi {int_pct}%")
+        now = self._clock()
+        is_final = percentage >= 100.0
+        due = now - self._last_progress_emit >= PROGRESS_MIN_INTERVAL_S
+        if (due and int_pct != self._last_progress_pct) or (is_final and self._last_progress_pct < 100):
+            self._last_progress_emit = now
+            self._last_progress_pct = int_pct
+            self.signals.progress.emit(uploaded_bytes, total_bytes, percentage)
+            self.signal_bus.upload_progress.emit(self.video_id, uploaded_bytes, total_bytes, percentage)
+            self.signal_bus.upload_stage_changed.emit(self.video_id, f"Đang gửi {int_pct}%")
 
         # Emit log on 25% milestones (25, 50, 75, 100) or at start of chunking
         milestone = (int_pct // 25) * 25

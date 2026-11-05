@@ -37,10 +37,12 @@ class ProfileRuntimeSyncWorker(BaseWorker):
         profiles: list[dict[str, Any]],
         launcher: OrbitaLauncher,
         parent: QObject | None = None,
+        profile_repo: Any | None = None,
     ) -> None:
         super().__init__()
         self.profiles = profiles
         self.launcher = launcher
+        self.profile_repo = profile_repo
         self.signals = ProfileRuntimeSyncSignals(parent)
         self.setAutoDelete(False)  # Managed cooperatively by caller / ThreadPoolManager
 
@@ -72,7 +74,22 @@ class ProfileRuntimeSyncWorker(BaseWorker):
                 deltas[p_id] = new_status
 
         if deltas and not self.is_cancelled:
+            self._persist_deltas(deltas)
             try:
                 self.signals.statuses_updated.emit(deltas)
             except RuntimeError as re:
                 logger.debug("Signal target deleted before status emit: %s", re)
+
+    def _persist_deltas(self, deltas: dict[int, str]) -> None:
+        """Writes status changes on this worker thread (grouped: one UPDATE per status value),
+        so the GUI slot never blocks on SQLite's writer lock."""
+        if self.profile_repo is None:
+            return
+        by_status: dict[str, list[int]] = {}
+        for p_id, status in deltas.items():
+            by_status.setdefault(status, []).append(p_id)
+        for status, ids in by_status.items():
+            try:
+                self.profile_repo.bulk_update_fields(ids, {"status": status})
+            except Exception as e:
+                logger.warning("Failed persisting runtime status %s for %d profiles: %s", status, len(ids), e)

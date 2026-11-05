@@ -31,6 +31,7 @@ from src.presentation.dialogs.dialog_helpers import (
     STANDARD_DIALOG_SPACING,
     create_dialog_header,
 )
+from src.presentation.widgets.fast_table import FastTableWidget
 from src.presentation.widgets.table_helpers import (
     format_mmo_metric,
     format_money_string,
@@ -84,7 +85,7 @@ class ProjectManagerDialog(QDialog):
         layout.addLayout(row1)
 
         # Table of existing projects with aggregates (Read-only on direct click)
-        self.table = TableWidget(self)
+        self.table = FastTableWidget(self)
         self.table.setColumnCount(6)
         self.table.setHorizontalHeaderLabels(
             [

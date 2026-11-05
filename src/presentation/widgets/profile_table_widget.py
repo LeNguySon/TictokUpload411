@@ -7,10 +7,11 @@ from typing import Any
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import QApplication, QHeaderView, QTableWidgetItem
-from qfluentwidgets import Action, FluentIcon, RoundMenu, TableWidget
+from qfluentwidgets import Action, FluentIcon, RoundMenu
 
 from src.presentation.delegates.circular_avatar_delegate import CircularAvatarDelegate
 from src.presentation.delegates.status_badge_delegate import StatusBadgeDelegate
+from src.presentation.widgets.fast_table import FastTableWidget, RowIndex
 from src.presentation.widgets.table_helpers import (
     NumericTableWidgetItem,
     format_mmo_metric,
@@ -19,7 +20,7 @@ from src.presentation.widgets.table_helpers import (
 )
 
 
-class ProfileTableWidget(TableWidget):
+class ProfileTableWidget(FastTableWidget):
     """
     Fluent UI Table for managing TikTok profiles with 28 columns matching SSMATool parity.
     Supports multi-row context actions, crisp vector icons, and robust data persistence.
@@ -47,6 +48,7 @@ class ProfileTableWidget(TableWidget):
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
+        self._profile_rows = RowIndex()
         self.headers = get_profile_table_headers()
         self.setColumnCount(len(self.headers))
         self.setHorizontalHeaderLabels(self.headers)
@@ -60,9 +62,9 @@ class ProfileTableWidget(TableWidget):
         self.horizontalHeader().setDefaultAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
         self.verticalHeader().setVisible(False)
         self.verticalHeader().setDefaultSectionSize(34)
-        self.setSelectionBehavior(TableWidget.SelectionBehavior.SelectRows)
-        self.setSelectionMode(TableWidget.SelectionMode.ExtendedSelection)
-        self.setEditTriggers(TableWidget.EditTrigger.NoEditTriggers)
+        self.setSelectionBehavior(FastTableWidget.SelectionBehavior.SelectRows)
+        self.setSelectionMode(FastTableWidget.SelectionMode.ExtendedSelection)
+        self.setEditTriggers(FastTableWidget.EditTrigger.NoEditTriggers)
         self.setWordWrap(False)
         self.setSortingEnabled(True)
         self.setSelectRightClickedRow(True)
@@ -104,208 +106,231 @@ class ProfileTableWidget(TableWidget):
         """Populates the table with profile records."""
         self.setSortingEnabled(False)
         self.clearSelection()
-        self.setRowCount(len(profiles))
+        self.setUpdatesEnabled(False)
+        try:
+            self._profile_rows.clear()
+            self.setRowCount(len(profiles))
+            for row_idx, p in enumerate(profiles):
+                self._populate_row(row_idx, p, stt=row_idx + 1)
+        finally:
+            self.setUpdatesEnabled(True)
+            self.setSortingEnabled(True)
 
-        for row_idx, p in enumerate(profiles):
-            status = p.get("status", "stopped")
-            logged_in = bool(p.get("cookie") or p.get("logged", False))
+    def row_for_profile_id(self, profile_id: Any) -> int | None:
+        """O(1) lookup of the current row of a profile (correct after sorting)."""
+        return self._profile_rows.row(self, profile_id)
 
-            # Helper to create non-editable items
-            def make_item(
-                text: str, align=Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft
-            ) -> QTableWidgetItem:
-                item = QTableWidgetItem(str(text))
-                item.setTextAlignment(align)
-                item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
-                return item
+    def update_profile_row(self, row: int, profile: dict[str, Any]) -> None:
+        """Re-renders a single row from an (already merged) profile dict, keeping its STT number."""
+        stt_item = self.item(row, 0)
+        stt = int(stt_item.text()) if stt_item and stt_item.text().isdigit() else row + 1
+        sorting = self.isSortingEnabled()
+        self.setSortingEnabled(False)  # setItem() with sorting on would move the row mid-update
+        try:
+            self._populate_row(row, profile, stt=stt)
+        finally:
+            self.setSortingEnabled(sorting)
 
-            def make_num_item(
-                val: int | float | None,
-                display_text: str | None = None,
-                align=Qt.AlignmentFlag.AlignCenter,
-            ) -> NumericTableWidgetItem:
-                item = NumericTableWidgetItem(val, display_text)
-                item.setTextAlignment(align)
-                item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
-                return item
+    def _populate_row(self, row_idx: int, p: dict[str, Any], *, stt: int) -> None:
+        """Builds all cells of one profile row (shared by full load and single-row patches)."""
+        status = p.get("status", "stopped")
+        logged_in = bool(p.get("cookie") or p.get("logged", False))
 
-            # Col 0: STT (holds profile record in UserRole)
-            stt_item = make_num_item(row_idx + 1, str(row_idx + 1))
-            stt_item.setData(Qt.ItemDataRole.UserRole, p)
-            self.setItem(row_idx, 0, stt_item)
+        # Helper to create non-editable items
+        def make_item(
+            text: str, align=Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft
+        ) -> QTableWidgetItem:
+            item = QTableWidgetItem(str(text))
+            item.setTextAlignment(align)
+            item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+            return item
 
-            # Col 1: Avt
-            avt_item = make_item("👤", Qt.AlignmentFlag.AlignCenter)
-            avt_path = str(p.get("avatar_path") or "")
-            if avt_path:
-                avt_item.setData(Qt.ItemDataRole.UserRole + 1, avt_path)
-            self.setItem(row_idx, 1, avt_item)
+        def make_num_item(
+            val: int | float | None,
+            display_text: str | None = None,
+            align=Qt.AlignmentFlag.AlignCenter,
+        ) -> NumericTableWidgetItem:
+            item = NumericTableWidgetItem(val, display_text)
+            item.setTextAlignment(align)
+            item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+            return item
 
-            # Col 2: Tên hồ sơ
-            self.setItem(row_idx, 2, make_item(p.get("name", "")))
+        # Col 0: STT (holds profile record in UserRole)
+        stt_item = make_num_item(stt, str(stt))
+        stt_item.setData(Qt.ItemDataRole.UserRole, p)
+        self.setItem(row_idx, 0, stt_item)
+        self._profile_rows.add(p.get("id"), stt_item)
 
-            # Col 3: Logged
-            logged_item = make_item("Yes" if logged_in else "No", Qt.AlignmentFlag.AlignCenter)
-            logged_item.setForeground(QColor("#107C41") if logged_in else QColor("#8A8886"))
-            self.setItem(row_idx, 3, logged_item)
+        # Col 1: Avt
+        avt_item = make_item("👤", Qt.AlignmentFlag.AlignCenter)
+        avt_path = str(p.get("avatar_path") or "")
+        if avt_path:
+            avt_item.setData(Qt.ItemDataRole.UserRole + 1, avt_path)
+        self.setItem(row_idx, 1, avt_item)
 
-            # Col 4: Proxy & Col 5: Type
-            if p.get("vpn_config"):
-                proxy_display = "🛡️ WireGuard VPN"
-                proxy_type = "WireGuard"
-            elif p.get("proxy_host"):
-                is_rotating = p.get("proxy_type") == "rotating" or bool(p.get("change_ip_url"))
-                prefix = "🔄 " if is_rotating else ""
-                proxy_display = f"{prefix}{p.get('proxy_host')}"
-                if p.get("proxy_port"):
-                    proxy_display = f"{proxy_display}:{p.get('proxy_port')}"
-                proxy_type = "rotating" if is_rotating else p.get("proxy_protocol", "http")
-            elif p.get("proxy_id"):
-                proxy_display = f"Proxy #{p.get('proxy_id')}"
-                proxy_type = p.get("proxy_protocol", "http")
-            else:
-                proxy_display = ""
-                proxy_type = ""
+        # Col 2: Tên hồ sơ
+        self.setItem(row_idx, 2, make_item(p.get("name", "")))
 
-            self.setItem(row_idx, 4, make_item(proxy_display))
-            self.setItem(row_idx, 5, make_item(proxy_type, Qt.AlignmentFlag.AlignCenter))
+        # Col 3: Logged
+        logged_item = make_item("Yes" if logged_in else "No", Qt.AlignmentFlag.AlignCenter)
+        logged_item.setForeground(QColor("#107C41") if logged_in else QColor("#8A8886"))
+        self.setItem(row_idx, 3, logged_item)
 
-            # Col 6: ID Tiktok
-            self.setItem(row_idx, 6, make_item(p.get("username_on_tiktok", "")))
+        # Col 4: Proxy & Col 5: Type
+        if p.get("vpn_config"):
+            proxy_display = "🛡️ WireGuard VPN"
+            proxy_type = "WireGuard"
+        elif p.get("proxy_host"):
+            is_rotating = p.get("proxy_type") == "rotating" or bool(p.get("change_ip_url"))
+            prefix = "🔄 " if is_rotating else ""
+            proxy_display = f"{prefix}{p.get('proxy_host')}"
+            if p.get("proxy_port"):
+                proxy_display = f"{proxy_display}:{p.get('proxy_port')}"
+            proxy_type = "rotating" if is_rotating else p.get("proxy_protocol", "http")
+        elif p.get("proxy_id"):
+            proxy_display = f"Proxy #{p.get('proxy_id')}"
+            proxy_type = p.get("proxy_protocol", "http")
+        else:
+            proxy_display = ""
+            proxy_type = ""
 
-            # Col 7: Views(30d)
-            self.setItem(
-                row_idx,
-                7,
-                make_num_item(
-                    p.get("views_30d", 0),
-                    format_mmo_metric(p.get("views_30d", 0)),
-                    Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
-                ),
-            )
+        self.setItem(row_idx, 4, make_item(proxy_display))
+        self.setItem(row_idx, 5, make_item(proxy_type, Qt.AlignmentFlag.AlignCenter))
 
-            # Col 8: T.Follows
-            self.setItem(
-                row_idx,
-                8,
-                make_num_item(
-                    p.get("t_follows", 0),
-                    format_mmo_metric(p.get("t_follows", 0)),
-                    Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
-                ),
-            )
+        # Col 6: ID Tiktok
+        self.setItem(row_idx, 6, make_item(p.get("username_on_tiktok", "")))
 
-            # Col 9: T.Views
-            self.setItem(
-                row_idx,
-                9,
-                make_num_item(
-                    p.get("t_views", 0),
-                    format_mmo_metric(p.get("t_views", 0)),
-                    Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
-                ),
-            )
+        # Col 7: Views(30d)
+        self.setItem(
+            row_idx,
+            7,
+            make_num_item(
+                p.get("views_30d", 0),
+                format_mmo_metric(p.get("views_30d", 0)),
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+            ),
+        )
 
-            # Col 10: T.Video
-            self.setItem(row_idx, 10, make_num_item(p.get("t_video", 0)))
+        # Col 8: T.Follows
+        self.setItem(
+            row_idx,
+            8,
+            make_num_item(
+                p.get("t_follows", 0),
+                format_mmo_metric(p.get("t_follows", 0)),
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+            ),
+        )
 
-            # Col 11: Email
-            self.setItem(row_idx, 11, make_item(p.get("email", "")))
+        # Col 9: T.Views
+        self.setItem(
+            row_idx,
+            9,
+            make_num_item(
+                p.get("t_views", 0),
+                format_mmo_metric(p.get("t_views", 0)),
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+            ),
+        )
 
-            # Col 12: Tình trạng (Rendered via StatusBadgeDelegate)
-            status_item = make_item(status, Qt.AlignmentFlag.AlignCenter)
-            status_item.setData(Qt.ItemDataRole.UserRole, status)
-            status_item.setToolTip(f"Trạng thái hoạt động: {status}")
-            self.setItem(row_idx, 12, status_item)
+        # Col 10: T.Video
+        self.setItem(row_idx, 10, make_num_item(p.get("t_video", 0)))
 
-            # Col 13: Cookie (Masked)
-            raw_cookie = p.get("cookie", "")
-            masked_cookie = (raw_cookie[:14] + "...") if len(raw_cookie) > 14 else raw_cookie
-            self.setItem(row_idx, 13, make_item(masked_cookie))
+        # Col 11: Email
+        self.setItem(row_idx, 11, make_item(p.get("email", "")))
 
-            # Col 14: $Earned
-            self.setItem(
-                row_idx,
-                14,
-                make_num_item(
-                    p.get("earned", 0.0),
-                    format_money_string(p.get("earned", 0.0)),
-                    Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
-                ),
-            )
+        # Col 12: Tình trạng (Rendered via StatusBadgeDelegate)
+        status_item = make_item(status, Qt.AlignmentFlag.AlignCenter)
+        status_item.setData(Qt.ItemDataRole.UserRole, status)
+        status_item.setToolTip(f"Trạng thái hoạt động: {status}")
+        self.setItem(row_idx, 12, status_item)
 
-            # Col 15: $Balance
-            self.setItem(
-                row_idx,
-                15,
-                make_num_item(
-                    p.get("balance", 0.0),
-                    format_money_string(p.get("balance", 0.0)),
-                    Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
-                ),
-            )
+        # Col 13: Cookie (Masked)
+        raw_cookie = p.get("cookie", "")
+        masked_cookie = (raw_cookie[:14] + "...") if len(raw_cookie) > 14 else raw_cookie
+        self.setItem(row_idx, 13, make_item(masked_cookie))
 
-            # Col 16: CS (Chỉ số sức khỏe / Account Standing & Strikes)
-            strikes = int(p.get("strike_count") or 0)
-            standing = str(p.get("account_standing") or "").strip()
-            if strikes > 0:
-                cs_display = f"🔴 {strikes}/3 Gậy"
-            elif standing == "Good":
-                cs_display = "🟢 Tốt"
-            elif standing == "Warning":
-                cs_display = "🟡 Cảnh báo"
-            elif str(p.get("channel_verdict") or "").lower() == "enough":
-                cs_display = "💎 Đủ Quỹ"
-            else:
-                cs_display = str(p.get("cs") or "—")
-            self.setItem(row_idx, 16, make_item(cs_display, Qt.AlignmentFlag.AlignCenter))
+        # Col 14: $Earned
+        self.setItem(
+            row_idx,
+            14,
+            make_num_item(
+                p.get("earned", 0.0),
+                format_money_string(p.get("earned", 0.0)),
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+            ),
+        )
 
-            # Col 17: RPM
-            self.setItem(
-                row_idx,
-                17,
-                make_num_item(
-                    p.get("rpm", 0.0),
-                    format_money_string(p.get("rpm", 0.0)),
-                    Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
-                ),
-            )
+        # Col 15: $Balance
+        self.setItem(
+            row_idx,
+            15,
+            make_num_item(
+                p.get("balance", 0.0),
+                format_money_string(p.get("balance", 0.0)),
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+            ),
+        )
 
-            # Col 18: QG
-            self.setItem(row_idx, 18, make_item(p.get("qg", ""), Qt.AlignmentFlag.AlignCenter))
+        # Col 16: CS (Chỉ số sức khỏe / Account Standing & Strikes)
+        strikes = int(p.get("strike_count") or 0)
+        standing = str(p.get("account_standing") or "").strip()
+        if strikes > 0:
+            cs_display = f"🔴 {strikes}/3 Gậy"
+        elif standing == "Good":
+            cs_display = "🟢 Tốt"
+        elif standing == "Warning":
+            cs_display = "🟡 Cảnh báo"
+        elif str(p.get("channel_verdict") or "").lower() == "enough":
+            cs_display = "💎 Đủ Quỹ"
+        else:
+            cs_display = str(p.get("cs") or "—")
+        self.setItem(row_idx, 16, make_item(cs_display, Qt.AlignmentFlag.AlignCenter))
 
-            # Col 19: KYC
-            self.setItem(row_idx, 19, make_item(p.get("kyc", "No"), Qt.AlignmentFlag.AlignCenter))
+        # Col 17: RPM
+        self.setItem(
+            row_idx,
+            17,
+            make_num_item(
+                p.get("rpm", 0.0),
+                format_money_string(p.get("rpm", 0.0)),
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+            ),
+        )
 
-            # Col 20: Note
-            self.setItem(row_idx, 20, make_item(p.get("note", "")))
+        # Col 18: QG
+        self.setItem(row_idx, 18, make_item(p.get("qg", ""), Qt.AlignmentFlag.AlignCenter))
 
-            # Col 21: Re.Apply
-            self.setItem(row_idx, 21, make_item(p.get("re_apply", ""), Qt.AlignmentFlag.AlignCenter))
+        # Col 19: KYC
+        self.setItem(row_idx, 19, make_item(p.get("kyc", "No"), Qt.AlignmentFlag.AlignCenter))
 
-            # Col 22: PRIVACY
-            self.setItem(row_idx, 22, make_item(p.get("privacy", "PUBLIC"), Qt.AlignmentFlag.AlignCenter))
+        # Col 20: Note
+        self.setItem(row_idx, 20, make_item(p.get("note", "")))
 
-            # Col 23: VAT
-            self.setItem(row_idx, 23, make_item(p.get("vat", "No"), Qt.AlignmentFlag.AlignCenter))
+        # Col 21: Re.Apply
+        self.setItem(row_idx, 21, make_item(p.get("re_apply", ""), Qt.AlignmentFlag.AlignCenter))
 
-            # Col 24: TS
-            self.setItem(row_idx, 24, make_item(p.get("ts", "Yes"), Qt.AlignmentFlag.AlignCenter))
+        # Col 22: PRIVACY
+        self.setItem(row_idx, 22, make_item(p.get("privacy", "PUBLIC"), Qt.AlignmentFlag.AlignCenter))
 
-            # Col 25: STT (secondary)
-            self.setItem(row_idx, 25, make_num_item(p.get("stt", row_idx + 1)))
+        # Col 23: VAT
+        self.setItem(row_idx, 23, make_item(p.get("vat", "No"), Qt.AlignmentFlag.AlignCenter))
 
-            # Col 26: VVP (Số lượng Video Vi Phạm)
-            vvp_val = int(p.get("ttl_violations") or p.get("vvp") or 0)
-            self.setItem(row_idx, 26, make_num_item(vvp_val))
+        # Col 24: TS
+        self.setItem(row_idx, 24, make_item(p.get("ts", "Yes"), Qt.AlignmentFlag.AlignCenter))
 
-            # Col 27: MP
-            self.setItem(row_idx, 27, make_num_item(p.get("mp", 0)))
+        # Col 25: STT (secondary)
+        self.setItem(row_idx, 25, make_num_item(p.get("stt", stt)))
 
-            # Col 28: ID
-            self.setItem(row_idx, 28, make_num_item(p.get("id", 0)))
+        # Col 26: VVP (Số lượng Video Vi Phạm)
+        vvp_val = int(p.get("ttl_violations") or p.get("vvp") or 0)
+        self.setItem(row_idx, 26, make_num_item(vvp_val))
 
-        self.setSortingEnabled(True)
+        # Col 27: MP
+        self.setItem(row_idx, 27, make_num_item(p.get("mp", 0)))
+
+        # Col 28: ID
+        self.setItem(row_idx, 28, make_num_item(p.get("id", 0)))
 
     def get_selected_profiles(self) -> list[dict[str, Any]]:
         """Returns list of selected profile dicts stored in ItemDataRole.UserRole."""

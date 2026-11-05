@@ -37,6 +37,7 @@ from src.presentation.dialogs.dialog_helpers import (
     STANDARD_DIALOG_SPACING,
     create_dialog_header,
 )
+from src.presentation.widgets.fast_table import FastTableWidget
 
 
 class ProxyManagerDialog(QDialog):
@@ -110,7 +111,7 @@ class ProxyManagerDialog(QDialog):
         layout.addLayout(btn_layout)
 
         # Proxies Table
-        self.table = TableWidget(self)
+        self.table = FastTableWidget(self)
         self.table.setColumnCount(8)
         self.table.setHorizontalHeaderLabels(
             [

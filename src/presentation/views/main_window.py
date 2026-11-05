@@ -79,6 +79,8 @@ from src.presentation.dialogs.video_metadata_dialog import VideoMetadataDialog
 from src.presentation.widgets.profile_table_widget import ProfileTableWidget
 from src.presentation.widgets.video_queue_table_widget import VideoQueueTableWidget
 
+PROFILE_PATCH_COALESCE_MS = 250
+
 logger = logging.getLogger(__name__)
 
 
@@ -160,6 +162,13 @@ class TikTokManagerMainWindow(QMainWindow):
 
         self.setWindowTitle("SSMATool Reup Tiktok - TAVM 2026 Windows 11 Edition")
         self.resize(1366, 850)
+
+        # Coalesces bursts of profile_updated signals into one row-patch pass (T3).
+        self._pending_profile_patches: dict[int, dict[str, Any]] = {}
+        self._profile_patch_timer = QTimer(self)
+        self._profile_patch_timer.setSingleShot(True)
+        self._profile_patch_timer.setInterval(PROFILE_PATCH_COALESCE_MS)
+        self._profile_patch_timer.timeout.connect(self._flush_profile_patches)
 
         self._init_ui()
         # Apply persistent column visibility
@@ -441,6 +450,7 @@ class TikTokManagerMainWindow(QMainWindow):
                 profiles=profiles,
                 launcher=self.orbita_launcher,
                 parent=self,
+                profile_repo=self.profile_repo,  # deltas are persisted off the GUI thread
             )
             self._active_status_sync_worker = worker
             worker.signals.statuses_updated.connect(self._on_profile_statuses_updated)
@@ -457,38 +467,25 @@ class TikTokManagerMainWindow(QMainWindow):
 
     def _on_profile_statuses_updated(self, delta_map: dict[int, str]) -> None:
         """
-        Slot executed on Qt Main Thread: updates table cell badges and SQLite records
-        for only the profiles whose status actually changed. Runs in < 0.001s with zero GUI freeze.
+        GUI-thread slot: refreshes only the status badges that changed.
+        Persistence already happened in ProfileRuntimeSyncWorker, so no SQLite write here
+        (a write here could block on the writer lock held by upload workers).
         """
-        if not delta_map:
-            return
-
-        total_rows = self.profile_table.rowCount()
-        for row in range(total_rows):
+        for p_id, new_status in (delta_map or {}).items():
+            row = self.profile_table.row_for_profile_id(p_id)
+            if row is None:
+                continue
             stt_item = self.profile_table.item(row, 0)
-            if not stt_item:
-                continue
-            prof = stt_item.data(Qt.ItemDataRole.UserRole)
-            if not isinstance(prof, dict):
-                continue
-
-            p_id = prof.get("id")
-            if p_id in delta_map:
-                new_status = delta_map[p_id]
-                self.profile_repo.update(p_id, status=new_status)
+            prof = stt_item.data(Qt.ItemDataRole.UserRole) if stt_item else None
+            if isinstance(prof, dict):
                 prof["status"] = new_status
-                self._update_profile_status_cell(row, new_status)
+                stt_item.setData(Qt.ItemDataRole.UserRole, prof)
+            self._update_profile_status_cell(row, new_status)
 
     def _find_profile_row_by_id(self, profile_id: int) -> int:
-        """Finds table row index corresponding to database profile id."""
-        total_rows = self.profile_table.rowCount()
-        for r in range(total_rows):
-            it = self.profile_table.item(r, 0)
-            if it:
-                data = it.data(Qt.ItemDataRole.UserRole)
-                if isinstance(data, dict) and data.get("id") == profile_id:
-                    return r
-        return -1
+        """Finds table row index corresponding to database profile id (O(1))."""
+        row = self.profile_table.row_for_profile_id(profile_id)
+        return -1 if row is None else row
 
     def _update_profile_status_cell(self, row: int, status: str) -> None:
         """Updates Column 12 with StatusBadgeDelegate data for instant redraw."""
@@ -1835,8 +1832,12 @@ class TikTokManagerMainWindow(QMainWindow):
         jump_step = max(1, self.spin_jump.value() + 1)
         dispatched = 0
         for idx, video in enumerate(available_videos):
-            prof_idx = (idx * jump_step) % len(selected_profiles)
-            profile_id = selected_profiles[prof_idx]
+            assigned_id = video.get("assigned_profile_id")
+            if assigned_id:
+                profile_id = assigned_id
+            else:
+                prof_idx = (idx * jump_step) % len(selected_profiles)
+                profile_id = selected_profiles[prof_idx]
             worker = UploadWorker(
                 video_id=video["id"],
                 profile_id=profile_id,
@@ -1920,10 +1921,45 @@ class TikTokManagerMainWindow(QMainWindow):
         )
 
     def _on_profile_updated(self, profile_id: int, fields: dict) -> None:
-        try:
-            self.refresh_profiles()
-        except Exception:
-            pass
+        """Queues a row patch; bursts from sync/sniffer workers are applied in one pass."""
+        self._pending_profile_patches.setdefault(profile_id, {}).update(fields or {})
+        if not self._profile_patch_timer.isActive():
+            self._profile_patch_timer.start()
+
+    def _flush_profile_patches(self) -> None:
+        """Applies queued profile_updated patches to their rows without reloading the table.
+
+        Falls back to a single full refresh when a profile is not displayed (new profile, other
+        project filter) or its membership changed (trashed / moved project).
+        """
+        pending, self._pending_profile_patches = self._pending_profile_patches, {}
+        if not pending:
+            return
+        current_project = self.project_combo.currentData()
+        needs_full_refresh = False
+        for profile_id, fields in pending.items():
+            row = self.profile_table.row_for_profile_id(profile_id)
+            if row is None:
+                needs_full_refresh = True
+                continue
+            if fields.get("is_trashed") or (
+                "project_id" in fields and current_project is not None and fields["project_id"] != current_project
+            ):
+                needs_full_refresh = True
+                continue
+            stt_item = self.profile_table.item(row, 0)
+            prof = stt_item.data(Qt.ItemDataRole.UserRole) if stt_item else None
+            merged = {**(prof if isinstance(prof, dict) else {"id": profile_id}), **fields}
+            try:
+                self.profile_table.update_profile_row(row, merged)
+            except Exception as e:  # never let one bad patch freeze the UI loop
+                logger.debug("Row patch failed for profile %s: %s", profile_id, e)
+                needs_full_refresh = True
+        if needs_full_refresh:
+            try:
+                self.refresh_profiles()
+            except Exception as e:
+                logger.debug("Fallback profile refresh failed: %s", e)
 
     def _on_upload_single_video(self, video_id_or_ids: list[int] | int) -> None:
         selected_profiles = self.profile_table.get_selected_profile_ids()

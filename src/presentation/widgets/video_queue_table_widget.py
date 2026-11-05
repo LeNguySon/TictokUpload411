@@ -14,8 +14,9 @@ from PyQt6.QtWidgets import (
     QTableWidgetItem,
     QWidget,
 )
-from qfluentwidgets import Action, FluentIcon, ProgressBar, RoundMenu, TableWidget
+from qfluentwidgets import Action, FluentIcon, ProgressBar, RoundMenu
 
+from src.presentation.widgets.fast_table import FastTableWidget, RowIndex
 from src.presentation.widgets.table_helpers import (
     NumericTableWidgetItem,
     format_duration_string,
@@ -24,7 +25,7 @@ from src.presentation.widgets.table_helpers import (
 )
 
 
-class VideoQueueTableWidget(TableWidget):
+class VideoQueueTableWidget(FastTableWidget):
     """
     Fluent UI Table for managing video upload pipeline matching SSMATool parity.
     Supports multi-selection context operations, vector icons, and robust data persistence.
@@ -42,6 +43,7 @@ class VideoQueueTableWidget(TableWidget):
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
+        self._video_rows = RowIndex()
         self.headers = get_video_table_headers()
         self.setColumnCount(len(self.headers))
         self.setHorizontalHeaderLabels(self.headers)
@@ -52,15 +54,15 @@ class VideoQueueTableWidget(TableWidget):
         self.horizontalHeader().setDefaultAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
         self.verticalHeader().setVisible(False)
         self.verticalHeader().setDefaultSectionSize(34)
-        self.setSelectionBehavior(TableWidget.SelectionBehavior.SelectRows)
-        self.setSelectionMode(TableWidget.SelectionMode.ExtendedSelection)
-        self.setEditTriggers(TableWidget.EditTrigger.NoEditTriggers)
+        self.setSelectionBehavior(FastTableWidget.SelectionBehavior.SelectRows)
+        self.setSelectionMode(FastTableWidget.SelectionMode.ExtendedSelection)
+        self.setEditTriggers(FastTableWidget.EditTrigger.NoEditTriggers)
         self.setWordWrap(False)
         self.setSortingEnabled(True)
         self.setSelectRightClickedRow(True)
         self.itemSelectionChanged.connect(self.updateSelectedRows)
         self.setAcceptDrops(True)
-        self.setDragDropMode(TableWidget.DragDropMode.DropOnly)
+        self.setDragDropMode(FastTableWidget.DragDropMode.DropOnly)
         self.cellDoubleClicked.connect(self._on_cell_double_clicked)
 
         self._progress_bars: dict[int, ProgressBar] = {}
@@ -85,9 +87,18 @@ class VideoQueueTableWidget(TableWidget):
         self.setColumnWidth(15, 100)  # PAF URL
 
     def load_videos(self, videos: list[dict[str, Any]]) -> None:
-        """Populates the table with video records."""
+        """Populates the table with video records (repaint suspended while filling)."""
+        self.setUpdatesEnabled(False)
+        try:
+            self._fill_videos(videos)
+        finally:
+            self.setUpdatesEnabled(True)
+            self.setSortingEnabled(True)
+
+    def _fill_videos(self, videos: list[dict[str, Any]]) -> None:
         self.setSortingEnabled(False)
         self.clearSelection()
+        self._video_rows.clear()
         self.setRowCount(len(videos))
         self._progress_bars.clear()
 
@@ -117,6 +128,7 @@ class VideoQueueTableWidget(TableWidget):
             stt_item = make_num_item(row_idx + 1, str(row_idx + 1))
             stt_item.setData(Qt.ItemDataRole.UserRole, v)
             self.setItem(row_idx, 0, stt_item)
+            self._video_rows.add(video_id, stt_item)
 
             # Col 1: Tiêu đề
             self.setItem(row_idx, 1, make_item(v.get("file_name") or v.get("title", f"Tiêu đề {row_idx + 1}")))
@@ -223,20 +235,9 @@ class VideoQueueTableWidget(TableWidget):
             # Col 15: PAF URL
             self.setItem(row_idx, 15, make_item(v.get("paf_url", "")))
 
-        self.setSortingEnabled(True)
-
     def find_row_by_video_id(self, video_id: int) -> int | None:
-        """Finds the current table row index for a given video ID."""
-        for row in range(self.rowCount()):
-            item = self.item(row, 0)
-            if item:
-                data = item.data(Qt.ItemDataRole.UserRole)
-                if isinstance(data, dict) and data.get("id") == video_id:
-                    return row
-            id_item = self.item(row, 13)
-            if id_item and id_item.text() == str(video_id):
-                return row
-        return None
+        """O(1) lookup of the current table row for a video ID (correct after sorting)."""
+        return self._video_rows.row(self, video_id)
 
     def append_log(
         self,

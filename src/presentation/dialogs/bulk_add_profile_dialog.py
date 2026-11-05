@@ -26,7 +26,6 @@ from qfluentwidgets import (
     PlainTextEdit,
     PrimaryPushButton,
     PushButton,
-    TableWidget,
 )
 
 from src.application.parsers.profile_import_parser import PRESETS, ProfileImportParser
@@ -40,6 +39,7 @@ from src.presentation.dialogs.dialog_helpers import (
     STANDARD_DIALOG_SPACING,
     create_dialog_header,
 )
+from src.presentation.widgets.fast_table import FastTableWidget
 
 
 def parse_bulk_profile_line(line: str, default_name_prefix: str = "TikTok") -> dict[str, Any] | None:
@@ -183,7 +183,7 @@ class BulkAddProfileDialog(QDialog):
         layout.addLayout(btn_layout)
 
         # 5. Preview Table
-        self.table_preview = TableWidget(self)
+        self.table_preview = FastTableWidget(self)
         self.preview_headers = [
             "STT",
             "Tên / User",

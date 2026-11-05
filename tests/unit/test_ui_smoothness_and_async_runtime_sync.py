@@ -151,7 +151,7 @@ def test_main_window_refresh_profiles_zero_blocking(isolated_db, app_instance):
 
 
 def test_main_window_async_status_watcher_updates_cells(isolated_db, app_instance):
-    """Verifies that _on_profile_statuses_updated modifies table cells and DB records cleanly without GUI freeze."""
+    """Verifies that _on_profile_statuses_updated updates table cells without writing the DB on the GUI thread."""
     db_file = isolated_db["db_file"]
     prof_repo = isolated_db["prof_repo"]
     target_pid = isolated_db["profile_ids"][0]
@@ -173,7 +173,9 @@ def test_main_window_async_status_watcher_updates_cells(isolated_db, app_instanc
         # Cell should be updated to running
         item_updated = win.profile_table.item(target_row, 12)
         assert item_updated.text() == "running"
-        assert prof_repo.get_by_id(target_pid)["status"] == "running"
+        # Persistence moved off the GUI thread into ProfileRuntimeSyncWorker (UI responsiveness T4);
+        # the slot itself must not write SQLite.
+        assert prof_repo.get_by_id(target_pid)["status"] == "stopped"
 
         win.scheduler_timer.stop()
         if hasattr(win, "profile_status_timer") and win.profile_status_timer.isActive():
