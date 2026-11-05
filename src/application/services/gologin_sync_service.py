@@ -122,6 +122,7 @@ class GoLoginSyncService:
         proxy_id: int | None = None,
         cookie: str | None = None,
         port: int = 36912,
+        extra_fields: dict[str, Any] | None = None,
     ) -> int:
         """
         Creates an authentic profile via SamMonny GoLogin SDK with Bayesian Antidetect Fingerprint,
@@ -153,10 +154,14 @@ class GoLoginSyncService:
         # 2. Inject cookies if provided
         if cookie:
             try:
-                from sammonny.core.models import CookieItem
+                from src.infrastructure.browser.cookie_injector import BrowserCookieInjector
 
-                items = [CookieItem(name="sessionid", value=cookie, domain=".tiktok.com", path="/")]
-                gl.post_cookies(items, profile_id=gologin_uuid)
+                BrowserCookieInjector.inject_to_gologin(
+                    profile_uuid=gologin_uuid,
+                    cookie_raw=cookie,
+                    gl_instance=gl,
+                    port=port,
+                )
             except Exception as ce:
                 logger.warning("Could not post initial cookie via GoLogin SDK: %s", ce)
 
@@ -175,5 +180,10 @@ class GoLoginSyncService:
             "webgl_renderer": "ANGLE (Intel, Intel(R) UHD Graphics Direct3D11)",
             "cookie": cookie if cookie else None,
         }
+
+        if extra_fields:
+            for k, v in extra_fields.items():
+                if v is not None and k not in profile_data:
+                    profile_data[k] = v
 
         return self.profile_repo.create(profile_data)

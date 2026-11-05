@@ -22,3 +22,4 @@
    - Hàm `redact_sensitive_text(text)` tự động phát hiện và che giấu toàn bộ chuỗi token (`act.*`, `sessionid`, `bearer`, `access_token`, `cookie: ...`) thành `[REDACTED]`.
 4. **Cập nhật Bảng Tiến Trình Cục Bộ (Targeted Row Update)**:
    - Cột `Tình trạng` (Col 9) và `Source/ProgressBar` (Col 10) cập nhật đúng hàng theo `find_row_by_video_id`, không gọi reload lại toàn bộ dữ liệu bảng khi worker đang chạy.
+

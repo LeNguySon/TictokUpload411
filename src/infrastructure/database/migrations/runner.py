@@ -29,6 +29,17 @@ def run_all_migrations(db_path: Path | str | None = None) -> list[str]:
         if proj_cols and "video_folder" not in proj_cols:
             conn.execute("ALTER TABLE projects ADD COLUMN video_folder TEXT DEFAULT NULL;")
 
+        # Pre-migration: check if profiles exists and needs refresh_token, client_id, cookie_email
+        prof_info = conn.execute("PRAGMA table_info(profiles);").fetchall()
+        prof_cols = [r[1] for r in prof_info]
+        if prof_cols:
+            if "refresh_token" not in prof_cols:
+                conn.execute("ALTER TABLE profiles ADD COLUMN refresh_token TEXT DEFAULT NULL;")
+            if "client_id" not in prof_cols:
+                conn.execute("ALTER TABLE profiles ADD COLUMN client_id TEXT DEFAULT NULL;")
+            if "cookie_email" not in prof_cols:
+                conn.execute("ALTER TABLE profiles ADD COLUMN cookie_email TEXT DEFAULT NULL;")
+
         conn.executescript(DDL_BASE_SCHEMAS)
 
         # Ensure default project exists

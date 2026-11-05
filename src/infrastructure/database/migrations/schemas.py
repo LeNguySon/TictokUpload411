@@ -148,7 +148,10 @@ CREATE TABLE IF NOT EXISTS profiles (
     vpn_config TEXT DEFAULT NULL,
     rx_bytes INTEGER DEFAULT 0,
     tx_bytes INTEGER DEFAULT 0,
-    user_extensions TEXT DEFAULT NULL
+    user_extensions TEXT DEFAULT NULL,
+    refresh_token TEXT DEFAULT NULL,
+    client_id TEXT DEFAULT NULL,
+    cookie_email TEXT DEFAULT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_profiles_name ON profiles(name);
