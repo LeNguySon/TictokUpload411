@@ -19,6 +19,6 @@ Kế hoạch: `docs/03_work_breakdown/ui_responsiveness_fix_plan.md` (Sprint P2 
 - Test chờ debounce: `process_events_until(lambda: not win._profile_search_timer.isActive())` (PyQt6 không có `QTest.qWaitFor`).
 
 ## 4. AN TOÀN KHI CHẠY TEST: không được kill trình duyệt thật
-- `BrowserProcessSupervisor.cleanup_orphan_browsers()` (không truyền danh sách) quét OS và **kill mọi chrome/orbita có chữ "profiles" trong command line** mà không có lock file. Khi venv có psutil, các test bấm "Dọn dẹp trình duyệt" sẽ chạy thật trên máy dev.
+- `BrowserProcessSupervisor.cleanup_orphan_browsers()` (không truyền danh sách) quét OS thật và **kill thật** các trình duyệt nó coi là mồ côi. Khi venv có psutil, các test bấm "Dọn dẹp trình duyệt" sẽ chạy thật trên máy dev.
 - `tests/conftest.py::never_kill_real_browsers` (autouse) chặn trường hợp này; test có danh sách orphan giả hoặc psutil giả vẫn chạy logic thật. Không gỡ fixture này.
-- Rủi ro sản phẩm còn mở: tiêu chí `"profiles" in cmdline` quá rộng — trình duyệt GoLogin/antidetect khác của người dùng có thể bị coi là "mồ côi" và bị kill khi bấm Dọn dẹp.
+- **Đã sửa (tiêu chí mồ côi trong app)**: trước đây mọi chrome/orbita có chữ `"profiles"` ở bất kỳ đâu trong command line đều bị coi là mồ côi ⇒ bấm Dọn dẹp có thể kill trình duyệt GoLogin/antidetect của người dùng và cả trình duyệt do SamMonny daemon mở. Giờ `scan_orphan_browsers` chỉ nhận **tiến trình gốc** (không có `--type=`) có `--user-data-dir` nằm **bên trong** `profiles_dir` của app (so sánh đường dẫn, không so chuỗi con); `cleanup_orphan_browsers` bỏ qua PID đã bị tái sử dụng (so `create_time`). Test: `tests/unit/test_orphan_browser_safety.py`. Mọi thay đổi về tiêu chí kill tiến trình phải thêm ca vào test này.

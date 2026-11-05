@@ -35,6 +35,31 @@ _PROCESS_QUERY_INFORMATION = 0x0400
 _PROCESS_TRIM_ACCESS = _PROCESS_SET_QUOTA | _PROCESS_QUERY_INFORMATION
 
 
+def _user_data_dir(cmdline: list[str]) -> Path | None:
+    """Value of --user-data-dir (``--user-data-dir=X`` or ``--user-data-dir X``), unquoted."""
+    for i, arg in enumerate(cmdline):
+        value: str | None = None
+        if arg.startswith("--user-data-dir="):
+            value = arg.split("=", 1)[1]
+        elif arg == "--user-data-dir" and i + 1 < len(cmdline):
+            value = cmdline[i + 1]
+        if value:
+            value = value.strip().strip('"').strip("'")
+            if value:
+                return Path(value)
+    return None
+
+
+def _is_profile_inside(user_data_dir: Path, profiles_root: Path) -> bool:
+    """True only for a profile directory strictly inside ``profiles_root`` (path-wise, not substring)."""
+    try:
+        candidate = Path(os.path.normcase(os.path.abspath(user_data_dir)))
+        root = Path(os.path.normcase(os.path.abspath(profiles_root)))
+    except (OSError, ValueError):
+        return False
+    return candidate != root and candidate.is_relative_to(root)
+
+
 class BrowserProcessSupervisor:
     """Manages profile processes, detects zombies/orphans, and enforces zero-leak lifecycle."""
 
@@ -123,14 +148,17 @@ class BrowserProcessSupervisor:
     ) -> list[dict[str, Any]]:
         """
         Scans OS for orphaned Chrome/Orbita instances.
-        An orphan is an orbita/chrome process running with --user-data-dir targeting
-        our profiles directory, but neither active in a lock file nor belonging to active PIDs.
+        An orphan is a *browser root* process (no ``--type=`` child flag) whose ``--user-data-dir``
+        is a profile directory strictly inside our profiles directory, and which is neither active
+        in a lock file nor a descendant of an active PID.
+
+        Anything else is never touched: the user's own Chrome/GoLogin/antidetect browsers, the
+        SamMonny daemon's browsers (managed by the daemon), sibling folders like ``profiles_backup``.
         """
         if psutil is None:
             return []
 
         target_dir = Path(profiles_dir or self.profiles_dir).resolve()
-        target_dir_str = str(target_dir).casefold()
 
         active_legitimate: set[int] = set(legitimate_pids or ())
 
@@ -155,10 +183,14 @@ class BrowserProcessSupervisor:
                     continue
 
                 cmdline_list = proc.info.get("cmdline") or []
-                cmdline = " ".join(cmdline_list).casefold()
 
-                # Target only processes using our profile storage path
-                if target_dir_str not in cmdline and "profiles" not in cmdline:
+                # Child processes (renderer, gpu, utility...) exit with their browser root.
+                if any(str(arg).startswith("--type=") for arg in cmdline_list):
+                    continue
+
+                # Target only browsers whose profile directory lives inside OUR profiles dir.
+                user_data_dir = _user_data_dir([str(a) for a in cmdline_list])
+                if user_data_dir is None or not _is_profile_inside(user_data_dir, target_dir):
                     continue
 
                 # Verify if process is descendant of any legitimate active root
@@ -213,6 +245,11 @@ class BrowserProcessSupervisor:
                 continue
             try:
                 proc = psutil.Process(pid)
+                expected_created = item.get("create_time")
+                if expected_created is not None and abs(proc.create_time() - float(expected_created)) > 1.0:
+                    # PID was reused by another process since the scan: never kill it.
+                    logger.info("Skipping PID %s: no longer the scanned orphan (PID reused)", pid)
+                    continue
                 logger.warning("Sweeping orphan browser PID %s (%s)", pid, item.get("name"))
                 proc.terminate()
                 try:
