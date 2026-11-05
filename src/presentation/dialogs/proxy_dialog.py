@@ -32,6 +32,11 @@ from src.application.workers.thread_pool_manager import ThreadPoolManager
 from src.infrastructure.database.repositories.proxy_repository import (
     ProxyRepository,
 )
+from src.presentation.dialogs.dialog_helpers import (
+    STANDARD_DIALOG_MARGINS,
+    STANDARD_DIALOG_SPACING,
+    create_dialog_header,
+)
 
 
 class ProxyManagerDialog(QDialog):
@@ -57,9 +62,22 @@ class ProxyManagerDialog(QDialog):
         self._connect_signals()
         self.refresh_proxies()
 
+    def exec(self) -> int:
+        """Explicit Python wrapper over QDialog.exec for testability and lifecycle hooks."""
+        return super().exec()
+
     def _init_ui(self) -> None:
         layout = QVBoxLayout(self)
-        layout.setSpacing(12)
+        layout.setContentsMargins(*STANDARD_DIALOG_MARGINS)
+        layout.setSpacing(STANDARD_DIALOG_SPACING)
+
+        header = create_dialog_header(
+            icon=FluentIcon.WIFI,
+            title="Quản Lý Proxy Hàng Loạt & Kiểm Định Sức Khỏe",
+            subtitle="Nhập proxy đa định dạng, kiểm tra ping/live, xoay IP và phòng chống rò rỉ WebRTC.",
+            parent=self,
+        )
+        layout.addWidget(header)
 
         # Import Text Box
         layout.addWidget(

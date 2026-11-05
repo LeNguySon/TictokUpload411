@@ -6,13 +6,11 @@ Fluent Design styling with vector icons.
 from PyQt6.QtWidgets import (
     QDialog,
     QHBoxLayout,
-    QLabel,
     QVBoxLayout,
 )
 from qfluentwidgets import (
     ComboBox,
     FluentIcon,
-    IconWidget,
     InfoBar,
     InfoBarPosition,
     PrimaryPushButton,
@@ -24,6 +22,11 @@ from src.infrastructure.database.repositories.profile_repository import (
 )
 from src.infrastructure.database.repositories.project_repository import (
     ProjectRepository,
+)
+from src.presentation.dialogs.dialog_helpers import (
+    STANDARD_DIALOG_MARGINS,
+    STANDARD_DIALOG_SPACING,
+    create_dialog_header,
 )
 
 
@@ -49,30 +52,24 @@ class AssignProjectDialog(QDialog):
         self._init_ui()
         self._populate_projects()
 
+    def exec(self) -> int:
+        """Explicit Python wrapper over QDialog.exec for testability and lifecycle hooks."""
+        return super().exec()
+
     def _init_ui(self) -> None:
         layout = QVBoxLayout(self)
-        layout.setSpacing(14)
-
-        # Header with vector FluentIcon
-        header_layout = QHBoxLayout()
-        icon_widget = IconWidget(FluentIcon.TAG, self)
-        icon_widget.setFixedSize(28, 28)
-        header_layout.addWidget(icon_widget)
+        layout.setContentsMargins(*STANDARD_DIALOG_MARGINS)
+        layout.setSpacing(STANDARD_DIALOG_SPACING)
 
         count = len(self.profile_ids)
         title_text = f"Chuyển {count} hồ sơ sang Dự án" if count > 1 else "Chuyển hồ sơ sang Dự án"
-        title_label = QLabel(title_text, self)
-        title_label.setStyleSheet("font-size: 15px; font-weight: 600;")
-        header_layout.addWidget(title_label)
-        header_layout.addStretch()
-        layout.addLayout(header_layout)
-
-        desc_label = QLabel(
-            "Chọn dự án / nhóm chiến dịch đích cho các tài khoản đang chọn:",
-            self,
+        header = create_dialog_header(
+            icon=FluentIcon.FOLDER,
+            title=title_text,
+            subtitle="Chọn dự án / nhóm chiến dịch đích cho các tài khoản đang chọn.",
+            parent=self,
         )
-        desc_label.setStyleSheet("color: #666666; font-size: 12px;")
-        layout.addWidget(desc_label)
+        layout.addWidget(header)
 
         # Project ComboBox
         self.combo_project = ComboBox(self)

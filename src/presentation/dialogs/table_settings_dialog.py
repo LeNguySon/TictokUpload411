@@ -7,16 +7,21 @@ from PyQt6.QtWidgets import (
     QDialog,
     QGridLayout,
     QHBoxLayout,
-    QLabel,
     QScrollArea,
     QVBoxLayout,
     QWidget,
 )
 from qfluentwidgets import (
+    FluentIcon,
     PrimaryPushButton,
     PushButton,
 )
 
+from src.presentation.dialogs.dialog_helpers import (
+    STANDARD_DIALOG_MARGINS,
+    STANDARD_DIALOG_SPACING,
+    create_dialog_header,
+)
 from src.presentation.widgets.table_helpers import get_profile_table_headers
 
 
@@ -35,11 +40,22 @@ class TableSettingsDialog(QDialog):
         self.resize(600, 480)
         self._init_ui()
 
+    def exec(self) -> int:
+        """Explicit Python wrapper over QDialog.exec for testability and lifecycle hooks."""
+        return super().exec()
+
     def _init_ui(self) -> None:
         layout = QVBoxLayout(self)
-        layout.setSpacing(10)
+        layout.setContentsMargins(*STANDARD_DIALOG_MARGINS)
+        layout.setSpacing(STANDARD_DIALOG_SPACING)
 
-        layout.addWidget(QLabel("Tích chọn các cột bạn muốn hiển thị trên giao diện chính:"))
+        header = create_dialog_header(
+            icon=FluentIcon.SETTING,
+            title="Cài Đặt Cột Bảng Hồ Sơ (28 Cột MMO)",
+            subtitle="Tùy biến hiển thị/ẩn các cột dữ liệu theo nhu cầu quản trị tài khoản.",
+            parent=self,
+        )
+        layout.addWidget(header)
 
         # Scroll Area for 29 columns
         scroll = QScrollArea(self)

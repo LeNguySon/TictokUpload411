@@ -7,11 +7,11 @@ from PyQt6.QtWidgets import (
     QDialog,
     QHBoxLayout,
     QHeaderView,
-    QLabel,
     QTableWidgetItem,
     QVBoxLayout,
 )
 from qfluentwidgets import (
+    FluentIcon,
     InfoBar,
     InfoBarPosition,
     PrimaryPushButton,
@@ -21,6 +21,11 @@ from qfluentwidgets import (
 
 from src.infrastructure.database.connection import db_session
 from src.infrastructure.database.repositories.profile_repository import ProfileRepository
+from src.presentation.dialogs.dialog_helpers import (
+    STANDARD_DIALOG_MARGINS,
+    STANDARD_DIALOG_SPACING,
+    create_dialog_header,
+)
 
 
 class TrashDialog(QDialog):
@@ -37,11 +42,22 @@ class TrashDialog(QDialog):
         self._init_ui()
         self.refresh_trash()
 
+    def exec(self) -> int:
+        """Explicit Python wrapper over QDialog.exec for testability and lifecycle hooks."""
+        return super().exec()
+
     def _init_ui(self) -> None:
         layout = QVBoxLayout(self)
-        layout.setSpacing(10)
+        layout.setContentsMargins(*STANDARD_DIALOG_MARGINS)
+        layout.setSpacing(STANDARD_DIALOG_SPACING)
 
-        layout.addWidget(QLabel("Danh sách các hồ sơ TikTok đã xóa tạm (Soft-deleted):"))
+        header = create_dialog_header(
+            icon=FluentIcon.DELETE,
+            title="Thùng Rác - Phục Hồi Hồ Sơ TikTok",
+            subtitle="Quản lý và khôi phục các tài khoản đã bị xóa tạm hoặc dọn sạch vĩnh viễn.",
+            parent=self,
+        )
+        layout.addWidget(header)
 
         self.table = TableWidget(self)
         self.table.setColumnCount(5)

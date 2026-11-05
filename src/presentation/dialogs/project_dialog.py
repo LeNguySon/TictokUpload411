@@ -26,6 +26,11 @@ from qfluentwidgets import (
 )
 
 from src.infrastructure.database.repositories.project_repository import ProjectRepository
+from src.presentation.dialogs.dialog_helpers import (
+    STANDARD_DIALOG_MARGINS,
+    STANDARD_DIALOG_SPACING,
+    create_dialog_header,
+)
 from src.presentation.widgets.table_helpers import (
     format_mmo_metric,
     format_money_string,
@@ -47,9 +52,22 @@ class ProjectManagerDialog(QDialog):
         self._init_ui()
         self.refresh_projects()
 
+    def exec(self) -> int:
+        """Explicit Python wrapper over QDialog.exec for testability and lifecycle hooks."""
+        return super().exec()
+
     def _init_ui(self) -> None:
         layout = QVBoxLayout(self)
-        layout.setSpacing(12)
+        layout.setContentsMargins(*STANDARD_DIALOG_MARGINS)
+        layout.setSpacing(STANDARD_DIALOG_SPACING)
+
+        header = create_dialog_header(
+            icon=FluentIcon.FOLDER,
+            title="Quản Lý Dự Án & Chiến Dịch",
+            subtitle="Tổ chức tài khoản theo từng dự án/chiến dịch riêng biệt, quản lý màu thẻ và hiệu suất.",
+            parent=self,
+        )
+        layout.addWidget(header)
 
         # Top Form: Add new project
         row1 = QHBoxLayout()

@@ -25,6 +25,7 @@ from PyQt6.QtWidgets import (
 )
 from qfluentwidgets import (
     CheckBox,
+    FluentIcon,
     InfoBar,
     InfoBarPosition,
     LineEdit,
@@ -38,6 +39,11 @@ from src.application.services.upload_service import UploadService
 from src.application.workers.folder_distribution_worker import FolderDistributionWorker
 from src.infrastructure.database.repositories.profile_repository import ProfileRepository
 from src.infrastructure.database.repositories.project_repository import ProjectRepository
+from src.presentation.dialogs.dialog_helpers import (
+    STANDARD_DIALOG_MARGINS,
+    STANDARD_DIALOG_SPACING,
+    create_dialog_header,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -95,10 +101,22 @@ class BatchFolderUploadDialog(QDialog):
         self._load_projects_table()
         self._sync_profiles_for_selected_projects()
 
+    def exec(self) -> int:
+        """Explicit Python wrapper over QDialog.exec for testability and lifecycle hooks."""
+        return super().exec()
+
     def _init_ui(self) -> None:
         main_layout = QVBoxLayout(self)
-        main_layout.setSpacing(10)
-        main_layout.setContentsMargins(16, 16, 16, 16)
+        main_layout.setContentsMargins(*STANDARD_DIALOG_MARGINS)
+        main_layout.setSpacing(STANDARD_DIALOG_SPACING)
+
+        header = create_dialog_header(
+            icon=FluentIcon.FOLDER_ADD,
+            title="Nạp Thư Mục Phân Bổ (Batch Upload)",
+            subtitle="Quét video từ thư mục máy tính và tự động phân bổ đồng đều hoặc ngẫu nhiên vào các tài khoản/dự án.",
+            parent=self,
+        )
+        main_layout.addWidget(header)
 
         # 0. Active Project Indicator Banner
         if self.project_id is not None:

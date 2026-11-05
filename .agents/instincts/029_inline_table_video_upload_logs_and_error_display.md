@@ -19,3 +19,4 @@
    - Hàm `append_log(video_id, ...)` và `set_video_error(video_id, ...)` tìm chính xác hàng qua `find_row_by_video_id` và chỉ cập nhật cell tương ứng, không refresh toàn bảng, giữ giao diện mượt mà 60 FPS.
 3. **Loại Bỏ Console Rời Ở Dưới**:
    - Trả lại 100% không gian hiển thị cho `self.video_table` trong `bottom_container`, loại bỏ splitter dọc và nút ẩn hiện console.
+

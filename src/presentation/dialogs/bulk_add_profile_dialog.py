@@ -19,6 +19,7 @@ from PyQt6.QtWidgets import (
 )
 from qfluentwidgets import (
     ComboBox,
+    FluentIcon,
     InfoBar,
     InfoBarPosition,
     LineEdit,
@@ -34,6 +35,11 @@ from src.infrastructure.credentials.windows_vault import WindowsCredentialVault
 from src.infrastructure.database.repositories.profile_repository import ProfileRepository
 from src.infrastructure.database.repositories.project_repository import ProjectRepository
 from src.infrastructure.database.repositories.proxy_repository import ProxyRepository
+from src.presentation.dialogs.dialog_helpers import (
+    STANDARD_DIALOG_MARGINS,
+    STANDARD_DIALOG_SPACING,
+    create_dialog_header,
+)
 
 
 def parse_bulk_profile_line(line: str, default_name_prefix: str = "TikTok") -> dict[str, Any] | None:
@@ -73,9 +79,23 @@ class BulkAddProfileDialog(QDialog):
         self.resize(880, 620)
         self._init_ui()
 
+    def exec(self) -> int:
+        """Explicit Python wrapper over QDialog.exec for testability and lifecycle hooks."""
+        return super().exec()
+
     def _init_ui(self) -> None:
         layout = QVBoxLayout(self)
-        layout.setSpacing(10)
+        layout.setContentsMargins(*STANDARD_DIALOG_MARGINS)
+        layout.setSpacing(STANDARD_DIALOG_SPACING)
+
+        # Header banner with sharp vector FluentIcon
+        header = create_dialog_header(
+            icon=FluentIcon.ADD_TO,
+            title="Thêm Hàng Loạt Hồ Sơ TikTok (MMO Automation)",
+            subtitle="Hỗ trợ nạp 8 trường dữ liệu MMO, tùy biến cấu trúc cột và tự động đăng nhập trình duyệt qua Cookie.",
+            parent=self,
+        )
+        layout.addWidget(header)
 
         # 1. Row 1: Destination Project & Separator
         row1_layout = QHBoxLayout()
@@ -147,10 +167,10 @@ class BulkAddProfileDialog(QDialog):
 
         # 4. Action Buttons
         btn_layout = QHBoxLayout()
-        self.btn_preview = PushButton("Xem trước", self)
+        self.btn_preview = PushButton(FluentIcon.VIEW, "Xem Trước Dữ Liệu", self)
         self.btn_preview.clicked.connect(self._on_preview)
 
-        self.btn_import = PrimaryPushButton("Nhập Tất Cả Vào Hệ Thống", self)
+        self.btn_import = PrimaryPushButton(FluentIcon.ACCEPT, "Nhập Tất Cả Vào Hệ Thống", self)
         self.btn_import.clicked.connect(self._on_import_all)
 
         self.btn_close = PushButton("Đóng", self)

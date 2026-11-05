@@ -23,16 +23,20 @@ from PyQt6.QtWidgets import (
     QHeaderView,
     QInputDialog,
     QLabel,
-    QPushButton,
     QTableWidget,
     QTableWidgetItem,
     QTabWidget,
     QVBoxLayout,
     QWidget,
 )
-from qfluentwidgets import InfoBar, InfoBarPosition
+from qfluentwidgets import FluentIcon, InfoBar, InfoBarPosition, PrimaryPushButton, PushButton
 
 from src.infrastructure.tiktok.moderation_service import TikTokModerationService
+from src.presentation.dialogs.dialog_helpers import (
+    STANDARD_DIALOG_MARGINS,
+    STANDARD_DIALOG_SPACING,
+    create_dialog_header,
+)
 
 
 class HealthKpiCard(QFrame):
@@ -131,32 +135,35 @@ class AccountHealthDialog(QDialog):
         self._build_ui()
         self._load_data()
 
+    def exec(self) -> int:
+        """Explicit Python wrapper over QDialog.exec for testability and lifecycle hooks."""
+        return super().exec()
+
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(18, 16, 18, 16)
-        layout.setSpacing(12)
+        layout.setContentsMargins(*STANDARD_DIALOG_MARGINS)
+        layout.setSpacing(STANDARD_DIALOG_SPACING)
 
         # 1. Header Title & Top Actions
-        title_row = QHBoxLayout()
-        self.lbl_title = QLabel(f"🛡️ Sức Khỏe Kênh & Gậy Vi Phạm TikTok — Profile #{self.profile_id}")
-        self.lbl_title.setStyleSheet("font-size: 16px; font-weight: bold; color: #F1F5F9;")
-        title_row.addWidget(self.lbl_title)
-        title_row.addStretch(1)
-
-        self.btn_check_appeals = QPushButton("🔄 Kiểm Tra Tiến Độ Kháng Cáo")
-        self.btn_check_appeals.setStyleSheet(
-            "background-color: #334155; color: #E2E8F0; padding: 6px 14px; border-radius: 6px; font-weight: 600;"
+        header = create_dialog_header(
+            icon=FluentIcon.HEART,
+            title=f"Kiểm Tra Chất Lượng & Gậy Vi Phạm TikTok — Profile #{self.profile_id}",
+            subtitle="Giám sát cảnh báo vi phạm bản quyền, gậy cộng đồng, điểm phạt và tiến độ kháng cáo tài khoản.",
+            parent=self,
         )
+        layout.addWidget(header)
+
+        top_actions_row = QHBoxLayout()
+        top_actions_row.addStretch(1)
+
+        self.btn_check_appeals = PushButton(FluentIcon.SYNC, "Kiểm Tra Tiến Độ Kháng Cáo", self)
         self.btn_check_appeals.clicked.connect(self._on_check_appeals_async)
-        title_row.addWidget(self.btn_check_appeals)
+        top_actions_row.addWidget(self.btn_check_appeals)
 
-        self.btn_refresh = QPushButton("⚡ Quét Toàn Kênh")
-        self.btn_refresh.setStyleSheet(
-            "background-color: #0284C7; color: white; padding: 6px 14px; border-radius: 6px; font-weight: bold;"
-        )
+        self.btn_refresh = PrimaryPushButton(FluentIcon.SPEED_HIGH, "Quét Toàn Kênh", self)
         self.btn_refresh.clicked.connect(self._run_scan_async)
-        title_row.addWidget(self.btn_refresh)
-        layout.addLayout(title_row)
+        top_actions_row.addWidget(self.btn_refresh)
+        layout.addLayout(top_actions_row)
 
         # 2. 5 KPI Status Cards (including Creator Rewards countdown)
         cards_layout = QHBoxLayout()
@@ -186,10 +193,7 @@ class AccountHealthDialog(QDialog):
         rb_layout.addWidget(self.lbl_reapply_status)
         rb_layout.addStretch(1)
 
-        self.btn_reapply_creator = QPushButton("💎 Nộp Lại Đơn Gia Nhập Quỹ Sáng Tạo")
-        self.btn_reapply_creator.setStyleSheet(
-            "background-color: #059669; color: white; padding: 6px 16px; border-radius: 6px; font-weight: bold;"
-        )
+        self.btn_reapply_creator = PrimaryPushButton(FluentIcon.SEND, "Nộp Lại Đơn Gia Nhập Quỹ Sáng Tạo", self)
         self.btn_reapply_creator.clicked.connect(self._on_reapply_creator_rewards_async)
         rb_layout.addWidget(self.btn_reapply_creator)
         layout.addWidget(self.reapply_banner)
@@ -236,27 +240,11 @@ class AccountHealthDialog(QDialog):
         action_bar_v = QHBoxLayout()
         action_bar_v.addStretch(1)
 
-        self.btn_appeal_video = QPushButton("⚖️ Nộp Đơn Kháng Cáo Video Đang Chọn...")
+        self.btn_appeal_video = PrimaryPushButton(FluentIcon.CERTIFICATE, "Nộp Đơn Kháng Cáo Video Đang Chọn...", self)
         self.btn_appeal_video.setEnabled(False)
-        self.btn_appeal_video.setStyleSheet("""
-            QPushButton {
-                background-color: #D97706;
-                color: white;
-                padding: 7px 18px;
-                border-radius: 6px;
-                font-weight: bold;
-                font-size: 12px;
-            }
-            QPushButton:hover {
-                background-color: #F59E0B;
-            }
-            QPushButton:disabled {
-                background-color: #334155;
-                color: #64748B;
-            }
-        """)
         self.btn_appeal_video.clicked.connect(lambda: self._on_appeal_selected_video())
         action_bar_v.addWidget(self.btn_appeal_video)
+        v_layout.addLayout(action_bar_v)
         v_layout.addLayout(action_bar_v)
 
         self.tabs.addTab(tab_violate, "⚠️ Video Bị Gậy Vi Phạm & Gậy Nguyên Tác")

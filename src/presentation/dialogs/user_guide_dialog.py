@@ -11,7 +11,14 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 from qfluentwidgets import (
+    FluentIcon,
     PushButton,
+)
+
+from src.presentation.dialogs.dialog_helpers import (
+    STANDARD_DIALOG_MARGINS,
+    STANDARD_DIALOG_SPACING,
+    create_dialog_header,
 )
 
 USER_GUIDE_CONTENT = {
@@ -131,9 +138,22 @@ class UserGuideDialog(QDialog):
         self.resize(800, 600)
         self._init_ui()
 
+    def exec(self) -> int:
+        """Explicit Python wrapper over QDialog.exec for testability and lifecycle hooks."""
+        return super().exec()
+
     def _init_ui(self) -> None:
         layout = QVBoxLayout(self)
-        layout.setSpacing(10)
+        layout.setContentsMargins(*STANDARD_DIALOG_MARGINS)
+        layout.setSpacing(STANDARD_DIALOG_SPACING)
+
+        header = create_dialog_header(
+            icon=FluentIcon.HELP,
+            title="Hướng Dẫn Sử Dụng & Vận Hành Hệ Thống",
+            subtitle="Tài liệu vận hành, tra cứu 28 cột MMO, kỹ thuật chống leak proxy và quy trình upload an toàn.",
+            parent=self,
+        )
+        layout.addWidget(header)
 
         self.tabs = QTabWidget(self)
 

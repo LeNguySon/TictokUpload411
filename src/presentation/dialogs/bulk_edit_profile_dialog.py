@@ -10,13 +10,11 @@ from PyQt6.QtWidgets import (
     QDialog,
     QFormLayout,
     QHBoxLayout,
-    QLabel,
     QVBoxLayout,
 )
 from qfluentwidgets import (
     ComboBox,
     FluentIcon,
-    IconWidget,
     InfoBar,
     InfoBarPosition,
     LineEdit,
@@ -29,6 +27,11 @@ from src.infrastructure.database.repositories.profile_repository import (
 )
 from src.infrastructure.database.repositories.project_repository import (
     ProjectRepository,
+)
+from src.presentation.dialogs.dialog_helpers import (
+    STANDARD_DIALOG_MARGINS,
+    STANDARD_DIALOG_SPACING,
+    create_dialog_header,
 )
 
 
@@ -54,29 +57,23 @@ class BulkEditProfileDialog(QDialog):
         self.resize(520, 480)
         self._init_ui()
 
+    def exec(self) -> int:
+        """Explicit Python wrapper over QDialog.exec for testability and lifecycle hooks."""
+        return super().exec()
+
     def _init_ui(self) -> None:
         layout = QVBoxLayout(self)
-        layout.setSpacing(14)
-
-        # Header with vector FluentIcon
-        header_layout = QHBoxLayout()
-        icon_widget = IconWidget(FluentIcon.EDIT, self)
-        icon_widget.setFixedSize(28, 28)
-        header_layout.addWidget(icon_widget)
+        layout.setContentsMargins(*STANDARD_DIALOG_MARGINS)
+        layout.setSpacing(STANDARD_DIALOG_SPACING)
 
         count = len(self.profile_ids)
-        title_label = QLabel(f"Cập nhật hàng loạt cho {count} hồ sơ đang chọn", self)
-        title_label.setStyleSheet("font-size: 15px; font-weight: 600;")
-        header_layout.addWidget(title_label)
-        header_layout.addStretch()
-        layout.addLayout(header_layout)
-
-        desc_label = QLabel(
-            "Tích chọn các trường thông tin bạn muốn cập nhật đồng loạt cho các tài khoản đã chọn:",
-            self,
+        header = create_dialog_header(
+            icon=FluentIcon.EDIT,
+            title=f"Cập nhật hàng loạt cho {count} hồ sơ đang chọn",
+            subtitle="Tích chọn các trường thông tin bạn muốn ghi đè đồng loạt cho các tài khoản đã chọn.",
+            parent=self,
         )
-        desc_label.setStyleSheet("color: #666666; font-size: 12px;")
-        layout.addWidget(desc_label)
+        layout.addWidget(header)
 
         form = QFormLayout()
         form.setSpacing(10)

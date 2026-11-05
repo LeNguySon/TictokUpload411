@@ -69,10 +69,12 @@ def test_profile_table_context_menu_and_signals(qapp, monkeypatch):
     event = QContextMenuEvent(QContextMenuEvent.Reason.Mouse, click_pos, widget.mapToGlobal(click_pos))
 
     # Spy on RoundMenu.exec to capture actions without blocking UI loop
+    captured_menu = None
     captured_actions = []
 
     def mock_menu_exec(menu_self, *args, **kwargs):
-        nonlocal captured_actions
+        nonlocal captured_actions, captured_menu
+        captured_menu = menu_self
         captured_actions = menu_self.actions()
         return None
 
@@ -84,8 +86,17 @@ def test_profile_table_context_menu_and_signals(qapp, monkeypatch):
     selected_ids = widget.get_selected_profile_ids()
     assert selected_ids == [102]
 
-    # Check generated actions
-    action_texts = [act.text() for act in captured_actions if not act.isSeparator()]
+    # Check generated actions (both root and submenus)
+    def collect_all_actions(menu_obj):
+        if not menu_obj:
+            return []
+        result = list(menu_obj.actions())
+        for sub in getattr(menu_obj, "_subMenus", []):
+            result.extend(collect_all_actions(sub))
+        return result
+
+    all_captured = collect_all_actions(captured_menu)
+    action_texts = [act.text() for act in all_captured if not act.isSeparator()]
     assert any("Mở Trình Duyệt" in t for t in action_texts)
     assert any("Đóng Trình Duyệt" in t for t in action_texts)
     assert any("Kiểm Tra Cookie" in t for t in action_texts)
@@ -97,7 +108,8 @@ def test_profile_table_context_menu_and_signals(qapp, monkeypatch):
     # Test multi-selection context menu
     widget.selectAll()
     widget.contextMenuEvent(event)
-    multi_texts = [act.text() for act in captured_actions if not act.isSeparator()]
+    multi_captured = collect_all_actions(captured_menu)
+    multi_texts = [act.text() for act in multi_captured if not act.isSeparator()]
     assert any("Mở Trình Duyệt (2 hồ sơ" in t for t in multi_texts)
     assert any("Đóng Trình Duyệt (2 hồ sơ)" in t for t in multi_texts)
     assert any("Proxy" in t and "2 hồ sơ" in t for t in multi_texts)

@@ -11,14 +11,20 @@ from PyQt6.QtWidgets import (
     QDialog,
     QFormLayout,
     QHBoxLayout,
-    QLabel,
     QVBoxLayout,
 )
 from qfluentwidgets import (
     CheckBox,
+    FluentIcon,
     PrimaryPushButton,
     PushButton,
     SpinBox,
+)
+
+from src.presentation.dialogs.dialog_helpers import (
+    STANDARD_DIALOG_MARGINS,
+    STANDARD_DIALOG_SPACING,
+    create_dialog_header,
 )
 
 
@@ -87,11 +93,22 @@ class ScheduleVideoDialog(QDialog):
         self.resize(480, 360)
         self._init_ui()
 
+    def exec(self) -> int:
+        """Explicit Python wrapper over QDialog.exec for testability and lifecycle hooks."""
+        return super().exec()
+
     def _init_ui(self) -> None:
         layout = QVBoxLayout(self)
-        layout.setSpacing(12)
+        layout.setContentsMargins(*STANDARD_DIALOG_MARGINS)
+        layout.setSpacing(STANDARD_DIALOG_SPACING)
 
-        layout.addWidget(QLabel(f"Lên lịch tự động cho <b>{self.video_count}</b> video đã chọn:"))
+        header = create_dialog_header(
+            icon=FluentIcon.CALENDAR,
+            title="Lên Lịch Đăng Video Hàng Loạt",
+            subtitle=f"Thiết lập lịch tự động cho {self.video_count} video đã chọn với khoảng cách và độ lệch jitter.",
+            parent=self,
+        )
+        layout.addWidget(header)
 
         form = QFormLayout()
         form.setSpacing(10)

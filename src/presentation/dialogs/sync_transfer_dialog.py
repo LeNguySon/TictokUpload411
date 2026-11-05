@@ -22,6 +22,7 @@ from PyQt6.QtWidgets import (
 )
 from qfluentwidgets import (
     ComboBox,
+    FluentIcon,
     InfoBar,
     InfoBarPosition,
     LineEdit,
@@ -32,6 +33,11 @@ from qfluentwidgets import (
 from src.infrastructure.database.repositories.profile_repository import ProfileRepository
 from src.infrastructure.database.repositories.project_repository import ProjectRepository
 from src.infrastructure.database.repositories.proxy_repository import ProxyRepository
+from src.presentation.dialogs.dialog_helpers import (
+    STANDARD_DIALOG_MARGINS,
+    STANDARD_DIALOG_SPACING,
+    create_dialog_header,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -179,9 +185,22 @@ class SyncTransferDialog(QDialog):
         self.resize(580, 420)
         self._init_ui()
 
+    def exec(self) -> int:
+        """Explicit Python wrapper over QDialog.exec for testability and lifecycle hooks."""
+        return super().exec()
+
     def _init_ui(self) -> None:
         main_layout = QVBoxLayout(self)
-        main_layout.setSpacing(12)
+        main_layout.setContentsMargins(*STANDARD_DIALOG_MARGINS)
+        main_layout.setSpacing(STANDARD_DIALOG_SPACING)
+
+        header = create_dialog_header(
+            icon=FluentIcon.SYNC,
+            title="Nhận và Gửi Dữ Liệu (Sao Lưu & Khôi Phục)",
+            subtitle="Xuất hoặc nhập trọn bộ cấu hình hồ sơ, proxy và dự án dưới dạng gói dữ liệu nén .zip.",
+            parent=self,
+        )
+        main_layout.addWidget(header)
 
         self.tabs = QTabWidget(self)
 

@@ -12,6 +12,7 @@ from PyQt6.QtWidgets import (
 )
 from qfluentwidgets import (
     ComboBox,
+    FluentIcon,
     LineEdit,
     PlainTextEdit,
     PrimaryPushButton,
@@ -27,6 +28,11 @@ from src.infrastructure.database.repositories.project_repository import (
 )
 from src.infrastructure.database.repositories.proxy_repository import (
     ProxyRepository,
+)
+from src.presentation.dialogs.dialog_helpers import (
+    STANDARD_DIALOG_MARGINS,
+    STANDARD_DIALOG_SPACING,
+    create_dialog_header,
 )
 
 
@@ -58,9 +64,23 @@ class AddProfileDialog(QDialog):
         if is_edit:
             self._prefill_data()
 
+    def exec(self) -> int:
+        """Explicit Python wrapper over QDialog.exec for testability and lifecycle hooks."""
+        return super().exec()
+
     def _init_ui(self) -> None:
         layout = QVBoxLayout(self)
-        layout.setSpacing(12)
+        layout.setContentsMargins(*STANDARD_DIALOG_MARGINS)
+        layout.setSpacing(STANDARD_DIALOG_SPACING)
+
+        is_edit = bool(self.profile_data and self.profile_data.get("id"))
+        header = create_dialog_header(
+            icon=FluentIcon.EDIT if is_edit else FluentIcon.ADD,
+            title="Chỉnh Sửa Hồ Sơ TikTok" if is_edit else "Thêm Hồ Sơ TikTok Mới",
+            subtitle="Cấu hình thông tin tài khoản, dự án phân bổ, proxy kết nối và thông tin xác thực.",
+            parent=self,
+        )
+        layout.addWidget(header)
 
         form = QFormLayout()
         form.setSpacing(10)

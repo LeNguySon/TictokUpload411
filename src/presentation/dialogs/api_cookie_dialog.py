@@ -10,6 +10,7 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
 )
 from qfluentwidgets import (
+    FluentIcon,
     InfoBar,
     InfoBarPosition,
     LineEdit,
@@ -19,6 +20,11 @@ from qfluentwidgets import (
 )
 
 from src.infrastructure.credentials.windows_vault import WindowsCredentialVault
+from src.presentation.dialogs.dialog_helpers import (
+    STANDARD_DIALOG_MARGINS,
+    STANDARD_DIALOG_SPACING,
+    create_dialog_header,
+)
 
 
 class ApiCookieDialog(QDialog):
@@ -34,9 +40,22 @@ class ApiCookieDialog(QDialog):
         self.resize(540, 420)
         self._init_ui()
 
+    def exec(self) -> int:
+        """Explicit Python wrapper over QDialog.exec for testability and lifecycle hooks."""
+        return super().exec()
+
     def _init_ui(self) -> None:
         layout = QVBoxLayout(self)
-        layout.setSpacing(12)
+        layout.setContentsMargins(*STANDARD_DIALOG_MARGINS)
+        layout.setSpacing(STANDARD_DIALOG_SPACING)
+
+        header = create_dialog_header(
+            icon=FluentIcon.CERTIFICATE,
+            title="Cấu Hình API & Quản Lý Cookie TikTok",
+            subtitle="Cấu hình TikTok Direct Post API chính thức và lưu trữ an toàn qua Windows Vault DPAPI.",
+            parent=self,
+        )
+        layout.addWidget(header)
 
         layout.addWidget(QLabel("<b>Cấu hình TikTok Direct Post API chính thức:</b>"))
 
@@ -66,7 +85,7 @@ class ApiCookieDialog(QDialog):
         layout.addWidget(self.txt_cookies)
 
         btn_layout = QHBoxLayout()
-        self.btn_save = PrimaryPushButton("Lưu Vào Windows Vault DPAPI", self)
+        self.btn_save = PrimaryPushButton(FluentIcon.SAVE, "Lưu Vào Windows Vault DPAPI", self)
         self.btn_save.clicked.connect(self._on_save)
         self.btn_close = PushButton("Đóng", self)
         self.btn_close.clicked.connect(self.accept)

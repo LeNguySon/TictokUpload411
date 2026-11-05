@@ -380,7 +380,7 @@ class ProfileTableWidget(TableWidget):
 
         menu = RoundMenu(parent=self)
 
-        # --- Section 1: Browser Operations ---
+        # --- Root Section 1: Immediate Browser Operations ---
         orbita_title = f"Mở Trình Duyệt ({count} hồ sơ Orbita)" if count > 1 else "Mở Trình Duyệt (Orbita Antidetect)"
         act_orbita = Action(FluentIcon.GLOBE, orbita_title, self)
         act_orbita.triggered.connect(lambda: self.open_orbita_requested.emit(selected_ids))
@@ -390,19 +390,6 @@ class ProfileTableWidget(TableWidget):
         act_close = Action(FluentIcon.POWER_BUTTON, close_title, self)
         act_close.triggered.connect(lambda: self.close_orbita_requested.emit(selected_ids))
         menu.addAction(act_close)
-
-        menu.addSeparator()
-
-        # --- Section 2: Account Health & Content ---
-        cookie_title = f"Kiểm Tra Cookie LIVE / DIE ({count} hồ sơ)" if count > 1 else "Kiểm Tra Cookie LIVE / DIE"
-        act_cookie = Action(FluentIcon.CERTIFICATE, cookie_title, self)
-        act_cookie.triggered.connect(lambda: self.check_cookie_requested.emit(selected_ids))
-        menu.addAction(act_cookie)
-
-        sync_title = f"Đồng Bộ Số Liệu TikTok ({count} hồ sơ)" if count > 1 else "Đồng Bộ Số Liệu TikTok"
-        act_sync = Action(FluentIcon.SYNC, sync_title, self)
-        act_sync.triggered.connect(lambda: self.sync_metrics_requested.emit(selected_ids))
-        menu.addAction(act_sync)
 
         prof_label = first_profile.get("name") or f"#{first_id}"
         add_video_title = (
@@ -416,31 +403,27 @@ class ProfileTableWidget(TableWidget):
 
         menu.addSeparator()
 
-        # --- Section 3: Proxy & Bulk Metadata Operations ---
-        proxy_title = f"Cập Nhật / Thêm Proxy Hàng Loạt ({count} hồ sơ)..." if count > 1 else "Cập Nhật / Gán Proxy..."
-        act_proxy = Action(FluentIcon.WIFI, proxy_title, self)
-        act_proxy.triggered.connect(lambda: self.update_proxy_requested.emit(selected_ids))
-        menu.addAction(act_proxy)
+        # --- Submenu 1: Kênh TikTok & Sức Khỏe ---
+        tiktok_menu = RoundMenu("Sức Khỏe & Kênh TikTok", self)
+        tiktok_menu.setIcon(FluentIcon.HEART)
 
-        act_rotate_proxy = Action(FluentIcon.SYNC, "Xoay IP Proxy (Rotate IP)", self)
-        act_rotate_proxy.triggered.connect(lambda: self.rotate_proxy_requested.emit(selected_ids))
-        menu.addAction(act_rotate_proxy)
+        cookie_title = f"Kiểm Tra Cookie LIVE / DIE ({count} hồ sơ)" if count > 1 else "Kiểm Tra Cookie LIVE / DIE"
+        act_cookie = Action(FluentIcon.CERTIFICATE, cookie_title, self)
+        act_cookie.triggered.connect(lambda: self.check_cookie_requested.emit(selected_ids))
+        tiktok_menu.addAction(act_cookie)
 
-        act_check_proxy = Action(FluentIcon.SPEED_HIGH, "Kiểm Tra Ping / Live Proxy", self)
-        act_check_proxy.triggered.connect(lambda: self.check_proxy_requested.emit(selected_ids))
-        menu.addAction(act_check_proxy)
+        sync_title = f"Đồng Bộ Số Liệu TikTok ({count} hồ sơ)" if count > 1 else "Đồng Bộ Số Liệu TikTok"
+        act_sync = Action(FluentIcon.SYNC, sync_title, self)
+        act_sync.triggered.connect(lambda: self.sync_metrics_requested.emit(selected_ids))
+        tiktok_menu.addAction(act_sync)
 
-        act_remove_proxy = Action(FluentIcon.REMOVE, "Gỡ Bỏ Proxy / WireGuard VPN", self)
-        act_remove_proxy.triggered.connect(lambda: self.remove_proxy_requested.emit(selected_ids))
-        menu.addAction(act_remove_proxy)
+        act_account_health = Action(FluentIcon.HEART, "Sức Khỏe Kênh & Gậy Vi Phạm...", self)
+        act_account_health.triggered.connect(lambda: self.account_health_requested.emit(int(first_id or 0)))
+        tiktok_menu.addAction(act_account_health)
 
-        bulk_title = f"Cập Nhật Thông Tin Hàng Loạt ({count} hồ sơ)..." if count > 1 else "Chỉnh Sửa Thông Tin Hồ Sơ..."
-        act_bulk = Action(FluentIcon.EDIT, bulk_title, self)
-        if count > 1:
-            act_bulk.triggered.connect(lambda: self.bulk_edit_requested.emit(selected_ids))
-        else:
-            act_bulk.triggered.connect(lambda: self.edit_profile_requested.emit(int(first_id or 0)))
-        menu.addAction(act_bulk)
+        act_channel_radar = Action(FluentIcon.SPEED_HIGH, "Radar Đánh Giá Kênh & Cảnh Báo...", self)
+        act_channel_radar.triggered.connect(lambda: self.channel_radar_requested.emit(int(first_id or 0)))
+        tiktok_menu.addAction(act_channel_radar)
 
         channel_title = (
             f"Cập Nhật Kênh Hàng Loạt (Avatar, Bio, Tên) ({count} hồ sơ)..."
@@ -449,36 +432,64 @@ class ProfileTableWidget(TableWidget):
         )
         act_batch_channel = Action(FluentIcon.PEOPLE, channel_title, self)
         act_batch_channel.triggered.connect(lambda: self.batch_channel_update_requested.emit(selected_ids))
-        menu.addAction(act_batch_channel)
+        tiktok_menu.addAction(act_batch_channel)
 
-        project_title = f"Chuyển Vào Dự Án / Chiến Dịch ({count} hồ sơ)..." if count > 1 else "Chuyển Vào Dự Án..."
-        act_project = Action(FluentIcon.FOLDER, project_title, self)
-        act_project.triggered.connect(lambda: self.change_project_requested.emit(selected_ids))
-        menu.addAction(act_project)
-
-        act_channel_radar = Action(FluentIcon.SPEED_HIGH, "Radar Đánh Giá Kênh & Cảnh Báo...", self)
-        act_channel_radar.triggered.connect(lambda: self.channel_radar_requested.emit(int(first_id or 0)))
-        menu.addAction(act_channel_radar)
-
-        act_account_health = Action(FluentIcon.HEART, "🛡️ Sức Khỏe Kênh & Gậy Vi Phạm...", self)
-        act_account_health.triggered.connect(lambda: self.account_health_requested.emit(int(first_id or 0)))
-        menu.addAction(act_account_health)
-
-        menu.addSeparator()
-
-        # --- Section 3: Navigation & Clipboard Utilities ---
         tiktok_user = first_profile.get("username_on_tiktok")
         act_web = Action(FluentIcon.LINK, f"Mở Trang TikTok (@{tiktok_user or 'profile'})", self)
         act_web.setEnabled(bool(tiktok_user))
         act_web.triggered.connect(lambda: self.open_web_profile_requested.emit(str(tiktok_user or "")))
-        menu.addAction(act_web)
+        tiktok_menu.addAction(act_web)
+
+        menu.addMenu(tiktok_menu)
+
+        # --- Submenu 2: Quản Lý Proxy & Mạng ---
+        proxy_menu = RoundMenu("Quản Lý Proxy & Mạng", self)
+        proxy_menu.setIcon(FluentIcon.WIFI)
+
+        proxy_title = f"Cập Nhật / Thêm Proxy Hàng Loạt ({count} hồ sơ)..." if count > 1 else "Cập Nhật / Gán Proxy..."
+        act_proxy = Action(FluentIcon.WIFI, proxy_title, self)
+        act_proxy.triggered.connect(lambda: self.update_proxy_requested.emit(selected_ids))
+        proxy_menu.addAction(act_proxy)
+
+        act_rotate_proxy = Action(FluentIcon.SYNC, "Xoay IP Proxy (Rotate IP)", self)
+        act_rotate_proxy.triggered.connect(lambda: self.rotate_proxy_requested.emit(selected_ids))
+        proxy_menu.addAction(act_rotate_proxy)
+
+        act_check_proxy = Action(FluentIcon.SPEED_HIGH, "Kiểm Tra Ping / Live Proxy", self)
+        act_check_proxy.triggered.connect(lambda: self.check_proxy_requested.emit(selected_ids))
+        proxy_menu.addAction(act_check_proxy)
+
+        act_remove_proxy = Action(FluentIcon.REMOVE, "Gỡ Bỏ Proxy / WireGuard VPN", self)
+        act_remove_proxy.triggered.connect(lambda: self.remove_proxy_requested.emit(selected_ids))
+        proxy_menu.addAction(act_remove_proxy)
+
+        menu.addMenu(proxy_menu)
+
+        # --- Submenu 3: Quản Lý Hồ Sơ ---
+        profile_mgmt_menu = RoundMenu("Quản Lý Hồ Sơ", self)
+        profile_mgmt_menu.setIcon(FluentIcon.SETTING)
+
+        bulk_title = f"Cập Nhật Thông Tin Hàng Loạt ({count} hồ sơ)..." if count > 1 else "Chỉnh Sửa Thông Tin Hồ Sơ..."
+        act_bulk = Action(FluentIcon.EDIT, bulk_title, self)
+        if count > 1:
+            act_bulk.triggered.connect(lambda: self.bulk_edit_requested.emit(selected_ids))
+        else:
+            act_bulk.triggered.connect(lambda: self.edit_profile_requested.emit(int(first_id or 0)))
+        profile_mgmt_menu.addAction(act_bulk)
+
+        project_title = f"Chuyển Vào Dự Án / Chiến Dịch ({count} hồ sơ)..." if count > 1 else "Chuyển Vào Dự Án..."
+        act_project = Action(FluentIcon.FOLDER, project_title, self)
+        act_project.triggered.connect(lambda: self.change_project_requested.emit(selected_ids))
+        profile_mgmt_menu.addAction(act_project)
 
         profile_path = first_profile.get("storage_path") or first_profile.get("name", "")
         act_folder = Action(FluentIcon.FOLDER_ADD, "Mở Thư Mục Hồ Sơ (Local Profile)", self)
         act_folder.triggered.connect(lambda: self.open_folder_requested.emit(str(profile_path)))
-        menu.addAction(act_folder)
+        profile_mgmt_menu.addAction(act_folder)
 
-        # Submenu: Copy Information (Vector FluentIcon)
+        menu.addMenu(profile_mgmt_menu)
+
+        # --- Submenu 4: Sao Chép Thông Tin ---
         copy_menu = RoundMenu("Sao Chép Thông Tin", self)
         copy_menu.setIcon(FluentIcon.COPY)
 
@@ -512,9 +523,7 @@ class ProfileTableWidget(TableWidget):
 
         menu.addMenu(copy_menu)
 
-        menu.addSeparator()
-
-        # --- Section 4: Change Status ---
+        # --- Submenu 5: Đổi Trạng Thái ---
         status_menu = RoundMenu("Đổi Trạng Thái", self)
         status_menu.setIcon(FluentIcon.TAG)
 
@@ -533,7 +542,7 @@ class ProfileTableWidget(TableWidget):
 
         menu.addSeparator()
 
-        # --- Section 5: Soft Delete ---
+        # --- Root Bottom Section: Soft Delete ---
         delete_title = f"Chuyển Vào Thùng Rác ({count})" if count > 1 else "Chuyển Vào Thùng Rác"
         act_delete = Action(FluentIcon.DELETE, delete_title, self)
         act_delete.triggered.connect(lambda: self.soft_delete_requested.emit(selected_ids))

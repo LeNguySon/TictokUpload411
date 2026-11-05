@@ -20,6 +20,7 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
 )
 from qfluentwidgets import (
+    FluentIcon,
     PushButton,
 )
 
@@ -31,6 +32,11 @@ from src.domain.analytics.channel_quality_radar import (
 from src.domain.analytics.low_view_alert import analyze_low_view_alert
 from src.infrastructure.database.connection import db_session
 from src.infrastructure.database.repositories.profile_repository import ProfileRepository
+from src.presentation.dialogs.dialog_helpers import (
+    STANDARD_DIALOG_MARGINS,
+    STANDARD_DIALOG_SPACING,
+    create_dialog_header,
+)
 
 
 class ChannelRadarDialog(QDialog):
@@ -54,6 +60,10 @@ class ChannelRadarDialog(QDialog):
         self.setWindowTitle("Radar Đánh Giá Sức Khỏe Kênh TikTok MMO")
         self.resize(600, 640)
         self._analyze_and_init_ui()
+
+    def exec(self) -> int:
+        """Explicit Python wrapper over QDialog.exec for testability and lifecycle hooks."""
+        return super().exec()
 
     def _load_profile_videos(self) -> list[dict[str, Any]]:
         """Loads video performance history for this profile from statisticTable or videoTables."""
@@ -114,14 +124,17 @@ class ChannelRadarDialog(QDialog):
 
         # 3. Build UI
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 20, 24, 20)
-        layout.setSpacing(14)
+        layout.setContentsMargins(*STANDARD_DIALOG_MARGINS)
+        layout.setSpacing(STANDARD_DIALOG_SPACING)
 
-        # Header with channel info
         prof_name = self.profile.get("username_on_tiktok") or self.profile.get("name") or f"Profile #{self.profile_id}"
-        self.title_lbl = QLabel(f"Chẩn Đoán Kênh: @{prof_name}", self)
-        self.title_lbl.setStyleSheet("font-size: 18px; font-weight: bold; color: #0f172a;")
-        layout.addWidget(self.title_lbl)
+        header = create_dialog_header(
+            icon=FluentIcon.SPEED_HIGH,
+            title=f"Chẩn Đoán Radar Kênh: @{prof_name}",
+            subtitle="Đánh giá chất lượng phân phối video, cảnh báo flop/view ảo và tư vấn chiến lược nội dung.",
+            parent=self,
+        )
+        layout.addWidget(header)
 
         # Verdict Badge
         badge_frame = QFrame(self)

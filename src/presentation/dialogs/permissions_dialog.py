@@ -6,15 +6,21 @@ from PyQt6.QtWidgets import (
     QDialog,
     QFormLayout,
     QHBoxLayout,
-    QLabel,
     QVBoxLayout,
 )
 from qfluentwidgets import (
+    FluentIcon,
     InfoBar,
     InfoBarPosition,
     LineEdit,
     PrimaryPushButton,
     PushButton,
+)
+
+from src.presentation.dialogs.dialog_helpers import (
+    STANDARD_DIALOG_MARGINS,
+    STANDARD_DIALOG_SPACING,
+    create_dialog_header,
 )
 
 
@@ -29,11 +35,22 @@ class PermissionsDialog(QDialog):
         self.resize(520, 340)
         self._init_ui()
 
+    def exec(self) -> int:
+        """Explicit Python wrapper over QDialog.exec for testability and lifecycle hooks."""
+        return super().exec()
+
     def _init_ui(self) -> None:
         layout = QVBoxLayout(self)
-        layout.setSpacing(12)
+        layout.setContentsMargins(*STANDARD_DIALOG_MARGINS)
+        layout.setSpacing(STANDARD_DIALOG_SPACING)
 
-        layout.addWidget(QLabel("<b>Quy trình cấp quyền truy cập TikTok API:</b>"))
+        header = create_dialog_header(
+            icon=FluentIcon.CERTIFICATE,
+            title="Cấp Quyền & Ủy Quyền TikTok OAuth 2.0",
+            subtitle="Tạo liên kết xác thực OAuth 2.0 và cấp quyền truy cập tài khoản nhà sáng tạo.",
+            parent=self,
+        )
+        layout.addWidget(header)
 
         form = QFormLayout()
         form.setSpacing(10)

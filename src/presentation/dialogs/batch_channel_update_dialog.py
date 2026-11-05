@@ -39,6 +39,11 @@ from src.application.workers.channel_update_worker import (
 from src.application.workers.thread_pool_manager import ThreadPoolManager
 from src.domain.policies.spintax_policy import spin_text
 from src.infrastructure.database.repositories.profile_repository import ProfileRepository
+from src.presentation.dialogs.dialog_helpers import (
+    STANDARD_DIALOG_MARGINS,
+    STANDARD_DIALOG_SPACING,
+    create_dialog_header,
+)
 
 
 class BatchChannelUpdateDialog(QDialog):
@@ -63,18 +68,23 @@ class BatchChannelUpdateDialog(QDialog):
         self.resize(540, 580)
         self._init_ui()
 
+    def exec(self) -> int:
+        """Explicit Python wrapper over QDialog.exec for testability and lifecycle hooks."""
+        return super().exec()
+
     def _init_ui(self) -> None:
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(14)
+        layout.setContentsMargins(*STANDARD_DIALOG_MARGINS)
+        layout.setSpacing(STANDARD_DIALOG_SPACING)
 
-        # Header
-        self.title_lbl = QLabel("Cập Nhật Thông Tin Kênh Hàng Loạt", self)
-        self.title_lbl.setStyleSheet("font-size: 16px; font-weight: bold; color: #201F1E;")
-        self.count_lbl = QLabel(f"Đang áp dụng cho {self.profile_count} tài khoản đã chọn.", self)
-        self.count_lbl.setStyleSheet("font-size: 13px; color: #0078D4; font-weight: bold;")
-        layout.addWidget(self.title_lbl)
-        layout.addWidget(self.count_lbl)
+        # Header banner
+        header = create_dialog_header(
+            icon=FluentIcon.PEOPLE,
+            title="Cập Nhật Thông Tin Kênh Hàng Loạt",
+            subtitle=f"Đang áp dụng đồng loạt cho {self.profile_count} tài khoản TikTok đã chọn.",
+            parent=self,
+        )
+        layout.addWidget(header)
 
         # 1. Group Avatar
         grp_avatar = QGroupBox("1. Ảnh Đại Diện (Avatar)", self)

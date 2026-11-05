@@ -18,7 +18,6 @@ from PyQt6.QtWidgets import (
 from qfluentwidgets import (
     ComboBox,
     FluentIcon,
-    IconWidget,
     InfoBar,
     InfoBarPosition,
     PlainTextEdit,
@@ -34,6 +33,11 @@ from src.infrastructure.database.repositories.proxy_repository import (
     parse_proxy_line,
 )
 from src.infrastructure.vpn.wireguard_manager import WireGuardManager
+from src.presentation.dialogs.dialog_helpers import (
+    STANDARD_DIALOG_MARGINS,
+    STANDARD_DIALOG_SPACING,
+    create_dialog_header,
+)
 
 
 class AssignProxyDialog(QDialog):
@@ -59,23 +63,24 @@ class AssignProxyDialog(QDialog):
         self._init_ui()
         self._populate_proxies()
 
+    def exec(self) -> int:
+        """Explicit Python wrapper over QDialog.exec for testability and lifecycle hooks."""
+        return super().exec()
+
     def _init_ui(self) -> None:
         layout = QVBoxLayout(self)
-        layout.setSpacing(12)
-
-        # Header with vector FluentIcon
-        header_layout = QHBoxLayout()
-        icon_widget = IconWidget(FluentIcon.WIFI, self)
-        icon_widget.setFixedSize(28, 28)
-        header_layout.addWidget(icon_widget)
+        layout.setContentsMargins(*STANDARD_DIALOG_MARGINS)
+        layout.setSpacing(STANDARD_DIALOG_SPACING)
 
         count = len(self.profile_ids)
         title_text = f"Cập Nhật Proxy cho {count} hồ sơ đang chọn" if count > 1 else "Cập Nhật Proxy cho hồ sơ đã chọn"
-        title_label = QLabel(title_text, self)
-        title_label.setStyleSheet("font-size: 15px; font-weight: 600;")
-        header_layout.addWidget(title_label)
-        header_layout.addStretch()
-        layout.addLayout(header_layout)
+        header = create_dialog_header(
+            icon=FluentIcon.WIFI,
+            title=title_text,
+            subtitle="Gán proxy có sẵn, nạp proxy xoay IP hàng loạt hoặc cấu hình WireGuard VPN.",
+            parent=self,
+        )
+        layout.addWidget(header)
 
         # Tab Widget for Mode selection
         self.tabs = QTabWidget(self)
