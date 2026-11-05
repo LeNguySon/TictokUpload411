@@ -38,6 +38,7 @@ class VideoQueueTableWidget(TableWidget):
     open_published_link_requested = pyqtSignal(str)
     delete_video_requested = pyqtSignal(list)
     files_dropped = pyqtSignal(list)
+    view_upload_logs_requested = pyqtSignal(int)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -213,12 +214,57 @@ class VideoQueueTableWidget(TableWidget):
 
         self.setSortingEnabled(True)
 
-    def update_progress(self, video_id: int, percentage: float) -> None:
-        """Dynamically updates the Fluent ProgressBar for a specific video row."""
+    def find_row_by_video_id(self, video_id: int) -> int | None:
+        """Finds the current table row index for a given video ID."""
+        for row in range(self.rowCount()):
+            item = self.item(row, 0)
+            if item:
+                data = item.data(Qt.ItemDataRole.UserRole)
+                if isinstance(data, dict) and data.get("id") == video_id:
+                    return row
+            id_item = self.item(row, 12)
+            if id_item and id_item.text() == str(video_id):
+                return row
+        return None
+
+    def update_stage(self, video_id: int, stage_text: str) -> None:
+        """Updates the status column (Col 9) with detailed stage text and color."""
+        row = self.find_row_by_video_id(video_id)
+        if row is None:
+            return
+        status_item = self.item(row, 9)
+        if not status_item:
+            status_item = QTableWidgetItem(stage_text)
+            status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.setItem(row, 9, status_item)
+        else:
+            status_item.setText(stage_text)
+
+        lower_stage = stage_text.lower()
+        if any(w in lower_stage for w in ("hoàn tất", "thành công", "completed", "published")):
+            status_item.setForeground(QColor("#107C41"))
+        elif any(w in lower_stage for w in ("lỗi", "thất bại", "error", "fail")):
+            status_item.setForeground(QColor("#D83B01"))
+        elif any(w in lower_stage for w in ("đang", "khởi tạo", "tải", "upload", "chunk", "publish")):
+            status_item.setForeground(QColor("#0078D4"))
+
+    def update_progress(self, video_id: int, percentage: float, speed_text: str = "") -> None:
+        """Dynamically updates the Fluent ProgressBar and Status for a specific video row."""
         if video_id in self._progress_bars:
             pbar = self._progress_bars[video_id]
             int_pct = int(min(100.0, max(0.0, percentage)))
             pbar.setValue(int_pct)
+
+        row = self.find_row_by_video_id(video_id)
+        if row is not None:
+            status_item = self.item(row, 9)
+            if status_item:
+                current_text = status_item.text().lower()
+                if not any(k in current_text for k in ("hoàn tất", "thành công", "lỗi", "thất bại")):
+                    int_pct = int(min(100.0, max(0.0, percentage)))
+                    extra = f" ({speed_text})" if speed_text else ""
+                    status_item.setText(f"Đang tải {int_pct}%{extra}")
+                    status_item.setForeground(QColor("#0078D4"))
 
     def get_selected_videos(self) -> list[dict[str, Any]]:
         """Returns list of selected video dictionaries stored in UserRole."""
@@ -308,6 +354,11 @@ class VideoQueueTableWidget(TableWidget):
         if first_id is not None:
             act_edit.triggered.connect(lambda: self.edit_metadata_requested.emit(int(first_id)))
         menu.addAction(act_edit)
+
+        if first_id is not None:
+            act_logs = Action(FluentIcon.DOCUMENT, "Xem Nhật Ký Upload (Logs)...", self)
+            act_logs.triggered.connect(lambda: self.view_upload_logs_requested.emit(int(first_id)))
+            menu.addAction(act_logs)
 
         menu.addSeparator()
 

@@ -18,6 +18,8 @@ class AppSignalBus(QObject):
     upload_progress = pyqtSignal(int, int, int, float)  # video_id, bytes_uploaded, total_bytes, percentage
     upload_completed = pyqtSignal(int, str)  # video_id, publish_id
     upload_failed = pyqtSignal(int, str)  # video_id, error_message
+    upload_log = pyqtSignal(int, str, str, str, str)  # video_id, timestamp, stage, message, level
+    upload_stage_changed = pyqtSignal(int, str)  # video_id, stage_text
 
     # Proxy signals
     proxy_checked = pyqtSignal(int, bool, float, str)  # proxy_id, is_alive, latency_ms, status_or_error

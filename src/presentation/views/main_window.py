@@ -78,6 +78,7 @@ from src.presentation.dialogs.user_guide_dialog import UserGuideDialog
 from src.presentation.dialogs.video_metadata_dialog import VideoMetadataDialog
 from src.presentation.widgets.profile_table_widget import ProfileTableWidget
 from src.presentation.widgets.video_queue_table_widget import VideoQueueTableWidget
+from src.presentation.widgets.video_upload_log_widget import VideoUploadLogWidget
 
 logger = logging.getLogger(__name__)
 
@@ -308,11 +309,25 @@ class TikTokManagerMainWindow(QMainWindow):
         self.switch_auto.setToolTip("Tự động chuyển tiếp kênh khi upload xong")
         bottom_toolbar.addWidget(self.switch_auto)
 
+        self.btn_toggle_upload_log = PushButton(FluentIcon.DOCUMENT, "Nhật Ký Upload", self)
+        self.btn_toggle_upload_log.setFixedHeight(34)
+        self.btn_toggle_upload_log.setCheckable(True)
+        self.btn_toggle_upload_log.setChecked(True)
+        self.btn_toggle_upload_log.setToolTip("Ẩn/Hiện bảng nhật ký upload song song thời gian thực")
+        self.btn_toggle_upload_log.clicked.connect(self._on_toggle_upload_log_panel)
+        bottom_toolbar.addWidget(self.btn_toggle_upload_log)
+
         bottom_layout.addLayout(bottom_toolbar)
 
-        # Video Queue Table
-        self.video_table = VideoQueueTableWidget(bottom_container)
-        bottom_layout.addWidget(self.video_table)
+        # Video Splitter (Video Queue Table + Per-Video Log Console)
+        self.video_splitter = QSplitter(Qt.Orientation.Vertical, bottom_container)
+        self.video_table = VideoQueueTableWidget(self.video_splitter)
+        self.upload_log_widget = VideoUploadLogWidget(self.video_splitter)
+        self.upload_log_widget.toggle_collapse_requested.connect(lambda: self._on_toggle_upload_log_panel(False))
+        self.video_splitter.addWidget(self.video_table)
+        self.video_splitter.addWidget(self.upload_log_widget)
+        self.video_splitter.setSizes([220, 120])
+        bottom_layout.addWidget(self.video_splitter, 1)
 
         # Set initial splitter proportions (55% top, 45% bottom)
         self.splitter.addWidget(top_container)
@@ -345,6 +360,8 @@ class TikTokManagerMainWindow(QMainWindow):
         self.signal_bus.upload_progress.connect(self._on_upload_progress)
         self.signal_bus.upload_completed.connect(self._on_upload_completed)
         self.signal_bus.upload_failed.connect(self._on_upload_failed)
+        self.signal_bus.upload_log.connect(self._on_upload_log_received)
+        self.signal_bus.upload_stage_changed.connect(self._on_upload_stage_changed)
         self.signal_bus.profile_updated.connect(self._on_profile_updated)
 
         # Context Menu Events on Profile Table
@@ -378,6 +395,7 @@ class TikTokManagerMainWindow(QMainWindow):
         self.video_table.delete_video_requested.connect(self._on_delete_selected_videos)
         self.video_table.itemSelectionChanged.connect(self._on_video_selection_changed)
         self.video_table.files_dropped.connect(self._on_videos_dropped)
+        self.video_table.view_upload_logs_requested.connect(self._on_view_video_logs_requested)
 
     def refresh_all_data(self) -> None:
         self._refresh_project_dropdown()
@@ -1868,6 +1886,26 @@ class TikTokManagerMainWindow(QMainWindow):
 
     def _on_upload_progress(self, video_id: int, uploaded: int, total: int, pct: float) -> None:
         self.video_table.update_progress(video_id, pct)
+
+    def _on_upload_log_received(self, video_id: int, timestamp: str, stage: str, message: str, level: str) -> None:
+        self.upload_log_widget.append_log(video_id, timestamp, stage, message, level)
+
+    def _on_upload_stage_changed(self, video_id: int, stage_text: str) -> None:
+        self.video_table.update_stage(video_id, stage_text)
+        self.upload_log_widget.update_stage(video_id, stage_text)
+
+    def _on_view_video_logs_requested(self, video_id: int) -> None:
+        if not self.upload_log_widget.isVisible():
+            self._on_toggle_upload_log_panel(True)
+        self.upload_log_widget.focus_video(video_id)
+
+    def _on_toggle_upload_log_panel(self, checked: bool | None = None) -> None:
+        if checked is None:
+            checked = not self.upload_log_widget.isVisible()
+        self.upload_log_widget.setVisible(checked)
+        self.btn_toggle_upload_log.setChecked(checked)
+        if checked:
+            self.video_splitter.setSizes([220, 120])
 
     def _on_upload_completed(self, video_id: int, publish_id: str) -> None:
         # Tự động cách ly video đã upload vào thư mục _posted/

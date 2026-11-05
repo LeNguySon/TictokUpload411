@@ -26,3 +26,4 @@ Nguyên nhân gốc rễ (Root Cause Analysis):
 ## Quy Chuẩn Bắt Buộc (Mandatory Rules)
 - **Tuyệt đối không chạy I/O, quét process psutil, hoặc gọi HTTP request trên Qt Main GUI Thread**. Mọi tác vụ tốn trên 16ms bắt buộc phải đưa vào `QRunnable` worker qua `ThreadPoolManager.instance().dispatch(worker)`.
 - Khi cập nhật giao diện dạng bảng có nhiều dòng, chỉ cập nhật cell có trạng thái thay đổi (delta update), tránh gọi `load_profiles()` hoặc render lại toàn bộ bảng liên tục.
+
