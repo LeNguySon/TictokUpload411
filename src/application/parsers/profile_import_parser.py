@@ -178,6 +178,14 @@ class ProfileImportParser:
                 val = parts[idx]
                 result[token_key] = val if val else None
 
+        # Smart fallback for legacy 2-token line where 2nd token is a cookie
+        if format_name == "legacy_5_fields" and len(parts) == 2:
+            second = parts[1]
+            if second and ("msToken=" in second or "sessionid=" in second) and not result.get("cookie"):
+                result["cookie"] = second
+                if result.get("proxy") == second:
+                    result["proxy"] = None
+
         # Ensure user has a valid fallback name
         if not result.get("user"):
             auto_name = f"{default_name_prefix}_{int(time.time() * 1000) % 100000}"

@@ -107,9 +107,18 @@ def format_mmo_metric(val: int | float | None) -> str:
         return str(val)
 
 
-def format_duration_string(seconds: float | int | None) -> str:
+def format_duration_string(seconds: float | int | str | None) -> str:
     """Formats seconds into HH:MM:SS format (e.g. 00:00:07)."""
-    if seconds is None or seconds < 0:
+    if seconds is None:
+        return "00:00:00"
+    if isinstance(seconds, str):
+        if ":" in seconds:
+            return seconds
+        try:
+            seconds = float(seconds)
+        except ValueError:
+            return "00:00:00"
+    if seconds < 0:
         return "00:00:00"
     total_sec = int(seconds)
     hours = total_sec // 3600
