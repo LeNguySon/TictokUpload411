@@ -196,3 +196,19 @@ class BrowserCacheCleaner:
             deleted_dirs,
         )
         return summary
+
+
+def collect_profile_dirs(profiles: list[dict[str, Any]]) -> list[Path]:
+    """Existing on-disk browser profile directories of the given profile records."""
+    dirs: list[Path] = []
+    for p in profiles:
+        s_dir = p.get("storage_dir")
+        if s_dir and Path(s_dir).is_dir():
+            dirs.append(Path(s_dir))
+            continue
+        uuid_val = p.get("uuid") or p.get("name")
+        if uuid_val:
+            candidate = Path("profiles") / str(uuid_val)
+            if candidate.is_dir():
+                dirs.append(candidate)
+    return dirs

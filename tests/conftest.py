@@ -43,3 +43,23 @@ def never_kill_real_browsers(monkeypatch):
         return original(self, orphans=orphans, profiles_dir=profiles_dir)
 
     monkeypatch.setattr(ps.BrowserProcessSupervisor, "cleanup_orphan_browsers", guarded)
+
+
+@pytest.fixture(autouse=True)
+def isolated_ui_settings(monkeypatch, tmp_path):
+    """Tests must never read/write the developer's real UI settings (Windows registry) and must not
+    run the real exit cache cleanup on whatever `profiles/` dirs exist: every test gets a temp ini
+    with clean_cache_on_exit=False (tests that need it enable it explicitly)."""
+    from PyQt6.QtCore import QSettings
+
+    try:
+        from src.presentation.views.main_window import TikTokManagerMainWindow
+    except Exception:
+        return
+    ini = tmp_path / "ui_settings.ini"
+    seed = QSettings(str(ini), QSettings.Format.IniFormat)
+    seed.setValue("clean_cache_on_exit", False)
+    seed.sync()
+    monkeypatch.setattr(
+        TikTokManagerMainWindow, "_settings", lambda self: QSettings(str(ini), QSettings.Format.IniFormat)
+    )

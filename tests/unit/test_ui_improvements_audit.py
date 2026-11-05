@@ -11,7 +11,7 @@ Tests:
 from unittest.mock import MagicMock
 
 import pytest
-from PyQt6.QtCore import QSettings, Qt
+from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QKeyEvent
 from PyQt6.QtWidgets import QApplication
 from src.presentation.widgets.profile_table_widget import ProfileTableWidget
@@ -128,9 +128,11 @@ def test_main_window_column_persistence_and_shortcuts(qapp, tmp_path):
     db_file = tmp_path / "test_mw_ui.db"
     run_all_migrations(db_file)
 
-    # Pre-configure QSettings with hidden columns {3, 5}
-    settings = QSettings("TAVM", "TikTokManager")
+    # Pre-configure the (test-isolated, see conftest) UI settings with hidden columns {3, 5};
+    # writing QSettings("TAVM", "TikTokManager") here used to overwrite/remove the developer's real ones.
+    settings = TikTokManagerMainWindow._settings(None)
     settings.setValue("hidden_profile_columns", "3,5")
+    settings.sync()
 
     with patch("src.infrastructure.browser.sammonny_daemon_manager.SamMonnyDaemonSupervisor.ensure_daemon_running"):
         mw = TikTokManagerMainWindow(db_path=db_file)
