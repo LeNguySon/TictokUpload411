@@ -25,6 +25,7 @@ from PyQt6.QtWidgets import (
 from qfluentwidgets import (
     Action,
     ComboBox,
+    CompactSpinBox,
     FluentIcon,
     InfoBar,
     InfoBarPosition,
@@ -33,7 +34,6 @@ from qfluentwidgets import (
     PushButton,
     RoundMenu,
     SearchLineEdit,
-    SpinBox,
     SwitchButton,
     Theme,
     TransparentToolButton,
@@ -78,10 +78,12 @@ from src.presentation.dialogs.table_settings_dialog import TableSettingsDialog
 from src.presentation.dialogs.trash_dialog import TrashDialog
 from src.presentation.dialogs.user_guide_dialog import UserGuideDialog
 from src.presentation.dialogs.video_metadata_dialog import VideoMetadataDialog
+from src.presentation.widgets.fluent_compat import apply_fluent_compat_patches
 from src.presentation.widgets.profile_table_widget import ProfileTableWidget
 from src.presentation.widgets.video_queue_table_widget import VideoQueueTableWidget
 
 PROFILE_PATCH_COALESCE_MS = 250
+PROFILE_SEARCH_WIDTH = 340
 SEARCH_DEBOUNCE_MS = 200
 UPLOAD_NOTICE_COALESCE_MS = 1500
 
@@ -100,6 +102,7 @@ class TikTokManagerMainWindow(QMainWindow):
         parent=None,
     ) -> None:
         super().__init__(parent)
+        apply_fluent_compat_patches()  # before any SpinBox is created/laid out
         self.db_path = db_path
         try:
             from qfluentwidgets import isDarkTheme
@@ -253,7 +256,11 @@ class TikTokManagerMainWindow(QMainWindow):
         self.search_profile.setClearButtonEnabled(True)
         self.search_profile.setPlaceholderText("Tìm theo id | profile | email | proxy...")
         self.search_profile.textChanged.connect(self._on_search_profile)
-        top_toolbar.addWidget(self.search_profile, 1)
+        # Compact search box (it used to stretch across the whole window); the stretch keeps the
+        # settings button pinned to the right edge.
+        self.search_profile.setFixedWidth(PROFILE_SEARCH_WIDTH)
+        top_toolbar.addWidget(self.search_profile)
+        top_toolbar.addStretch(1)
 
         # Unified Settings & Tools Menu Button (Clean 36x36 with 20x20 Vector FluentIcon - Zero Dropdown Arrow)
         self.btn_settings = TransparentToolButton(FluentIcon.SETTING, self)
@@ -315,7 +322,8 @@ class TikTokManagerMainWindow(QMainWindow):
         lbl_jump.setFixedHeight(34)
         bottom_toolbar.addWidget(lbl_jump)
 
-        self.spin_jump = SpinBox(self)
+        # 70px is too narrow for SpinBox's inline buttons (80px reserved): use the compact variant.
+        self.spin_jump = CompactSpinBox(self)
         self.spin_jump.setFixedHeight(34)
         self.spin_jump.setFixedWidth(70)
         self.spin_jump.setValue(0)
@@ -828,16 +836,41 @@ class TikTokManagerMainWindow(QMainWindow):
                 )
                 return
 
+        # AgentShield Strict Proxy Gate: Filter profiles that have an assigned proxy
+        proxied_ids = [pid for pid in selected_ids if (self.profile_repo.get_by_id(pid) or {}).get("proxy_id")]
+        skipped_count = len(selected_ids) - len(proxied_ids)
+
+        if not proxied_ids:
+            InfoBar.error(
+                title="Chặn An Toàn AgentShield",
+                content="Toàn bộ hồ sơ được chọn chưa được gán Proxy! Đồng bộ bị chặn để chống rò rỉ IP máy thật ra TikTok.",
+                position=InfoBarPosition.TOP,
+                duration=6000,
+                parent=self,
+            )
+            return
+
+        if skipped_count > 0:
+            InfoBar.warning(
+                title="Bỏ Qua Hồ Sơ Không Proxy",
+                content=f"Đã bỏ qua {skipped_count} hồ sơ chưa gán Proxy để bảo vệ IP máy chủ.",
+                position=InfoBarPosition.TOP,
+                duration=4000,
+                parent=self,
+            )
+
         try:
             worker = MetricsSyncWorker(
-                profile_ids=selected_ids,
+                profile_ids=proxied_ids,
                 profile_service=self.profile_service,
                 signal_bus=self.signal_bus,
+                proxy_repo=self.proxy_repo,
+                profile_repo=self.profile_repo,
             )
             self.thread_pool.dispatch(worker)
             InfoBar.info(
                 title="Đang đồng bộ số liệu",
-                content=f"Đang đồng bộ số liệu thụ động cho {len(selected_ids)} hồ sơ...",
+                content=f"Đang đồng bộ số liệu an toàn qua Proxy cho {len(proxied_ids)} hồ sơ...",
                 position=InfoBarPosition.TOP,
                 parent=self,
             )
@@ -866,6 +899,17 @@ class TikTokManagerMainWindow(QMainWindow):
         target_ids = profile_id_or_ids if isinstance(profile_id_or_ids, list) else [profile_id_or_ids]
         if not target_ids:
             return
+
+        # AgentShield Proxy Warning: notify if any profile is unproxied
+        unproxied = [pid for pid in target_ids if not (self.profile_repo.get_by_id(pid) or {}).get("proxy_id")]
+        if unproxied:
+            InfoBar.warning(
+                title="Cảnh Báo Proxy Trình Duyệt",
+                content=f"Có {len(unproxied)} hồ sơ chưa được gán Proxy. Trình duyệt sẽ mở với IP thật của máy chủ.",
+                position=InfoBarPosition.TOP,
+                duration=6000,
+                parent=self,
+            )
 
         count = len(target_ids)
         InfoBar.info(
@@ -1968,15 +2012,42 @@ class TikTokManagerMainWindow(QMainWindow):
             )
             return
 
+        # AgentShield Strict Proxy Gate: Filter profiles that have an assigned proxy
+        proxied_profiles = [pid for pid in selected_profiles if (self.profile_repo.get_by_id(pid) or {}).get("proxy_id")]
+        skipped_count = len(selected_profiles) - len(proxied_profiles)
+
+        if not proxied_profiles:
+            InfoBar.error(
+                title="Chặn An Toàn AgentShield",
+                content="Toàn bộ tài khoản được chọn chưa được gán Proxy! Bắt đầu đăng bị chặn để chống rò rỉ IP máy thật ra TikTok.",
+                position=InfoBarPosition.TOP,
+                duration=6000,
+                parent=self,
+            )
+            return
+
+        if skipped_count > 0:
+            InfoBar.warning(
+                title="Bỏ Qua Tài Khoản Không Proxy",
+                content=f"Đã bỏ qua {skipped_count} tài khoản chưa gán Proxy để bảo vệ an toàn cho kênh.",
+                position=InfoBarPosition.TOP,
+                duration=4000,
+                parent=self,
+            )
+
         jump_step = max(1, self.spin_jump.value() + 1)
         dispatched = 0
         for idx, video in enumerate(available_videos):
             assigned_id = video.get("assigned_profile_id")
             if assigned_id:
+                # Validate assigned profile has proxy
+                p_row = self.profile_repo.get_by_id(assigned_id)
+                if not p_row or not p_row.get("proxy_id"):
+                    continue
                 profile_id = assigned_id
             else:
-                prof_idx = (idx * jump_step) % len(selected_profiles)
-                profile_id = selected_profiles[prof_idx]
+                prof_idx = (idx * jump_step) % len(proxied_profiles)
+                profile_id = proxied_profiles[prof_idx]
             worker = UploadWorker(
                 video_id=video["id"],
                 profile_id=profile_id,
@@ -2148,6 +2219,18 @@ class TikTokManagerMainWindow(QMainWindow):
             )
             return
 
+        # AgentShield Strict Proxy Gate: Filter profiles that have an assigned proxy
+        proxied_profiles = [pid for pid in selected_profiles if (self.profile_repo.get_by_id(pid) or {}).get("proxy_id")]
+        if not proxied_profiles:
+            InfoBar.error(
+                title="Chặn An Toàn AgentShield",
+                content="Tài khoản được chọn chưa được gán Proxy! Vui lòng chuột phải chọn 'Gán Proxy' trước khi đăng.",
+                position=InfoBarPosition.TOP,
+                duration=6000,
+                parent=self,
+            )
+            return
+
         ids = video_id_or_ids if isinstance(video_id_or_ids, list) else [video_id_or_ids]
         dispatched = 0
         for idx, target in enumerate(ids):
@@ -2159,7 +2242,7 @@ class TikTokManagerMainWindow(QMainWindow):
             if not v:
                 continue
 
-            target_profile = selected_profiles[idx % len(selected_profiles)]
+            target_profile = proxied_profiles[idx % len(proxied_profiles)]
             worker = UploadWorker(
                 video_id=v["id"],
                 profile_id=target_profile,

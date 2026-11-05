@@ -22,6 +22,7 @@ from src.domain.policies.upload_policy import (
 )
 from src.domain.policies.video_validation_policy import VideoValidationPolicy
 from src.infrastructure.database.repositories.profile_repository import ProfileRepository
+from src.infrastructure.database.repositories.proxy_repository import ProxyRepository
 from src.infrastructure.database.repositories.video_repository import VideoRepository
 from src.infrastructure.media.video_isolation import move_video_to_posted_folder
 from src.infrastructure.tiktok.sammonny_adapter import SamMonnyTikTokAdapter
@@ -41,12 +42,14 @@ class UploadService:
         tiktok_adapter: SamMonnyTikTokAdapter,
         validation_policy: VideoValidationPolicy | None = None,
         retry_policy: RetryPolicy | None = None,
+        proxy_repo: ProxyRepository | None = None,
     ) -> None:
         self.profile_repo = profile_repo
         self.video_repo = video_repo
         self.tiktok_adapter = tiktok_adapter
         self.validation_policy = validation_policy or VideoValidationPolicy()
         self.retry_policy = retry_policy or RetryPolicy()
+        self.proxy_repo = proxy_repo
 
     @staticmethod
     def compute_sha256(path: Path) -> str:
@@ -447,6 +450,32 @@ class UploadService:
                         "ERROR",
                     )
                     raise RuntimeError(f"Profile {profile_id} is in non-uploadable state: {profile_row.get('status')}")
+
+                # AgentShield Strict Proxy Gate: reject unproxied or leak_detected profile
+                proxy_id = profile_row.get("proxy_id")
+                if not proxy_id:
+                    err_msg = "Security: Profile chưa được gán Proxy (Strict Proxy Gate)"
+                    _safe_log(
+                        "SECURITY", f"CHẶN AN TOÀN AGENTSHIELD: Hồ sơ #{profile_id} chưa được gán Proxy!", "ERROR"
+                    )
+                    self.video_repo.mark_error(video_id, err_msg)
+                    raise PermissionError(
+                        f"AgentShield Strict Proxy Gate: Upload rejected because Profile #{profile_id} has no proxy assigned."
+                    )
+
+                if self.proxy_repo:
+                    px = self.proxy_repo.get_by_id(proxy_id)
+                    if px and px.get("status") == "leak_detected":
+                        err_msg = f"Security: Proxy #{proxy_id} bị gắn cờ LEAK DETECTED"
+                        _safe_log(
+                            "SECURITY",
+                            f"CHẶN AN TOÀN AGENTSHIELD: Proxy #{proxy_id} bị gắn cờ LEAK DETECTED!",
+                            "ERROR",
+                        )
+                        self.video_repo.mark_error(video_id, err_msg)
+                        raise PermissionError(
+                            f"AgentShield Strict Proxy Gate: Proxy #{proxy_id} is flagged with leak_detected."
+                        )
 
                 video_row = self.video_repo.get_by_id(video_id)
                 if not video_row:

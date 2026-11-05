@@ -230,26 +230,33 @@ class PassiveTikTokSyncService:
         return hydration
 
     def _fetch_url_content(self, url: str, proxy_id: int | None) -> str:
-        """Fetches URL content routing through the assigned proxy if present."""
-        if proxy_id and self.proxy_repo:
-            px = self.proxy_repo.get_by_id(proxy_id)
-            if px and px.get("status") == "leak_detected":
-                logger.warning("Proxy %s is flagged with LEAK DETECTED! Aborting DOM scraping.", proxy_id)
-                return ""
+        """Fetches URL content strictly routing through the assigned proxy (AgentShield Standard)."""
+        if not proxy_id or not self.proxy_repo:
+            logger.warning(
+                "AgentShield Strict Proxy Gate: Blocked unproxied DOM scraping for %s (no proxy configured)", url
+            )
+            return ""
 
-        opener = urllib.request.build_opener()
-        if proxy_id and self.proxy_repo:
-            px = self.proxy_repo.get_by_id(proxy_id)
-            if px and px.get("host") and px.get("port"):
-                proto = px.get("protocol", "http")
-                host = px["host"]
-                port = px["port"]
-                usr = px.get("username")
-                pwd = px.get("password")
-                auth = f"{usr}:{pwd}@" if usr and pwd else ""
-                proxy_url = f"{proto}://{auth}{host}:{port}"
-                handler = urllib.request.ProxyHandler({"http": proxy_url, "https": proxy_url})
-                opener = urllib.request.build_opener(handler)
+        px = self.proxy_repo.get_by_id(proxy_id)
+        if not px or not px.get("host") or not px.get("port"):
+            logger.warning(
+                "AgentShield Strict Proxy Gate: Blocked DOM scraping for %s (invalid proxy %s)", url, proxy_id
+            )
+            return ""
+
+        if px.get("status") == "leak_detected":
+            logger.warning("Proxy %s is flagged with LEAK DETECTED! Aborting DOM scraping.", proxy_id)
+            return ""
+
+        proto = px.get("protocol", "http")
+        host = px["host"]
+        port = px["port"]
+        usr = px.get("username")
+        pwd = px.get("password")
+        auth = f"{usr}:{pwd}@" if usr and pwd else ""
+        proxy_url = f"{proto}://{auth}{host}:{port}"
+        handler = urllib.request.ProxyHandler({"http": proxy_url, "https": proxy_url})
+        opener = urllib.request.build_opener(handler)
 
         req = urllib.request.Request(
             url,

@@ -146,7 +146,15 @@ class GoLoginTikTokClient:
         cookie_hdr = self.get_profile_cookie_header(profile_id)
         proxy_dict = self.get_profile_proxy(profile_id)
         proxy_url = self._build_proxy_url(proxy_dict)
-        proxies = {"http": proxy_url, "https": proxy_url} if proxy_url else None
+        if not proxy_url:
+            logger.critical(
+                "AgentShield Strict Proxy Gate: Blocked raw HTTP request for profile %s with no proxy configured!",
+                profile_id,
+            )
+            raise PermissionError(
+                f"AgentShield Strict Proxy Gate: Outbound TikTok request blocked because profile {profile_id} has no valid proxy configured."
+            )
+        proxies = {"http": proxy_url, "https": proxy_url}
 
         req_headers = {
             "User-Agent": p.get("user_agent")
