@@ -23,3 +23,4 @@ Khi triển khai kiểm thử trực tiếp trên các tài khoản TikTok thự
 3. **Local Avatar Caching Pipeline**:
    - `avatar_cache_service.download_and_cache_avatar()` lưu ảnh về thư mục đệm cục bộ và cập nhật đường dẫn tuyệt đối vào cột `avatar_path` của bảng `profiles`.
    - `CircularAvatarDelegate` đọc ảnh từ đĩa cục bộ, cắt bo tròn mượt mà, giúp bảng UI hiển thị trực quan mà không bị độ trễ tải mạng.
+
