@@ -19,6 +19,7 @@ dependencies = [
     "cryptography>=44.0.0",
     "pywin32>=308",
     "geoip2>=4.8.0",
+    "psutil>=5.9.0",
     # Private SDK, not on PyPI: install from vendor/ (pip install --find-links vendor ...)
     "sammonny==1.8.1",
 ]

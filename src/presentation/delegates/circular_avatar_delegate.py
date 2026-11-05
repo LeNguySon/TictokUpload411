@@ -8,6 +8,7 @@ Gracefully falls back to a clean placeholder icon if no avatar is cached.
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 from PyQt6.QtCore import QModelIndex, QPointF, QRect, QRectF, Qt
@@ -22,6 +23,22 @@ from PyQt6.QtGui import (
 from PyQt6.QtWidgets import QStyle, QStyledItemDelegate, QStyleOptionViewItem
 
 _AVATAR_PIXMAP_CACHE: dict[str, QPixmap] = {}
+# Paths known to be missing -> monotonic time of the check. Without this, every repaint of every
+# visible row re-stat()ed the disk for avatars that are not downloaded yet (T10).
+_MISSING_AVATARS: dict[str, float] = {}
+MISSING_AVATAR_TTL_S = 30.0
+
+
+def clear_avatar_cache() -> None:
+    _AVATAR_PIXMAP_CACHE.clear()
+    _MISSING_AVATARS.clear()
+
+
+def forget_avatar(path_str: str) -> None:
+    """Drops cached state for one avatar path (e.g. after it was downloaded or replaced)."""
+    _MISSING_AVATARS.pop(path_str, None)
+    for key in [k for k in _AVATAR_PIXMAP_CACHE if k.startswith(f"{path_str}_")]:
+        _AVATAR_PIXMAP_CACHE.pop(key, None)
 
 
 def get_cached_avatar_pixmap(path_str: str, size: int) -> QPixmap | None:
@@ -31,9 +48,17 @@ def get_cached_avatar_pixmap(path_str: str, size: int) -> QPixmap | None:
     cache_key = f"{path_str}_{size}"
     if cache_key in _AVATAR_PIXMAP_CACHE:
         return _AVATAR_PIXMAP_CACHE[cache_key]
-    p = Path(path_str)
-    if not p.exists() or not p.is_file():
+    now = time.monotonic()
+    missing_since = _MISSING_AVATARS.get(path_str)
+    if missing_since is not None and now - missing_since < MISSING_AVATAR_TTL_S:
         return None
+    p = Path(path_str)
+    if not p.is_file():
+        if len(_MISSING_AVATARS) > 5000:
+            _MISSING_AVATARS.clear()
+        _MISSING_AVATARS[path_str] = now
+        return None
+    _MISSING_AVATARS.pop(path_str, None)
     try:
         pix = QPixmap(str(p))
         if not pix.isNull():

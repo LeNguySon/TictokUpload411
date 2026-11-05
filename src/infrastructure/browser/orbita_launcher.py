@@ -9,10 +9,16 @@ import os
 import shutil
 import socket
 import subprocess
+import threading
 from pathlib import Path
 from typing import Any
 
 from src.infrastructure.browser.process_supervisor import BrowserProcessSupervisor
+
+# Process-wide psutil scan cache shared by all OrbitaLauncher instances (see _scan_psutil_for_profile).
+PSUTIL_SCAN_TTL_S = 2.5
+_PSUTIL_SCAN_LOCK = threading.Lock()
+_PSUTIL_SCAN_CACHE: dict[str, Any] = {"time": float("-inf"), "cmdlines": []}
 
 logger = logging.getLogger(__name__)
 
@@ -700,22 +706,28 @@ class OrbitaLauncher:
         uuid_search = uuid_val.lower() if uuid_val and len(uuid_val) > 8 else None
         dir_search = str(Path(storage_dir).resolve()).lower() if storage_dir else None
 
-        now = time.monotonic()
-        if not hasattr(self, "_cached_scan_time") or (now - self._cached_scan_time > 2.5):
-            cmdlines: list[str] = []
-            for proc in psutil.process_iter(["name", "cmdline"]):
-                try:
-                    name = (proc.info.get("name") or "").lower()
-                    if "chrome" not in name and "orbita" not in name:
+        # Single-flight (T9): concurrent psutil.process_iter() calls crash with an access violation
+        # on Windows. One scan at a time, process-wide; callers that waited reuse its fresh result.
+        with _PSUTIL_SCAN_LOCK:
+            now = time.monotonic()
+            if now - _PSUTIL_SCAN_CACHE["time"] > PSUTIL_SCAN_TTL_S:
+                cmdlines: list[str] = []
+                # Only "name" up front: reading the command line of every process is what made a
+                # scan take seconds; fetch it just for chrome/orbita candidates.
+                for proc in psutil.process_iter(["name"]):
+                    try:
+                        name = (proc.info.get("name") or "").lower()
+                        if "chrome" not in name and "orbita" not in name:
+                            continue
+                        cmdline = " ".join(proc.cmdline() or []).lower()
+                        cmdlines.append(cmdline)
+                    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                         continue
-                    cmdline = " ".join(proc.info.get("cmdline") or []).lower()
-                    cmdlines.append(cmdline)
-                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-                    continue
-            self._cached_running_cmdlines = cmdlines
-            self._cached_scan_time = now
+                _PSUTIL_SCAN_CACHE["cmdlines"] = cmdlines
+                _PSUTIL_SCAN_CACHE["time"] = time.monotonic()
+            cached_cmdlines: list[str] = _PSUTIL_SCAN_CACHE["cmdlines"]
 
-        for cmdline in getattr(self, "_cached_running_cmdlines", []):
+        for cmdline in cached_cmdlines:
             if uuid_search and uuid_search in cmdline:
                 return True
             if dir_search and dir_search in cmdline:

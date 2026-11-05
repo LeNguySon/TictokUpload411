@@ -30,6 +30,9 @@ pywin32>=308
 geoip2>=4.8.0
 maxminddb>=2.6.0
 
+# Process inspection (browser runtime status; scans are single-flight, see orbita_launcher)
+psutil>=5.9.0
+
 # Development, Testing & Code Quality
 pytest>=8.3.0
 pytest-qt>=4.4.0

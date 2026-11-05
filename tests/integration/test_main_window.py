@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 from PyQt6.QtWidgets import QApplication
+from src.application.workers.task_worker import process_events_until
 from src.infrastructure.database.migrations.runner import run_all_migrations
 from src.presentation.views.main_window import TikTokManagerMainWindow
 
@@ -58,6 +59,7 @@ def test_main_window_creation_and_layout(qapp):
 
         # Check searching video filters rows
         window.search_video.setText("non_existent_search_query")
+        assert process_events_until(lambda: not window._video_search_timer.isActive())  # debounced search (T10)
         # Video table rows should be hidden
         for r in range(window.video_table.rowCount()):
             assert window.video_table.isRowHidden(r)
@@ -65,6 +67,7 @@ def test_main_window_creation_and_layout(qapp):
 
         # Check searching profile filters rows
         window.search_profile.setText("ghost_profile")
+        assert process_events_until(lambda: not window._profile_search_timer.isActive())  # debounced search (T10)
         for r in range(window.profile_table.rowCount()):
             assert window.profile_table.isRowHidden(r)
         window.search_profile.clear()

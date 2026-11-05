@@ -187,5 +187,5 @@ def test_auto_dispatch_scheduler_dispatches_worker(test_db: Path):
     # Call the auto-dispatch method logic
     TikTokManagerMainWindow._check_scheduled_queue(main_win)
 
-    # Worker should have been dispatched on thread_pool
-    assert main_win.thread_pool.dispatch.called
+    # Worker should have been dispatched on the dedicated upload pool (UI responsiveness T8)
+    assert main_win.thread_pool.dispatch_upload.called

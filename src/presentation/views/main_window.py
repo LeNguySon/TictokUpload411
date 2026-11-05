@@ -60,6 +60,7 @@ from src.infrastructure.database.repositories.proxy_repository import ProxyRepos
 from src.infrastructure.database.repositories.video_repository import VideoRepository
 from src.infrastructure.tiktok.passive_sync_service import PassiveTikTokSyncService
 from src.infrastructure.tiktok.sammonny_adapter import SamMonnyTikTokAdapter
+from src.presentation.delegates.circular_avatar_delegate import forget_avatar
 from src.presentation.dialogs.add_profile_dialog import AddProfileDialog
 from src.presentation.dialogs.api_cookie_dialog import ApiCookieDialog
 from src.presentation.dialogs.assign_project_dialog import AssignProjectDialog
@@ -81,6 +82,8 @@ from src.presentation.widgets.profile_table_widget import ProfileTableWidget
 from src.presentation.widgets.video_queue_table_widget import VideoQueueTableWidget
 
 PROFILE_PATCH_COALESCE_MS = 250
+SEARCH_DEBOUNCE_MS = 200
+UPLOAD_NOTICE_COALESCE_MS = 1500
 
 logger = logging.getLogger(__name__)
 
@@ -167,6 +170,24 @@ class TikTokManagerMainWindow(QMainWindow):
         # Generation tokens: only the latest async table load is applied (T5).
         self._profile_load_gen = 0
         self._video_load_gen = 0
+
+        # Search boxes filter after typing pauses, not on every keystroke (T10).
+        self._profile_search_timer = QTimer(self)
+        self._profile_search_timer.setSingleShot(True)
+        self._profile_search_timer.setInterval(SEARCH_DEBOUNCE_MS)
+        self._profile_search_timer.timeout.connect(lambda: self._apply_profile_filter())
+        self._video_search_timer = QTimer(self)
+        self._video_search_timer.setSingleShot(True)
+        self._video_search_timer.setInterval(SEARCH_DEBOUNCE_MS)
+        self._video_search_timer.timeout.connect(lambda: self._apply_video_filter())
+
+        # Upload completion/failure notices are aggregated into one InfoBar per burst (T10).
+        self._upload_notice_done: list[tuple[int, str]] = []
+        self._upload_notice_failed: list[tuple[int, str]] = []
+        self._upload_notice_timer = QTimer(self)
+        self._upload_notice_timer.setSingleShot(True)
+        self._upload_notice_timer.setInterval(UPLOAD_NOTICE_COALESCE_MS)
+        self._upload_notice_timer.timeout.connect(self._flush_upload_notices)
 
         # Coalesces bursts of profile_updated signals into one row-patch pass (T3).
         self._pending_profile_patches: dict[int, dict[str, Any]] = {}
@@ -463,6 +484,8 @@ class TikTokManagerMainWindow(QMainWindow):
         if gen != self._profile_load_gen:
             return  # superseded by a newer refresh
         self.profile_table.load_profiles(profiles)
+        if self.search_profile.text().strip():
+            self._apply_profile_filter()
         self._trigger_async_status_sync(profiles, force=True)
 
     def _sync_active_profile_statuses(self) -> None:
@@ -571,6 +594,8 @@ class TikTokManagerMainWindow(QMainWindow):
         if gen != self._video_load_gen:
             return
         self.video_table.load_videos(videos)
+        if self.search_video.text().strip():
+            self._apply_video_filter()
         self.lbl_video_header.setText(f"Bảng video Đã chọn 0 / {len(videos)}")
 
     def _on_project_changed(self) -> None:
@@ -578,7 +603,15 @@ class TikTokManagerMainWindow(QMainWindow):
         self.refresh_videos()
 
     def _on_search_profile(self, text: str) -> None:
-        filter_text = text.strip().lower()
+        """Debounced: clearing the box restores all rows at once; typing filters after a pause."""
+        if text.strip():
+            self._profile_search_timer.start()
+        else:
+            self._profile_search_timer.stop()
+            self._apply_profile_filter()
+
+    def _apply_profile_filter(self) -> None:
+        filter_text = self.search_profile.text().strip().lower()
         for row in range(self.profile_table.rowCount()):
             matched = False
             for col in (2, 4, 6, 11):  # Name, Proxy, ID Tiktok, Email
@@ -589,7 +622,15 @@ class TikTokManagerMainWindow(QMainWindow):
             self.profile_table.setRowHidden(row, not matched if filter_text else False)
 
     def _on_search_video(self, text: str) -> None:
-        filter_text = text.strip().lower()
+        """Debounced like _on_search_profile."""
+        if text.strip():
+            self._video_search_timer.start()
+        else:
+            self._video_search_timer.stop()
+            self._apply_video_filter()
+
+    def _apply_video_filter(self) -> None:
+        filter_text = self.search_video.text().strip().lower()
         for row in range(self.video_table.rowCount()):
             item = self.video_table.item(row, 1)  # Col 1: Tiêu đề
             matched = not filter_text or (item and filter_text in item.text().lower())
@@ -1741,7 +1782,7 @@ class TikTokManagerMainWindow(QMainWindow):
                             signal_bus=self.signal_bus,
                             schedule_time=sched_time,
                         )
-                        self.thread_pool.dispatch(worker)
+                        self.thread_pool.dispatch_upload(worker)
                     updated_count += 1
             self.refresh_videos()
             title_msg = "Đã Lên Lịch TikTok Studio" if is_studio else "Đã Lên Lịch Tự Động"
@@ -1784,7 +1825,7 @@ class TikTokManagerMainWindow(QMainWindow):
                             signal_bus=self.signal_bus,
                             schedule_time=sched_time,
                         )
-                        self.thread_pool.dispatch(worker)
+                        self.thread_pool.dispatch_upload(worker)
                     updated_count += 1
             self.refresh_videos()
             title_msg = "Đã Lên Lịch TikTok Studio" if is_studio else "Đã Lên Lịch Đăng"
@@ -1833,7 +1874,7 @@ class TikTokManagerMainWindow(QMainWindow):
                     upload_service=self.upload_service,
                     signal_bus=self.signal_bus,
                 )
-                self.thread_pool.dispatch(worker)
+                self.thread_pool.dispatch_upload(worker)
                 dispatched += 1
 
             if dispatched > 0:
@@ -1941,7 +1982,7 @@ class TikTokManagerMainWindow(QMainWindow):
                 upload_service=self.upload_service,
                 signal_bus=self.signal_bus,
             )
-            self.thread_pool.dispatch(worker)
+            self.thread_pool.dispatch_upload(worker)
             dispatched += 1
 
         InfoBar.info(
@@ -1977,12 +2018,7 @@ class TikTokManagerMainWindow(QMainWindow):
 
     def _on_upload_completed(self, video_id: int, publish_id: str) -> None:
         self.video_table.append_log(video_id, "", "SUCCESS", f"Xuất bản thành công: {publish_id}", "SUCCESS")
-        InfoBar.success(
-            title="Upload Hoàn Tất",
-            content=f"Video #{video_id} đã xuất bản thành công & cách ly vào _posted/: {publish_id}",
-            position=InfoBarPosition.TOP,
-            parent=self,
-        )
+        self._queue_upload_notice(self._upload_notice_done, video_id, publish_id)
 
         # Isolation moves the file into _posted/ (a full copy across drives) and auto-advance
         # reads the queue: both run off the GUI thread (T7).
@@ -2013,18 +2049,55 @@ class TikTokManagerMainWindow(QMainWindow):
                 upload_service=self.upload_service,
                 signal_bus=self.signal_bus,
             )
-            self.thread_pool.dispatch(worker)
+            self.thread_pool.dispatch_upload(worker)
 
         self._run_bg(_post_upload, on_result=_advance)
 
     def _on_upload_failed(self, video_id: int, error: str) -> None:
         self.video_table.set_video_error(video_id, error)
-        InfoBar.error(
-            title="Upload Thất Bại",
-            content=f"Video #{video_id} gặp sự cố: {error}",
-            position=InfoBarPosition.TOP,
-            parent=self,
-        )
+        self._queue_upload_notice(self._upload_notice_failed, video_id, error)
+
+    def _queue_upload_notice(self, bucket: list[tuple[int, str]], video_id: int, detail: str) -> None:
+        bucket.append((video_id, detail))
+        if not self._upload_notice_timer.isActive():
+            self._upload_notice_timer.start()
+
+    def _flush_upload_notices(self) -> None:
+        """One InfoBar per outcome per burst; a single event keeps its detailed message."""
+        done, self._upload_notice_done = self._upload_notice_done, []
+        failed, self._upload_notice_failed = self._upload_notice_failed, []
+        if len(done) == 1:
+            vid, publish_id = done[0]
+            InfoBar.success(
+                title="Upload Hoàn Tất",
+                content=f"Video #{vid} đã xuất bản thành công & cách ly vào _posted/: {publish_id}",
+                position=InfoBarPosition.TOP,
+                parent=self,
+            )
+        elif done:
+            ids = ", ".join(f"#{vid}" for vid, _ in done[:8]) + (" …" if len(done) > 8 else "")
+            InfoBar.success(
+                title="Upload Hoàn Tất",
+                content=f"{len(done)} video đã xuất bản thành công & cách ly vào _posted/: {ids}",
+                position=InfoBarPosition.TOP,
+                parent=self,
+            )
+        if len(failed) == 1:
+            vid, error = failed[0]
+            InfoBar.error(
+                title="Upload Thất Bại",
+                content=f"Video #{vid} gặp sự cố: {error}",
+                position=InfoBarPosition.TOP,
+                parent=self,
+            )
+        elif failed:
+            ids = ", ".join(f"#{vid}" for vid, _ in failed[:8]) + (" …" if len(failed) > 8 else "")
+            InfoBar.error(
+                title="Upload Thất Bại",
+                content=f"{len(failed)} video gặp sự cố: {ids} (xem cột Nhật Ký Upload)",
+                position=InfoBarPosition.TOP,
+                parent=self,
+            )
 
     def _on_profile_updated(self, profile_id: int, fields: dict) -> None:
         """Queues a row patch; bursts from sync/sniffer workers are applied in one pass."""
@@ -2053,6 +2126,8 @@ class TikTokManagerMainWindow(QMainWindow):
             ):
                 needs_full_refresh = True
                 continue
+            if fields.get("avatar_path"):
+                forget_avatar(str(fields["avatar_path"]))  # newly downloaded avatar: drop "missing" cache
             stt_item = self.profile_table.item(row, 0)
             prof = stt_item.data(Qt.ItemDataRole.UserRole) if stt_item else None
             merged = {**(prof if isinstance(prof, dict) else {"id": profile_id}), **fields}
@@ -2096,7 +2171,7 @@ class TikTokManagerMainWindow(QMainWindow):
                 upload_service=self.upload_service,
                 signal_bus=self.signal_bus,
             )
-            self.thread_pool.dispatch(worker)
+            self.thread_pool.dispatch_upload(worker)
             dispatched += 1
 
         InfoBar.info(

@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 import pytest
 from PyQt6.QtWidgets import QApplication
-from src.application.workers.task_worker import drain_ui_tasks
+from src.application.workers.task_worker import drain_ui_tasks, process_events_until
 from src.infrastructure.database.migrations.runner import run_all_migrations
 from src.infrastructure.database.repositories.profile_repository import ProfileRepository
 from src.infrastructure.database.repositories.project_repository import ProjectRepository
@@ -169,6 +169,7 @@ def test_toolbar_buttons_and_filtering_metrics(populated_db, app_instance):
 
         # 2. Profile Search LineEdit Metrics
         win.search_profile.setText("kr1@example.com")
+        assert process_events_until(lambda: not win._profile_search_timer.isActive())  # debounced search (T10)
         hidden_count = sum(1 for r in range(win.profile_table.rowCount()) if win.profile_table.isRowHidden(r))
         visible_count = sum(1 for r in range(win.profile_table.rowCount()) if not win.profile_table.isRowHidden(r))
         assert visible_count == 1
@@ -180,6 +181,7 @@ def test_toolbar_buttons_and_filtering_metrics(populated_db, app_instance):
 
         # 3. Video Search LineEdit Metrics
         win.search_video.setText("korea")
+        assert process_events_until(lambda: not win._video_search_timer.isActive())  # debounced search (T10)
         v_visible = sum(1 for r in range(win.video_table.rowCount()) if not win.video_table.isRowHidden(r))
         v_hidden = sum(1 for r in range(win.video_table.rowCount()) if win.video_table.isRowHidden(r))
         assert v_visible == 1
@@ -365,7 +367,8 @@ def test_video_queue_context_menu_actions_and_metrics(populated_db, app_instance
         vid_id = selected_vid[0]["id"]
 
         # 1. act_upload (Upload Now)
-        with patch.object(win.thread_pool, "dispatch") as mock_dispatch:
+        # Uploads run on the dedicated upload pool since UI responsiveness T8
+        with patch.object(win.thread_pool, "dispatch_upload") as mock_dispatch:
             win.video_table.upload_now_requested.emit([vid_id])
             assert mock_dispatch.called
 

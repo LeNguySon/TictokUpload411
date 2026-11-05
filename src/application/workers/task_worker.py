@@ -110,3 +110,14 @@ def drain_ui_tasks(timeout_s: float = 5.0) -> bool:
                 return True
         time.sleep(0.005)
     return False
+
+
+def process_events_until(predicate: Callable[[], bool], timeout_s: float = 5.0) -> bool:
+    """Processes Qt events until ``predicate()`` is true (e.g. a debounce timer has fired)."""
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        QCoreApplication.processEvents()
+        if predicate():
+            return True
+        time.sleep(0.005)
+    return predicate()
