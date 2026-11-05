@@ -16,6 +16,7 @@ from src.infrastructure.database.connection import DEFAULT_DB_PATH
 from src.infrastructure.database.migrations.runner import run_all_migrations
 from src.infrastructure.logging.redaction_logger import configure_app_logger
 from src.presentation.views.main_window import TikTokManagerMainWindow
+from src.presentation.widgets.fluent_compat import apply_fluent_compat_patches
 
 logger = logging.getLogger("tavm")
 
@@ -59,6 +60,7 @@ def main() -> None:
     QApplication.setHighDpiScaleFactorRoundingPolicy(Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
 
     app = QApplication(sys.argv)
+    apply_fluent_compat_patches()  # SpinBox value invisible on Qt 6.12 + Fluent 1.11 otherwise
     app.setApplicationName("SSMATool Reup Tiktok")
     app.setOrganizationName("Goepro")
 

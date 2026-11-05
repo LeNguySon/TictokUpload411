@@ -19,6 +19,7 @@ from src.presentation.dialogs.dialog_helpers import (
     STANDARD_DIALOG_MARGINS,
     STANDARD_DIALOG_SPACING,
     create_dialog_header,
+    style_tab_widget,
 )
 
 USER_GUIDE_CONTENT = {
@@ -134,7 +135,7 @@ class UserGuideDialog(QDialog):
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("📖 Hướng Dẫn Sử Dụng & Vận Hành Hệ Thống TikTok Manager")
+        self.setWindowTitle("Hướng Dẫn Sử Dụng & Vận Hành Hệ Thống TikTok Manager")
         self.resize(800, 600)
         self._init_ui()
 
@@ -155,7 +156,7 @@ class UserGuideDialog(QDialog):
         )
         layout.addWidget(header)
 
-        self.tabs = QTabWidget(self)
+        self.tabs = style_tab_widget(QTabWidget(self))
 
         def make_tab(markdown_text: str) -> QWidget:
             tab = QWidget()
@@ -167,16 +168,16 @@ class UserGuideDialog(QDialog):
             t_layout.addWidget(browser)
             return tab
 
-        self.tabs.addTab(make_tab(USER_GUIDE_CONTENT["quick_start"]), "🚀 Bắt Đầu Nhanh")
-        self.tabs.addTab(make_tab(USER_GUIDE_CONTENT["mmo_columns"]), "📊 28 Cột MMO")
-        self.tabs.addTab(make_tab(USER_GUIDE_CONTENT["proxy_security"]), "🛡️ Chống Leak Proxy")
-        self.tabs.addTab(make_tab(USER_GUIDE_CONTENT["upload_modes"]), "⚡ 3 Chế Độ Upload")
-        self.tabs.addTab(make_tab(USER_GUIDE_CONTENT["shortcuts"]), "⌨️ Phím Tắt")
+        self.tabs.addTab(make_tab(USER_GUIDE_CONTENT["quick_start"]), "Bắt Đầu Nhanh")
+        self.tabs.addTab(make_tab(USER_GUIDE_CONTENT["mmo_columns"]), "28 Cột MMO")
+        self.tabs.addTab(make_tab(USER_GUIDE_CONTENT["proxy_security"]), "Chống Leak Proxy")
+        self.tabs.addTab(make_tab(USER_GUIDE_CONTENT["upload_modes"]), "3 Chế Độ Upload")
+        self.tabs.addTab(make_tab(USER_GUIDE_CONTENT["shortcuts"]), "Phím Tắt")
 
         layout.addWidget(self.tabs)
 
         btn_layout = QHBoxLayout()
-        btn_close = PushButton("Đã Hiểu & Đóng", self)
+        btn_close = PushButton("Đã Hiểu && Đóng", self)
         btn_close.clicked.connect(self.accept)
         btn_layout.addStretch()
         btn_layout.addWidget(btn_close)

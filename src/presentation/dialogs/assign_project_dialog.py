@@ -94,11 +94,11 @@ class AssignProjectDialog(QDialog):
 
     def _populate_projects(self) -> None:
         self.combo_project.clear()
-        self.combo_project.addItem("📁 Không phân nhóm (Chưa gán dự án)", userData=None)
+        self.combo_project.addItem("Không phân nhóm (Chưa gán dự án)", userData=None)
 
         projects = self.project_repo.list_all()
         for p in projects:
-            self.combo_project.addItem(f"📁 {p['name']}", userData=p["id"])
+            self.combo_project.addItem(p["name"], userData=p["id"])
 
     def _on_apply(self) -> None:
         chosen_project_id = self.combo_project.currentData()

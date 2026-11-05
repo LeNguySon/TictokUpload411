@@ -9,8 +9,9 @@ from __future__ import annotations
 from typing import Any
 
 from PyQt6.QtCore import QModelIndex, QRectF, QSize, Qt
-from PyQt6.QtGui import QColor, QFont, QPainter, QPen
-from PyQt6.QtWidgets import QStyle, QStyledItemDelegate, QStyleOptionViewItem
+from PyQt6.QtGui import QColor, QFont, QPainter
+from PyQt6.QtWidgets import QStyledItemDelegate, QStyleOptionViewItem
+from qfluentwidgets import isDarkTheme
 
 # Badge styling: (bg_light, border_light, text_light, dot_light, bg_dark, border_dark, text_dark, dot_dark, label)
 STATUS_THEMES: dict[str, tuple[str, str, str, str, str, str, str, str, str]] = {
@@ -125,73 +126,41 @@ def get_status_config(status_raw: Any, is_light: bool = True) -> tuple[str, str,
     return cfg[4], cfg[5], cfg[6], cfg[7], cfg[8]
 
 
+def status_text_color(status_raw: Any) -> QColor:
+    """Readable text color of a status for the current Fluent theme (light app -> dark tones)."""
+    _, _, text_col, _, _ = get_status_config(status_raw, is_light=not isDarkTheme())
+    return QColor(text_col)
+
+
 class StatusBadgeDelegate(QStyledItemDelegate):
     """
-    Paints a modern rounded pill status badge matching enterprise antidetect dashboards.
-    Prevents text elision ('stop...') by computing explicit geometry with sub-pixel antialiasing.
+    Paints the status as colored text only (no pill, border or dot), centered in the cell.
+    Row hover/selection backgrounds come from the table's own delegate so the column matches the rest
+    of the row. The theme comes from qfluentwidgets: the Fluent table palette's base color is
+    transparent, so palette-based detection always picked the dark palette in the light app.
     """
 
     def paint(self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex) -> None:  # type: ignore[override]
-        painter.save()
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        painter.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
-        rect = option.rect
+        row_delegate = getattr(self.parent(), "delegate", None)
+        if row_delegate is not None and hasattr(row_delegate, "paint_row_background"):
+            row_delegate.paint_row_background(painter, option, index)
 
-        is_light = option.palette.base().color().lightness() > 128
-
-        # Background row hover / selection highlight
-        if option.state & QStyle.StateFlag.State_Selected:
-            painter.fillRect(rect, QColor("#E0F2FE" if is_light else "#1E293B"))
-        elif option.state & QStyle.StateFlag.State_MouseOver:
-            painter.fillRect(rect, QColor("#F8FAFC" if is_light else "#1A2234"))
-
-        # Extract status key
         user_data = index.data(Qt.ItemDataRole.UserRole)
         display_data = index.data(Qt.ItemDataRole.DisplayRole)
         status_key = user_data if user_data is not None else display_data
+        label_text = get_status_config(status_key)[4]
 
-        bg_col, border_col, text_col, dot_col, label_text = get_status_config(status_key, is_light=is_light)
-
-        # Compute pill width adaptively based on label length
-        pill_w = 104.0 if len(label_text) >= 8 else 92.0
-        pill_h = 24.0
-
-        # Perfectly center pill inside the table cell
-        pill_x = float(rect.x() + max(4.0, (rect.width() - pill_w) / 2))
-        pill_y = float(rect.y() + (rect.height() - pill_h) / 2)
-        pill_rect = QRectF(pill_x, pill_y, pill_w, pill_h)
-
-        # 1. Draw Pill Background & Border
-        painter.setPen(QPen(QColor(border_col), 1.0))
-        painter.setBrush(QColor(bg_col))
-        painter.drawRoundedRect(pill_rect, 12.0, 12.0)
-
-        # 2. Draw Glowing Status Dot
-        dot_r = 3.5
-        dot_cx = pill_x + 11.0
-        dot_cy = pill_y + (pill_h / 2)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(dot_col))
-        painter.drawEllipse(QRectF(dot_cx - dot_r, dot_cy - dot_r, dot_r * 2, dot_r * 2))
-
-        # 3. Draw Localized Text Label
-        font = QFont("Segoe UI", 9)
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
+        font = QFont(option.font)
         font.setWeight(QFont.Weight.DemiBold)
         painter.setFont(font)
-        painter.setPen(QColor(text_col))
-
-        # Text area offset right from the dot
-        text_rect = QRectF(pill_x + 18.0, pill_y, pill_w - 22.0, pill_h)
-        painter.drawText(
-            text_rect,
-            int(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignCenter),
-            label_text,
-        )
-
+        painter.setPen(status_text_color(status_key))
+        painter.drawText(QRectF(option.rect), int(Qt.AlignmentFlag.AlignCenter), label_text)
         painter.restore()
 
     def sizeHint(self, option: QStyleOptionViewItem, index: QModelIndex) -> QSize:  # type: ignore[override]
         return QSize(125, 34)
 
 
-__all__ = ["STATUS_THEMES", "StatusBadgeDelegate", "get_status_config"]
+__all__ = ["STATUS_THEMES", "StatusBadgeDelegate", "get_status_config", "status_text_color"]

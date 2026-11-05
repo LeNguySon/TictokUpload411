@@ -6,13 +6,13 @@ Windows 11 Fluent Design styling.
 from typing import Any
 
 from PyQt6.QtWidgets import (
-    QCheckBox,
     QDialog,
     QFormLayout,
     QHBoxLayout,
     QVBoxLayout,
 )
 from qfluentwidgets import (
+    CheckBox,
     ComboBox,
     FluentIcon,
     InfoBar,
@@ -32,6 +32,7 @@ from src.presentation.dialogs.dialog_helpers import (
     STANDARD_DIALOG_MARGINS,
     STANDARD_DIALOG_SPACING,
     create_dialog_header,
+    fit_dialog_to_content,
 )
 
 
@@ -56,6 +57,7 @@ class BulkEditProfileDialog(QDialog):
         self.setWindowTitle("Cập Nhật Thông Tin Hàng Loạt")
         self.resize(520, 480)
         self._init_ui()
+        fit_dialog_to_content(self)
 
     def exec(self) -> int:
         """Explicit Python wrapper over QDialog.exec for testability and lifecycle hooks."""
@@ -79,7 +81,7 @@ class BulkEditProfileDialog(QDialog):
         form.setSpacing(10)
 
         # 1. Project
-        self.chk_project = QCheckBox("Dự án / Nhóm:", self)
+        self.chk_project = CheckBox("Dự án / Nhóm:", self)
         self.combo_project = ComboBox(self)
         self.combo_project.addItem("Chưa gán dự án", userData=None)
         for proj in self.project_repo.list_all():
@@ -89,7 +91,7 @@ class BulkEditProfileDialog(QDialog):
         form.addRow(self.chk_project, self.combo_project)
 
         # 2. Status
-        self.chk_status = QCheckBox("Trạng thái tài khoản:", self)
+        self.chk_status = CheckBox("Trạng thái tài khoản:", self)
         self.combo_status = ComboBox(self)
         for stat in ("LIVE", "DIE", "CHECKPOINT", "stopped"):
             self.combo_status.addItem(stat, userData=stat)
@@ -98,7 +100,7 @@ class BulkEditProfileDialog(QDialog):
         form.addRow(self.chk_status, self.combo_status)
 
         # 3. Country (QG)
-        self.chk_qg = QCheckBox("Quốc gia (QG):", self)
+        self.chk_qg = CheckBox("Quốc gia (QG):", self)
         self.input_qg = LineEdit(self)
         self.input_qg.setPlaceholderText("Ví dụ: US, UK, DE, VN, FR...")
         self.input_qg.setEnabled(False)
@@ -106,7 +108,7 @@ class BulkEditProfileDialog(QDialog):
         form.addRow(self.chk_qg, self.input_qg)
 
         # 4. Privacy
-        self.chk_privacy = QCheckBox("Chế độ hiển thị:", self)
+        self.chk_privacy = CheckBox("Chế độ hiển thị:", self)
         self.combo_privacy = ComboBox(self)
         for priv in ("PUBLIC", "PRIVATE", "FRIENDS"):
             self.combo_privacy.addItem(priv, userData=priv)
@@ -115,7 +117,7 @@ class BulkEditProfileDialog(QDialog):
         form.addRow(self.chk_privacy, self.combo_privacy)
 
         # 5. Note
-        self.chk_note = QCheckBox("Ghi chú (Note):", self)
+        self.chk_note = CheckBox("Ghi chú (Note):", self)
         self.input_note = LineEdit(self)
         self.input_note.setPlaceholderText("Nhập ghi chú áp dụng chung...")
         self.input_note.setEnabled(False)

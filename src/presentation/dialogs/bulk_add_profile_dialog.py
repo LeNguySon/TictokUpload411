@@ -9,7 +9,6 @@ from typing import Any
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
-    QCheckBox,
     QDialog,
     QHBoxLayout,
     QHeaderView,
@@ -18,6 +17,7 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
 )
 from qfluentwidgets import (
+    CheckBox,
     ComboBox,
     FluentIcon,
     InfoBar,
@@ -121,7 +121,7 @@ class BulkAddProfileDialog(QDialog):
         row2_layout = QHBoxLayout()
         row2_layout.addWidget(QLabel("Định dạng nhập:"))
         self.combo_preset = ComboBox(self)
-        self.combo_preset.addItem("⭐ Chuẩn TikTok MMO (8 trường)", userData="mmo_8_fields")
+        self.combo_preset.addItem("Chuẩn TikTok MMO (8 trường)", userData="mmo_8_fields")
         self.combo_preset.addItem("Chuẩn Cũ (5 trường: Tên|Proxy|Cookie|Email|Ghi chú)", userData="legacy_5_fields")
         self.combo_preset.addItem("Cơ Bản (3 trường: User|Pass|Cookie)", userData="basic_3_fields")
         self.combo_preset.addItem(
@@ -146,12 +146,11 @@ class BulkAddProfileDialog(QDialog):
         layout.addLayout(row_custom)
 
         # Auto-inject cookie option
-        self.chk_auto_inject_cookie = QCheckBox(
-            "Nạp Cookie trực tiếp vào trình duyệt & Tự động đăng nhập TikTok (Zero-Click Auto-Login)",
+        self.chk_auto_inject_cookie = CheckBox(
+            "Nạp Cookie trực tiếp vào trình duyệt && Tự động đăng nhập TikTok (Zero-Click Auto-Login)",
             self,
         )
         self.chk_auto_inject_cookie.setChecked(True)
-        self.chk_auto_inject_cookie.setStyleSheet("font-weight: bold; color: #107C41;")
         layout.addWidget(self.chk_auto_inject_cookie)
 
         # 3. Input Text Box
@@ -322,10 +321,10 @@ class BulkAddProfileDialog(QDialog):
             status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             if cookie_val:
                 if "sessionid=" in cookie_val:
-                    status_item.setText("✅ Sẵn sàng đăng nhập")
+                    status_item.setText("Sẵn sàng đăng nhập")
                     status_item.setForeground(QColor("#107C41"))
                 else:
-                    status_item.setText("⚠️ Thiếu sessionid")
+                    status_item.setText("Thiếu sessionid")
                     status_item.setForeground(QColor("#D83B01"))
             else:
                 status_item.setText("Không có cookie")

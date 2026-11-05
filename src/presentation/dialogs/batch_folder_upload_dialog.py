@@ -14,6 +14,7 @@ from PyQt6.QtCore import Qt, QThreadPool, QTimer
 from PyQt6.QtWidgets import (
     QDialog,
     QFileDialog,
+    QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QHeaderView,
@@ -44,6 +45,8 @@ from src.presentation.dialogs.dialog_helpers import (
     STANDARD_DIALOG_MARGINS,
     STANDARD_DIALOG_SPACING,
     create_dialog_header,
+    style_group_box,
+    style_plain_table,
 )
 
 logger = logging.getLogger(__name__)
@@ -54,7 +57,7 @@ SCANNING_TEXT = "⏳ Đang quét..."
 
 
 def scan_text_for(folder: str, count: int) -> str:
-    return f"📁 {count} video" if folder and count > 0 else ("⚠️ 0 video" if folder else "Chưa chọn")
+    return f"{count} video" if folder and count > 0 else ("0 video" if folder else "Chưa chọn")
 
 
 def count_valid_videos_in_folder(folder_path: str) -> int:
@@ -137,11 +140,9 @@ class BatchFolderUploadDialog(QDialog):
 
         # 0. Active Project Indicator Banner
         if self.project_id is not None:
-            p_title = (
-                f"🏷️ Chiến Dịch Mục Tiêu: <b>{self.project_name}</b> (Có thể tích chọn thêm các nhóm khác bên dưới)"
-            )
+            p_title = f"Chiến Dịch Mục Tiêu: <b>{self.project_name}</b> (Có thể tích chọn thêm các nhóm khác bên dưới)"
         else:
-            p_title = "🏷️ Chế Độ Phân Bổ: <b>Hỗ trợ phân bổ đồng thời nhiều Dự án / Nhóm theo thư mục riêng</b>"
+            p_title = "Chế Độ Phân Bổ: <b>Hỗ trợ phân bổ đồng thời nhiều Dự án / Nhóm theo thư mục riêng</b>"
         self.lbl_project_badge = QLabel(p_title, self)
         self.lbl_project_badge.setStyleSheet(
             "background-color: #F3F2F1; border: 1px solid #D2D0CE; border-radius: 6px; padding: 8px 12px; font-size: 13px; color: #0078D4;"
@@ -149,7 +150,8 @@ class BatchFolderUploadDialog(QDialog):
         main_layout.addWidget(self.lbl_project_badge)
 
         # 1. Multi-Project Video Folders Table
-        grp_projects = QGroupBox("1. Danh Sách Các Dự Án / Nhóm & Thư Mục Video Riêng (Multi-Project Folders)", self)
+        grp_projects = QGroupBox("1. Danh Sách Các Dự Án / Nhóm && Thư Mục Video Riêng (Multi-Project Folders)", self)
+        style_group_box(grp_projects)
         layout_proj_v = QVBoxLayout(grp_projects)
         layout_proj_v.setSpacing(6)
 
@@ -166,7 +168,7 @@ class BatchFolderUploadDialog(QDialog):
         proj_btn_row.addWidget(self.lbl_proj_summary)
         layout_proj_v.addLayout(proj_btn_row)
 
-        self.project_table = QTableWidget(self)
+        self.project_table = style_plain_table(QTableWidget(self))
         self.project_table.setColumnCount(5)
         self.project_table.setHorizontalHeaderLabels(
             [
@@ -183,7 +185,9 @@ class BatchFolderUploadDialog(QDialog):
         self.project_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
         self.project_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
         self.project_table.verticalHeader().setVisible(False)
-        self.project_table.setMinimumHeight(140)
+        # Rows host a LineEdit + button: give them room and show 3 rows without scrolling.
+        self.project_table.verticalHeader().setDefaultSectionSize(40)
+        self.project_table.setMinimumHeight(40 * 3 + 34)
         layout_proj_v.addWidget(self.project_table)
 
         # Backward compatibility fields (synced transparently)
@@ -197,6 +201,7 @@ class BatchFolderUploadDialog(QDialog):
 
         # 2. Target Profiles Selection Group
         grp_profiles = QGroupBox("2. Danh Sách Tài Khoản Nhận Video Của Các Nhóm Đã Chọn (Target Profiles)", self)
+        style_group_box(grp_profiles)
         layout_profiles = QVBoxLayout(grp_profiles)
         layout_profiles.setSpacing(6)
 
@@ -213,7 +218,7 @@ class BatchFolderUploadDialog(QDialog):
         btn_row.addWidget(self.lbl_selected_count)
         layout_profiles.addLayout(btn_row)
 
-        self.profile_table = QTableWidget(self)
+        self.profile_table = style_plain_table(QTableWidget(self))
         self.profile_table.setColumnCount(5)
         self.profile_table.setHorizontalHeaderLabels(["Chọn", "ID", "Dự Án / Nhóm", "Tên Tài Khoản", "Quốc Gia"])
         self.profile_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
@@ -222,13 +227,14 @@ class BatchFolderUploadDialog(QDialog):
         self.profile_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
         self.profile_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
         self.profile_table.verticalHeader().setVisible(False)
-        self.profile_table.setMinimumHeight(130)
+        self.profile_table.setMinimumHeight(120)
         layout_profiles.addWidget(self.profile_table)
 
         main_layout.addWidget(grp_profiles)
 
         # 3. Distribution & Publishing Options
-        grp_opts = QGroupBox("3. Cấu Hình Phân Bổ & Lịch Đăng (Distribution Options)", self)
+        grp_opts = QGroupBox("3. Cấu Hình Phân Bổ && Lịch Đăng (Distribution Options)", self)
+        style_group_box(grp_opts)
         layout_opts = QVBoxLayout(grp_opts)
         layout_opts.setSpacing(8)
 
@@ -237,15 +243,9 @@ class BatchFolderUploadDialog(QDialog):
         self.spin_interval = SpinBox(self)
         self.spin_interval.setRange(1, 72)
         self.spin_interval.setValue(12)
+        self.spin_interval.setMinimumWidth(140)
         row1.addWidget(self.spin_interval)
         row1.addStretch()
-
-        self.chk_shuffle = CheckBox("Xáo trộn video ngẫu nhiên (Random Shuffle)", self)
-        self.chk_shuffle.setChecked(True)
-        self.chk_deduplicate = CheckBox("Khử trùng lặp nội dung (SHA-256 Checksum)", self)
-        self.chk_deduplicate.setChecked(True)
-        row1.addWidget(self.chk_shuffle)
-        row1.addWidget(self.chk_deduplicate)
         layout_opts.addLayout(row1)
 
         row2 = QHBoxLayout()
@@ -255,24 +255,39 @@ class BatchFolderUploadDialog(QDialog):
         row2.addWidget(self.txt_spintax, 1)
         layout_opts.addLayout(row2)
 
-        row3 = QHBoxLayout()
+        # Options grid (3 columns): distribution | interaction | quality & labels.
+        # A single horizontal row clipped the labels ("Cho phép Due", "AI-Generatec").
+        self.chk_shuffle = CheckBox("Xáo trộn thứ tự ngẫu nhiên", self)
+        self.chk_shuffle.setChecked(True)
+        self.chk_deduplicate = CheckBox("Khử trùng lặp (SHA-256)", self)
+        self.chk_deduplicate.setChecked(True)
+        self.chk_allow_hd = CheckBox("Upload chất lượng cao (HD)", self)
+        self.chk_allow_hd.setChecked(True)
         self.chk_comment = CheckBox("Cho phép bình luận", self)
         self.chk_comment.setChecked(True)
         self.chk_duet = CheckBox("Cho phép Duet", self)
         self.chk_duet.setChecked(True)
         self.chk_stitch = CheckBox("Cho phép Stitch", self)
         self.chk_stitch.setChecked(True)
-        self.chk_allow_hd = CheckBox("Upload chất lượng cao (HD)", self)
-        self.chk_allow_hd.setChecked(True)
         self.chk_is_ai = CheckBox("Gắn nhãn AI-Generated", self)
 
-        row3.addWidget(self.chk_comment)
-        row3.addWidget(self.chk_duet)
-        row3.addWidget(self.chk_stitch)
-        row3.addWidget(self.chk_allow_hd)
-        row3.addWidget(self.chk_is_ai)
-        row3.addStretch()
-        layout_opts.addLayout(row3)
+        grid_opts = QGridLayout()
+        grid_opts.setHorizontalSpacing(24)
+        grid_opts.setVerticalSpacing(6)
+        for idx, chk in enumerate(
+            (
+                self.chk_shuffle,
+                self.chk_deduplicate,
+                self.chk_allow_hd,
+                self.chk_comment,
+                self.chk_duet,
+                self.chk_stitch,
+                self.chk_is_ai,
+            )
+        ):
+            grid_opts.addWidget(chk, idx // 3, idx % 3)
+        grid_opts.setColumnStretch(3, 1)
+        layout_opts.addLayout(grid_opts)
 
         main_layout.addWidget(grp_opts)
 
@@ -335,7 +350,7 @@ class BatchFolderUploadDialog(QDialog):
                 chk_item.setCheckState(Qt.CheckState.Checked)
 
             # Col 1: Project Name
-            name_item = QTableWidgetItem(f"🏷️ {p_name}")
+            name_item = QTableWidgetItem(p_name)
             name_item.setFlags(Qt.ItemFlag.ItemIsEnabled)
             name_item.setData(Qt.ItemDataRole.UserRole, p_id)
 
@@ -487,7 +502,7 @@ class BatchFolderUploadDialog(QDialog):
             id_item.setFlags(Qt.ItemFlag.ItemIsEnabled)
 
             proj_name = all_projects.get(p.get("project_id")) or "Mặc định"
-            proj_item = QTableWidgetItem(f"🏷️ {proj_name}")
+            proj_item = QTableWidgetItem(proj_name)
             proj_item.setFlags(Qt.ItemFlag.ItemIsEnabled)
 
             name_item = QTableWidgetItem(p.get("name") or p.get("account") or f"Profile #{p['id']}")
@@ -619,11 +634,11 @@ class BatchFolderUploadDialog(QDialog):
 
         def _scan() -> str:
             if not Path(folder_str).is_dir():
-                return "⚠️ Thư mục không tồn tại trên máy tính."
+                return "Thư mục không tồn tại trên máy tính."
             count = count_valid_videos_in_folder(folder_str)
             if count > 0:
-                return f"📁 Đã tìm thấy: {count} video hợp lệ (quét đệ quy toàn bộ thư mục con)"
-            return "⚠️ Thư mục này chưa có file video hợp lệ (.mp4, .mov, .mkv, .webm, .avi)"
+                return f"Đã tìm thấy: {count} video hợp lệ (quét đệ quy toàn bộ thư mục con)"
+            return "Thư mục này chưa có file video hợp lệ (.mp4, .mov, .mkv, .webm, .avi)"
 
         def _apply(text: str) -> None:
             if gen != self._scan_gen:
@@ -641,6 +656,7 @@ class BatchFolderUploadDialog(QDialog):
                     pass
 
         run_task(_scan, on_result=_apply, on_error=_failed)
+
     def _on_cancel_clicked(self) -> None:
         """Cooperative cancel handler terminating worker if active before rejecting."""
         if self.worker and not self.worker.is_cancelled:
@@ -709,7 +725,7 @@ class BatchFolderUploadDialog(QDialog):
         """Updates progress bar and label smoothly on main thread."""
         self.progress_bar.setMaximum(max(1, total))
         self.progress_bar.setValue(current)
-        self.lbl_progress_status.setText(f"🔍 Đang phân tích ({current}/{total}): {msg}")
+        self.lbl_progress_status.setText(f"Đang phân tích ({current}/{total}): {msg}")
 
     def _on_worker_completed(self, items: list[dict[str, Any]]) -> None:
         """Handles successful worker completion."""

@@ -56,12 +56,9 @@ class FastTableItemDelegate(TableItemDelegate):
             return 5
         return 0
 
-    def paint(self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex) -> None:
-        if index.data(Qt.ItemDataRole.CheckStateRole) is not None:
-            # Rare (check-box columns): keep Fluent's full implementation.
-            super().paint(painter, option, index)
-            return
-
+    def paint_row_background(self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex) -> None:
+        """Row hover/pressed/selected/alternate background for one cell (shared by column delegates)."""
+        option = QStyleOptionViewItem(option)
         row, col = index.row(), index.column()
         option.rect.adjust(0, self.margin, 0, -self.margin)
 
@@ -87,6 +84,15 @@ class FastTableItemDelegate(TableItemDelegate):
                 painter.restore()
             else:
                 painter.fillRect(option.rect, brush)  # exact cell rect: overlap would double the alpha at seams
+
+    def paint(self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex) -> None:
+        if index.data(Qt.ItemDataRole.CheckStateRole) is not None:
+            # Rare (check-box columns): keep Fluent's full implementation.
+            super().paint(painter, option, index)
+            return
+
+        self.paint_row_background(painter, option, index)
+        option.rect.adjust(0, self.margin, 0, -self.margin)
 
         QStyledItemDelegate.paint(self, painter, option, index)
 

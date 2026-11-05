@@ -3,7 +3,6 @@ Table Settings Dialog for configuring 28-column visibility preferences with Flue
 """
 
 from PyQt6.QtWidgets import (
-    QCheckBox,
     QDialog,
     QGridLayout,
     QHBoxLayout,
@@ -12,6 +11,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 from qfluentwidgets import (
+    CheckBox,
     FluentIcon,
     PrimaryPushButton,
     PushButton,
@@ -34,10 +34,10 @@ class TableSettingsDialog(QDialog):
         super().__init__(parent)
         self.headers = get_profile_table_headers()
         self.hidden_columns: set[int] = set(hidden_columns or set())
-        self._checkboxes: dict[int, QCheckBox] = {}
+        self._checkboxes: dict[int, CheckBox] = {}
 
         self.setWindowTitle("Cài Đặt Cột Bảng Hồ Sơ (28 Cột MMO)")
-        self.resize(600, 480)
+        self.resize(620, 600)  # 29 Fluent checkboxes fit without a scrollbar
         self._init_ui()
 
     def exec(self) -> int:
@@ -66,7 +66,7 @@ class TableSettingsDialog(QDialog):
 
         # 3 columns layout
         for idx, header in enumerate(self.headers):
-            chk = QCheckBox(f"{idx}. {header}", container)
+            chk = CheckBox(f"{idx}. {header}", container)
             chk.setChecked(idx not in self.hidden_columns)
             self._checkboxes[idx] = chk
             row = idx // 3

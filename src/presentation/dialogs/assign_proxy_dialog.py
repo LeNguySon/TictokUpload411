@@ -37,6 +37,7 @@ from src.presentation.dialogs.dialog_helpers import (
     STANDARD_DIALOG_MARGINS,
     STANDARD_DIALOG_SPACING,
     create_dialog_header,
+    style_tab_widget,
 )
 
 
@@ -83,7 +84,7 @@ class AssignProxyDialog(QDialog):
         layout.addWidget(header)
 
         # Tab Widget for Mode selection
-        self.tabs = QTabWidget(self)
+        self.tabs = style_tab_widget(QTabWidget(self))
 
         # --- Tab 1: Existing Proxies ---
         tab_existing = QWidget()
@@ -192,7 +193,7 @@ class AssignProxyDialog(QDialog):
 
     def _populate_proxies(self) -> None:
         self.combo_proxy.clear()
-        self.combo_proxy.addItem("❌ Không dùng proxy (Gỡ bỏ proxy)", userData=None)
+        self.combo_proxy.addItem("Không dùng proxy (Gỡ bỏ proxy)", userData=None)
 
         proxies = self.proxy_repo.list_all()
         for px in proxies:

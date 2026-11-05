@@ -21,6 +21,7 @@ from src.presentation.dialogs.dialog_helpers import (
     STANDARD_DIALOG_MARGINS,
     STANDARD_DIALOG_SPACING,
     create_dialog_header,
+    fit_dialog_to_content,
 )
 
 
@@ -34,6 +35,7 @@ class PermissionsDialog(QDialog):
         self.setWindowTitle("Cấp Quyền & Ủy Quyền TikTok OAuth 2.0")
         self.resize(520, 340)
         self._init_ui()
+        fit_dialog_to_content(self)
 
     def exec(self) -> int:
         """Explicit Python wrapper over QDialog.exec for testability and lifecycle hooks."""
@@ -75,10 +77,10 @@ class PermissionsDialog(QDialog):
         layout.addLayout(form)
 
         btn_layout = QHBoxLayout()
-        self.btn_gen_url = PushButton("🔗 Tạo Link Ủy Quyền", self)
+        self.btn_gen_url = PushButton(FluentIcon.LINK, "Tạo Link Ủy Quyền", self)
         self.btn_gen_url.clicked.connect(self._on_generate_url)
 
-        self.btn_exchange = PrimaryPushButton("Xác Thực & Nhận Token", self)
+        self.btn_exchange = PrimaryPushButton("Xác Thực && Nhận Token", self)
         self.btn_exchange.clicked.connect(self._on_exchange)
 
         self.btn_close = PushButton("Đóng", self)

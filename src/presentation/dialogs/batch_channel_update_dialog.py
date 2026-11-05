@@ -43,6 +43,7 @@ from src.presentation.dialogs.dialog_helpers import (
     STANDARD_DIALOG_MARGINS,
     STANDARD_DIALOG_SPACING,
     create_dialog_header,
+    style_group_box,
 )
 
 
@@ -88,6 +89,7 @@ class BatchChannelUpdateDialog(QDialog):
 
         # 1. Group Avatar
         grp_avatar = QGroupBox("1. Ảnh Đại Diện (Avatar)", self)
+        style_group_box(grp_avatar)
         lay_avatar = QVBoxLayout(grp_avatar)
         self.chk_avatar = CheckBox("Kích hoạt cập nhật Avatar", grp_avatar)
         self.chk_avatar.setChecked(False)
@@ -113,6 +115,7 @@ class BatchChannelUpdateDialog(QDialog):
 
         # 2. Group Nickname
         grp_nick = QGroupBox("2. Tên Hiển Thị (Nickname)", self)
+        style_group_box(grp_nick)
         lay_nick = QVBoxLayout(grp_nick)
         self.chk_nickname = CheckBox("Kích hoạt cập nhật Nickname", grp_nick)
         self.chk_nickname.setChecked(False)
@@ -131,6 +134,7 @@ class BatchChannelUpdateDialog(QDialog):
 
         # 3. Group Bio Spintax
         grp_bio = QGroupBox("3. Tiểu Sử Kênh (Bio Spintax)", self)
+        style_group_box(grp_bio)
         lay_bio = QVBoxLayout(grp_bio)
         self.chk_bio = CheckBox("Kích hoạt cập nhật Tiểu sử (Bio)", grp_bio)
         self.chk_bio.setChecked(False)

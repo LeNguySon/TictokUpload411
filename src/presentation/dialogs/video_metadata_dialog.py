@@ -5,13 +5,13 @@ Video Metadata Dialog for fine-tuning TikTok video title, tags, and privacy sett
 from typing import Any
 
 from PyQt6.QtWidgets import (
-    QCheckBox,
     QDialog,
     QFormLayout,
     QHBoxLayout,
     QVBoxLayout,
 )
 from qfluentwidgets import (
+    CheckBox,
     ComboBox,
     FluentIcon,
     LineEdit,
@@ -83,15 +83,15 @@ class VideoMetadataDialog(QDialog):
         form.addRow("Chế độ hiển thị:", self.combo_privacy)
 
         # Permissions
-        self.chk_comments = QCheckBox("Cho phép bình luận (Allow Comments)", self)
+        self.chk_comments = CheckBox("Cho phép bình luận (Allow Comments)", self)
         self.chk_comments.setChecked(True)
         form.addRow("Bình luận:", self.chk_comments)
 
-        self.chk_duet = QCheckBox("Cho phép Duet", self)
+        self.chk_duet = CheckBox("Cho phép Duet", self)
         self.chk_duet.setChecked(True)
         form.addRow("Duet:", self.chk_duet)
 
-        self.chk_stitch = QCheckBox("Cho phép Stitch", self)
+        self.chk_stitch = CheckBox("Cho phép Stitch", self)
         self.chk_stitch.setChecked(True)
         form.addRow("Stitch:", self.chk_stitch)
 

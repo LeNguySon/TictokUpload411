@@ -36,6 +36,10 @@ from src.presentation.dialogs.dialog_helpers import (
     STANDARD_DIALOG_MARGINS,
     STANDARD_DIALOG_SPACING,
     create_dialog_header,
+    fit_dialog_to_content,
+    status_color,
+    style_card,
+    style_group_box,
 )
 
 
@@ -60,6 +64,7 @@ class ChannelRadarDialog(QDialog):
         self.setWindowTitle("Radar Đánh Giá Sức Khỏe Kênh TikTok MMO")
         self.resize(600, 640)
         self._analyze_and_init_ui()
+        fit_dialog_to_content(self)
 
     def exec(self) -> int:
         """Explicit Python wrapper over QDialog.exec for testability and lifecycle hooks."""
@@ -145,76 +150,70 @@ class ChannelRadarDialog(QDialog):
         self.lbl_verdict_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         if report.verdict == ChannelVerdict.ENOUGH:
-            self.lbl_verdict_badge.setText("🏆 ĐỦ ĐIỀU KIỆN BẬT KIẾM TIỀN (CRP ELIGIBLE)")
-            badge_frame.setStyleSheet(
-                "background-color: #FEF3C7; border: 1.5px solid #F59E0B; border-radius: 8px; font-weight: bold; font-size: 14px; color: #B45309;"
-            )
+            verdict_text, verdict_kind = "ĐỦ ĐIỀU KIỆN BẬT KIẾM TIỀN (CRP ELIGIBLE)", "warning"
         elif report.verdict == ChannelVerdict.BUFF:
-            self.lbl_verdict_badge.setText("⚠️ NGHỈ NGỜ BUFF VIEW ẢO (LOW ENGAGEMENT)")
-            badge_frame.setStyleSheet(
-                "background-color: #FEE2E2; border: 1.5px solid #EF4444; border-radius: 8px; font-weight: bold; font-size: 14px; color: #991B1B;"
-            )
+            verdict_text, verdict_kind = "NGHI NGỜ BUFF VIEW ẢO (LOW ENGAGEMENT)", "danger"
         else:
-            self.lbl_verdict_badge.setText("✅ PHÂN PHỐI TỰ NHIÊN (ORGANIC REACH)")
-            badge_frame.setStyleSheet(
-                "background-color: #D1FAE5; border: 1.5px solid #10B981; border-radius: 8px; font-weight: bold; font-size: 14px; color: #065F46;"
-            )
+            verdict_text, verdict_kind = "PHÂN PHỐI TỰ NHIÊN (ORGANIC REACH)", "success"
+        self.lbl_verdict_badge.setText(verdict_text)
+        self.lbl_verdict_badge.setStyleSheet(
+            f"font-weight: 600; font-size: 14px; color: {status_color(verdict_kind)}; background: transparent;"
+        )
+        style_card(badge_frame, kind=verdict_kind, object_name="verdictBadge")
 
         badge_layout.addWidget(self.lbl_verdict_badge)
         layout.addWidget(badge_frame)
 
         # Grid of Cards
-        grp_metrics = QGroupBox("Chỉ Số Sức Khỏe & Thống Kê Tổng Hợp", self)
+        grp_metrics = QGroupBox("Chỉ Số Sức Khỏe && Thống Kê Tổng Hợp", self)
+        style_group_box(grp_metrics)
         grid = QGridLayout(grp_metrics)
         grid.setSpacing(10)
 
-        def make_card(title: str, val: str, color: str = "#0078D4") -> QFrame:
-            card = QFrame()
-            card.setStyleSheet(
-                "background-color: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 6px; padding: 6px;"
-            )
+        def make_card(title: str, val: str, kind: str = "info") -> QFrame:
+            card = style_card(QFrame(), object_name="metricCard")
             c_lay = QVBoxLayout(card)
-            c_lay.setContentsMargins(8, 6, 8, 6)
+            c_lay.setContentsMargins(12, 8, 12, 8)
+            c_lay.setSpacing(2)
             t_lbl = QLabel(title)
-            t_lbl.setStyleSheet("font-size: 11px; color: #64748B;")
+            t_lbl.setStyleSheet(f"font-size: 11px; color: {status_color('neutral')};")
             v_lbl = QLabel(val)
-            v_lbl.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {color};")
+            v_lbl.setStyleSheet(f"font-size: 16px; font-weight: 600; color: {status_color(kind)};")
             c_lay.addWidget(t_lbl)
             c_lay.addWidget(v_lbl)
             return card
 
         grid.addWidget(make_card("Lượt Theo Dõi", f"{followers:,}"), 0, 0)
         grid.addWidget(make_card("View 30 Ngày", f"{views_30d:,}"), 0, 1)
-        grid.addWidget(make_card("Tỷ Lệ Tương Tác", f"{report.signals.engagement_pct:.2f}%", "#107C41"), 0, 2)
+        grid.addWidget(make_card("Tỷ Lệ Tương Tác", f"{report.signals.engagement_pct:.2f}%", "success"), 0, 2)
         grid.addWidget(make_card("Trung Vị Lượt Xem", f"{int(report.signals.median_views):,}"), 1, 0)
-        grid.addWidget(make_card("Giờ Đăng Tối Ưu", f"{report.best_posting_hour}:00", "#D83B01"), 1, 1)
+        grid.addWidget(make_card("Giờ Đăng Tối Ưu", f"{report.best_posting_hour}:00", "warning"), 1, 1)
 
-        alert_color = "#D83B01" if low_alert.get("alert") else "#107C41"
-        alert_text = f"⚠️ Flop ({low_alert.get('risk_score', 0)}%)" if low_alert.get("alert") else "✅ An Toàn (0%)"
-        grid.addWidget(make_card("Cảnh Báo Flop/Shadowban", alert_text, alert_color), 1, 2)
+        alert_kind = "danger" if low_alert.get("alert") else "success"
+        alert_text = f"Flop ({low_alert.get('risk_score', 0)}%)" if low_alert.get("alert") else "An Toàn (0%)"
+        grid.addWidget(make_card("Cảnh Báo Flop/Shadowban", alert_text, alert_kind), 1, 2)
 
         layout.addWidget(grp_metrics)
 
         # Low View Alert Message Box
         if low_alert.get("alert"):
-            alert_box = QFrame(self)
-            alert_box.setStyleSheet(
-                "background-color: #FFF4CE; border: 1px solid #FED9CC; border-radius: 6px; padding: 10px;"
-            )
+            alert_box = style_card(QFrame(self), kind="warning", object_name="lowViewAlert")
             a_lay = QVBoxLayout(alert_box)
-            a_lbl = QLabel(f"⚠️ {low_alert.get('message')}")
+            a_lay.setContentsMargins(12, 10, 12, 10)
+            a_lbl = QLabel(str(low_alert.get("message")))
             a_lbl.setWordWrap(True)
-            a_lbl.setStyleSheet("color: #792E00; font-size: 12px; font-weight: 600;")
+            a_lbl.setStyleSheet(f"color: {status_color('warning')}; font-size: 12px; font-weight: 600;")
             a_lay.addWidget(a_lbl)
             layout.addWidget(alert_box)
 
         # Recommendations Box
         grp_recs = QGroupBox("Khuyến Nghị Tối Ưu Hóa Kênh Từ AI / Heuristics", self)
+        style_group_box(grp_recs)
         rec_lay = QVBoxLayout(grp_recs)
         for rec in report.recommendations:
             r_lbl = QLabel(f"• {rec}")
             r_lbl.setWordWrap(True)
-            r_lbl.setStyleSheet("font-size: 12px; color: #334155; margin-bottom: 4px;")
+            r_lbl.setStyleSheet("font-size: 12px; margin-bottom: 4px;")
             rec_lay.addWidget(r_lbl)
 
         layout.addWidget(grp_recs)

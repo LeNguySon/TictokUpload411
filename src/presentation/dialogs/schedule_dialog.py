@@ -7,7 +7,6 @@ from datetime import datetime, timedelta
 
 from PyQt6.QtCore import QDateTime
 from PyQt6.QtWidgets import (
-    QDateTimeEdit,
     QDialog,
     QFormLayout,
     QHBoxLayout,
@@ -15,6 +14,7 @@ from PyQt6.QtWidgets import (
 )
 from qfluentwidgets import (
     CheckBox,
+    DateTimeEdit,
     FluentIcon,
     PrimaryPushButton,
     PushButton,
@@ -25,6 +25,7 @@ from src.presentation.dialogs.dialog_helpers import (
     STANDARD_DIALOG_MARGINS,
     STANDARD_DIALOG_SPACING,
     create_dialog_header,
+    fit_dialog_to_content,
 )
 
 
@@ -92,6 +93,7 @@ class ScheduleVideoDialog(QDialog):
         self.setWindowTitle("Lên Lịch Đăng Video Hàng Loạt")
         self.resize(480, 360)
         self._init_ui()
+        fit_dialog_to_content(self)
 
     def exec(self) -> int:
         """Explicit Python wrapper over QDialog.exec for testability and lifecycle hooks."""
@@ -114,9 +116,8 @@ class ScheduleVideoDialog(QDialog):
         form.setSpacing(10)
 
         # Start Date Time
-        self.dt_start = QDateTimeEdit(self)
+        self.dt_start = DateTimeEdit(self)
         self.dt_start.setDateTime(QDateTime.currentDateTime().addSecs(1200))  # +20 minutes
-        self.dt_start.setCalendarPopup(True)
         form.addRow("Thời gian bắt đầu:", self.dt_start)
 
         # Interval

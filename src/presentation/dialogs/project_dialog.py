@@ -5,6 +5,7 @@ and delete projects safely with zero direct cell click-editing.
 """
 
 from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
     QDialog,
     QHBoxLayout,
@@ -74,7 +75,9 @@ class ProjectManagerDialog(QDialog):
         row1 = QHBoxLayout()
         self.name_input = LineEdit(self)
         self.name_input.setPlaceholderText("Tên dự án mới (ví dụ: Nhóm Japan, Nhóm Hàn Quốc)...")
-        self.color_picker = ColorPickerButton(Qt.GlobalColor.blue, "Màu thẻ", self)
+        self.color_picker = ColorPickerButton(
+            QColor("#0078D4"), "Màu thẻ", self
+        )  # default project color (Windows accent), not raw #0000FF
         self.btn_create = PrimaryPushButton(FluentIcon.ADD, "Tạo Dự Án", self)
         self.btn_create.clicked.connect(self._on_create_project)
 
@@ -98,6 +101,7 @@ class ProjectManagerDialog(QDialog):
             ]
         )
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)  # names on one line
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.verticalHeader().setVisible(False)
         self.table.setSelectionBehavior(TableWidget.SelectionBehavior.SelectRows)

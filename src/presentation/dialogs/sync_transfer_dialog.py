@@ -10,7 +10,6 @@ from typing import Any
 
 from PyQt6.QtWidgets import (
     QButtonGroup,
-    QCheckBox,
     QDialog,
     QFileDialog,
     QHBoxLayout,
@@ -21,6 +20,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 from qfluentwidgets import (
+    CheckBox,
     ComboBox,
     FluentIcon,
     InfoBar,
@@ -37,6 +37,7 @@ from src.presentation.dialogs.dialog_helpers import (
     STANDARD_DIALOG_MARGINS,
     STANDARD_DIALOG_SPACING,
     create_dialog_header,
+    style_tab_widget,
 )
 
 logger = logging.getLogger(__name__)
@@ -202,7 +203,7 @@ class SyncTransferDialog(QDialog):
         )
         main_layout.addWidget(header)
 
-        self.tabs = QTabWidget(self)
+        self.tabs = style_tab_widget(QTabWidget(self))
 
         # Tab 1: Gửi (Xuất dữ liệu)
         tab_export = QWidget()
@@ -216,7 +217,7 @@ class SyncTransferDialog(QDialog):
             self.combo_project_export.addItem(p["name"], userData=p["id"])
         exp_layout.addWidget(self.combo_project_export)
 
-        self.chk_include_proxies = QCheckBox("Kèm theo danh sách Proxy liên kết", tab_export)
+        self.chk_include_proxies = CheckBox("Kèm theo danh sách Proxy liên kết", tab_export)
         self.chk_include_proxies.setChecked(True)
         exp_layout.addWidget(self.chk_include_proxies)
 
@@ -231,11 +232,11 @@ class SyncTransferDialog(QDialog):
         exp_layout.addLayout(file_exp_layout)
 
         exp_layout.addStretch()
-        btn_start_export = PrimaryPushButton("📤 Bắt Đầu Đóng Gói & Xuất Dữ Liệu", tab_export)
+        btn_start_export = PrimaryPushButton(FluentIcon.SHARE, "Bắt Đầu Đóng Gói && Xuất Dữ Liệu", tab_export)
         btn_start_export.clicked.connect(self._on_start_export)
         exp_layout.addWidget(btn_start_export)
 
-        self.tabs.addTab(tab_export, "📤 Gửi (Sao Lưu)")
+        self.tabs.addTab(tab_export, "Gửi (Sao Lưu)")
 
         # Tab 2: Nhận (Khôi phục dữ liệu)
         tab_import = QWidget()
@@ -263,11 +264,11 @@ class SyncTransferDialog(QDialog):
         imp_layout.addWidget(self.rb_overwrite)
 
         imp_layout.addStretch()
-        btn_start_import = PrimaryPushButton("📥 Bắt Đầu Nhận & Khôi Phục Dữ Liệu", tab_import)
+        btn_start_import = PrimaryPushButton(FluentIcon.DOWNLOAD, "Bắt Đầu Nhận && Khôi Phục Dữ Liệu", tab_import)
         btn_start_import.clicked.connect(self._on_start_import)
         imp_layout.addWidget(btn_start_import)
 
-        self.tabs.addTab(tab_import, "📥 Nhận (Khôi Phục)")
+        self.tabs.addTab(tab_import, "Nhận (Khôi Phục)")
 
         main_layout.addWidget(self.tabs)
 
