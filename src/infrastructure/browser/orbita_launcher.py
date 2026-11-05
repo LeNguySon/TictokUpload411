@@ -13,6 +13,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
+from src.infrastructure.browser.engine_paths import daemon_profiles_dir, discover_orbita_executable
 from src.infrastructure.browser.process_supervisor import BrowserProcessSupervisor
 
 # Process-wide psutil scan cache shared by all OrbitaLauncher instances (see _scan_psutil_for_profile).
@@ -51,17 +52,9 @@ class OrbitaLauncher:
     native C++ proxy authentication routing via Preferences, and fingerprint noise injection.
     """
 
-    DEFAULT_ORBITA_PATHS = [
-        Path(r"C:\Users\sonson\Desktop\Gloglin2609\resources\engines\orbita-152\chrome.exe"),
-        Path(r"C:\Users\sonson\Desktop\Gloglin2609\resources\engines\orbita-139\chrome.exe"),
-        Path(r"C:\Users\sonson\Desktop\Gloglin2609\resources\engines\orbita-123\chrome.exe"),
-        Path(os.environ.get("USERPROFILE", "C:/Users/sonson")) / ".gologin/browser/orbita-browser-130/chrome.exe",
-        Path(os.environ.get("USERPROFILE", "C:/Users/sonson")) / ".gologin/browser/orbita-browser-128/chrome.exe",
-        Path("C:/Program Files/Google/Chrome/Application/chrome.exe"),
-        Path("C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe"),
-    ]
-
-    DAEMON_PROFILES_DIR = Path(r"D:\SamMonnygocLiengXiPoker\SamMonnygocLiengXiPoker\profiles")
+    # Resolved by engine_paths (env TAVM_ORBITA_PATH / TAVM_ORBITA_ENGINES_DIR / TAVM_DAEMON_PROFILES_DIR,
+    # then discovery; the newest orbita-<N> engine wins). No machine-specific paths.
+    DAEMON_PROFILES_DIR = daemon_profiles_dir()
 
     def __init__(self, executable_path: str | Path | None = None) -> None:
         self.executable_path = Path(executable_path) if executable_path else self._find_browser_executable()
@@ -72,10 +65,7 @@ class OrbitaLauncher:
         self.supervisor = BrowserProcessSupervisor()
 
     def _find_browser_executable(self) -> Path:
-        for p in self.DEFAULT_ORBITA_PATHS:
-            if p.exists() and p.is_file():
-                return p
-        return Path("chrome.exe")
+        return discover_orbita_executable() or Path("chrome.exe")
 
     def prepare_profile_environment(
         self,
@@ -316,9 +306,7 @@ class OrbitaLauncher:
             p_id_key = profile_data.get("id", "default")
             try:
                 wg_cfg = WireGuardConfig.from_conf(profile_data["vpn_config"], name=f"wg_{p_id_key}")
-                bridge = UserspaceVpnBridge(
-                    profile_id=p_id_key, config=wg_cfg, binary_path=resolve_vpn_bridge_binary()
-                )
+                bridge = UserspaceVpnBridge(profile_id=p_id_key, config=wg_cfg, binary_path=resolve_vpn_bridge_binary())
                 bridge.start()
             except Exception as ve:
                 raise RuntimeError(

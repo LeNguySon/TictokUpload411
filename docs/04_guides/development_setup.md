@@ -39,6 +39,23 @@ pip install -r requirements.txt
 
 ---
 
+## 2b. Đường Dẫn Trình Duyệt Orbita & SamMonny Daemon (Theo Từng Máy)
+
+App tự dò đường dẫn, không cần sửa code khi đổi máy hay cài Orbita mới. Thứ tự ưu tiên:
+biến môi trường → tự quét → vị trí mặc định cũ.
+
+| Biến môi trường | Ý nghĩa |
+| :--- | :--- |
+| `TAVM_ORBITA_PATH` | Đường dẫn trực tiếp tới `chrome.exe` của Orbita muốn dùng |
+| `TAVM_ORBITA_ENGINES_DIR` | Thư mục chứa các engine `orbita-<N>/` (nhiều thư mục ngăn bằng `;`). Bản `<N>` lớn nhất được chọn |
+| `TAVM_SAMMONNY_ROOT` | Thư mục gốc SamMonny (chứa `profiles/` và `dist_standalone/`) |
+| `TAVM_SAMMONNY_DAEMON` | Đường dẫn trực tiếp tới `sammonny-daemon.exe` |
+| `TAVM_DAEMON_PROFILES_DIR` | Thư mục profile do daemon quản lý |
+| `TAVM_WG_BRIDGE_BINARY` | Binary cầu nối WireGuard → SOCKS5 (mặc định `bin/wireproxy.exe`) |
+
+Không đặt biến nào: app quét `%USERPROFILE%\Desktop\Gloglin2609esources\engines`, `%USERPROFILE%\.gologinrowser`
+và `resources\engines` trong thư mục SamMonny, rồi mới tới Chrome/Edge hệ thống.
+
 ## 3. Khởi Tạo Cơ Sở Dữ Liệu Ban Đầu
 
 Ứng dụng yêu cầu khởi tạo CSDL SQLite từ bộ migration:

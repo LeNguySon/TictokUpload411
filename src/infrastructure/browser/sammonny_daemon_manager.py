@@ -16,7 +16,11 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+from src.infrastructure.browser.engine_paths import daemon_binary_candidates, sammonny_roots
+
 logger = logging.getLogger(__name__)
+
+
 
 
 class SamMonnyDaemonSupervisor:
@@ -24,19 +28,6 @@ class SamMonnyDaemonSupervisor:
     Supervisor managing the local sammonny-daemon process ensuring ports 7654 and 36912
     are alive and responding for the SamMonny Antidetect SDK.
     """
-
-    CANDIDATE_BINARY_PATHS = [
-        Path(
-            r"D:\SamMonnygocLiengXiPoker\SamMonnygocLiengXiPoker\dist_standalone\sammonny-antidetect\bin\sammonny-daemon.exe"
-        ),
-        Path(r"D:\SamMonnygocLiengXiPoker\dist_standalone\sammonny-antidetect\bin\sammonny-daemon.exe"),
-        Path(r"C:\SamMonny\bin\sammonny-daemon.exe"),
-    ]
-
-    CANDIDATE_WORKING_DIRS = [
-        Path(r"D:\SamMonnygocLiengXiPoker\SamMonnygocLiengXiPoker"),
-        Path(r"D:\SamMonnygocLiengXiPoker"),
-    ]
 
     def __init__(
         self,
@@ -53,15 +44,16 @@ class SamMonnyDaemonSupervisor:
 
     def find_daemon_binary(self) -> Path | None:
         """Finds the sammonny-daemon.exe binary on the host system."""
-        for p in self.CANDIDATE_BINARY_PATHS:
-            if p.exists() and p.is_file():
+        # TAVM_SAMMONNY_DAEMON / TAVM_SAMMONNY_ROOT first, then legacy locations (engine_paths).
+        for p in daemon_binary_candidates():
+            if p.is_file():
                 return p
         return None
 
     def find_working_dir(self) -> Path:
         """Finds the root working directory containing gologin.db and profiles."""
-        for p in self.CANDIDATE_WORKING_DIRS:
-            if p.exists() and p.is_dir():
+        for p in sammonny_roots():
+            if p.is_dir():
                 return p
         return Path.cwd()
 
