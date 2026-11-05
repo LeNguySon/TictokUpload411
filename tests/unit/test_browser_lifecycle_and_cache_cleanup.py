@@ -224,8 +224,8 @@ def test_orbita_launcher_creates_and_removes_process_lock(tmp_path: Path, monkey
 
     monkeypatch.setattr(subprocess, "Popen", lambda *args, **kwargs: DummyPopen())
 
-    # 1. Launch profile -> .process.lock created
-    launcher.launch_profile(profile_data)
+    # 1. Launch profile -> .process.lock created (browsers need a proxy: Strict Proxy Gate)
+    launcher.launch_profile(profile_data, {"host": "10.0.0.1", "port": 8080, "protocol": "http"})
     supervisor = BrowserProcessSupervisor()
     assert supervisor.is_locked(profile_dir)
     lock_info = supervisor.read_lock(profile_dir)

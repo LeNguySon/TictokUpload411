@@ -110,14 +110,18 @@ class OrbitaLaunchWorker(QRunnable):
                 except Exception as re_err:
                     logger.debug("Auto rotate proxy notice for profile %d: %s", profile_id, re_err)
 
-            # Pre-launch Proxy Guard
-            if proxy and not self._check_proxy_alive(proxy):
-                logger.warning(
-                    "Proxy for profile '%s' is unreachable (%s:%s)",
-                    name,
-                    proxy.get("host"),
-                    proxy.get("port"),
-                )
+            # Pre-launch Proxy Guard (fail closed): never open a profile without a usable proxy/VPN.
+            refusal = None
+            if not proxy and not p.get("vpn_config"):
+                refusal = "Chưa gán proxy/VPN: chặn mở trình duyệt để bảo vệ IP máy thật"
+            elif proxy and proxy.get("status") == "leak_detected":
+                refusal = f"Proxy #{proxy.get('id')} bị gắn cờ LEAK DETECTED: chặn mở trình duyệt"
+            elif proxy and not self._check_proxy_alive(proxy):
+                refusal = f"Proxy {proxy.get('host')}:{proxy.get('port')} không phản hồi: chưa mở trình duyệt"
+            if refusal:
+                logger.warning("Launch refused for profile '%s': %s", name, refusal)
+                self.signals.profile_failed.emit(profile_id, name, refusal)
+                continue
 
             try:
                 uuid_val = p.get("uuid")

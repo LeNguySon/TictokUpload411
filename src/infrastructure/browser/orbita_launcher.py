@@ -33,6 +33,18 @@ def is_port_open(port: int, host: str = "127.0.0.1", timeout: float = 0.1) -> bo
         return False
 
 
+VPN_BRIDGE_ENV = "TAVM_WG_BRIDGE_BINARY"
+DEFAULT_VPN_BRIDGE_BINARY = Path("bin") / "wireproxy.exe"
+
+
+def resolve_vpn_bridge_binary() -> Path | None:
+    """Userspace WireGuard->SOCKS5 bridge binary (env var first, then bin/wireproxy.exe)."""
+    env = os.environ.get(VPN_BRIDGE_ENV)
+    if env:
+        return Path(env)
+    return DEFAULT_VPN_BRIDGE_BINARY if DEFAULT_VPN_BRIDGE_BINARY.is_file() else None
+
+
 class OrbitaLauncher:
     """
     Manages discovery and launching of Orbita Antidetect Browser with custom flags,
@@ -270,7 +282,8 @@ class OrbitaLauncher:
 
             args.append(f"--proxy-server={clean_proxy}")
             if proxy_host:
-                args.append(f'--host-resolver-rules="MAP * 0.0.0.0 , EXCLUDE {proxy_host}"')
+                # argv list (no shell): quotes would become part of the value and void the rule
+                args.append(f"--host-resolver-rules=MAP * 0.0.0.0 , EXCLUDE {proxy_host}")
             args.append("--enforce-webrtc-ip-permission-check")
 
         if user_agent:
@@ -293,27 +306,28 @@ class OrbitaLauncher:
         start_url: str = "https://www.tiktok.com",
     ) -> subprocess.Popen:
         """Launches the Orbita browser process asynchronously without blocking GUI thread."""
-        # WireGuard VPN Userspace Bridge integration: route via local SOCKS5 if configured
+        # WireGuard VPN Userspace Bridge integration: route via local SOCKS5 if configured.
+        # Fails closed: if the bridge cannot start, the browser is NOT launched (it used to start
+        # without any proxy, i.e. from the host IP). Mock mode is for tests only.
         if profile_data.get("vpn_config") and not proxy_data:
-            try:
-                from src.infrastructure.vpn.vpn_bridge import UserspaceVpnBridge
-                from src.infrastructure.vpn.wireguard_manager import WireGuardConfig
+            from src.infrastructure.vpn.vpn_bridge import UserspaceVpnBridge
+            from src.infrastructure.vpn.wireguard_manager import WireGuardConfig
 
-                wg_cfg = WireGuardConfig.from_conf(
-                    profile_data["vpn_config"],
-                    name=f"wg_{profile_data.get('id', 'default')}",
-                )
-                p_id_key = profile_data.get("id", "default")
+            p_id_key = profile_data.get("id", "default")
+            try:
+                wg_cfg = WireGuardConfig.from_conf(profile_data["vpn_config"], name=f"wg_{p_id_key}")
                 bridge = UserspaceVpnBridge(
-                    profile_id=p_id_key,
-                    config=wg_cfg,
-                    mock_mode=True,
+                    profile_id=p_id_key, config=wg_cfg, binary_path=resolve_vpn_bridge_binary()
                 )
                 bridge.start()
-                self.vpn_bridges[p_id_key] = bridge
-                proxy_data = bridge.as_proxy_dict()
             except Exception as ve:
-                logger.warning("Could not initialize VPN bridge: %s", ve)
+                raise RuntimeError(
+                    f"VPN WireGuard của hồ sơ {p_id_key} không khởi động được ({ve}). "
+                    f"Không mở trình duyệt để tránh lộ IP máy thật. "
+                    f"Cấu hình binary cầu nối qua biến môi trường {VPN_BRIDGE_ENV} hoặc đặt tại {DEFAULT_VPN_BRIDGE_BINARY}."
+                ) from ve
+            self.vpn_bridges[p_id_key] = bridge
+            proxy_data = bridge.as_proxy_dict()
 
         storage_dir = profile_data.get("storage_dir") or f"profiles/{profile_data.get('name', 'default')}"
         p_dir = self.prepare_profile_environment(storage_dir, profile_data, proxy_data)
@@ -328,6 +342,12 @@ class OrbitaLauncher:
             auth = f"{usr}:{pwd}@" if usr and pwd else ""
             if host and port:
                 proxy_uri = f"{scheme}://{auth}{host}:{port}"
+
+        if not proxy_uri:
+            # Strict Proxy Gate for browsers: never open TikTok from the host IP.
+            raise PermissionError(
+                f"Hồ sơ {profile_data.get('id')} chưa có proxy/VPN hợp lệ: chặn mở trình duyệt để bảo vệ IP máy thật."
+            )
 
         args = self.build_launch_args(
             user_data_dir=p_dir,

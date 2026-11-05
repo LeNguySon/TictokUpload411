@@ -86,7 +86,8 @@ def test_antidetect_split_dns_leak_prevention_flag(env):
     )
 
     # 1. Force all DNS through remote proxy, preventing local ISP / router DNS leak
-    assert '--host-resolver-rules="MAP * 0.0.0.0 , EXCLUDE 185.48.54.7"' in args
+    # argv list (no shell): the value must not contain literal quotes or Chromium ignores the rule
+    assert "--host-resolver-rules=MAP * 0.0.0.0 , EXCLUDE 185.48.54.7" in args
     # 2. Enforce WebRTC IP permission check
     assert "--enforce-webrtc-ip-permission-check" in args
 
@@ -204,7 +205,17 @@ def test_orbita_launcher_routes_through_wireguard_vpn(env, monkeypatch):
 
     import subprocess
 
+    from src.infrastructure.vpn import vpn_bridge
+
     monkeypatch.setattr(subprocess, "Popen", fake_popen)
+
+    # Production uses the real bridge binary (no mock mode); simulate a bridge that came up.
+    def fake_start(self, timeout: float = 5.0) -> int:
+        self.local_port = 55555
+        self.state = vpn_bridge.VpnBridgeState.RUNNING
+        return 55555
+
+    monkeypatch.setattr(vpn_bridge.UserspaceVpnBridge, "start", fake_start)
 
     proc = launcher.launch_profile(profile_data)
     assert proc.pid == 12345

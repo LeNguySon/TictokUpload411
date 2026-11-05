@@ -118,10 +118,11 @@ class UserspaceVpnBridge:
         ]
 
         try:
+            # DEVNULL: the pipes were never read, so a chatty daemon would block once they filled up.
             self._process = subprocess.Popen(
                 cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
             )
 
             deadline = time.monotonic() + timeout
@@ -146,6 +147,13 @@ class UserspaceVpnBridge:
             self.state = VpnBridgeState.ERROR
             logger.error("Failed to start VPN Bridge: %s", exc)
             raise
+        finally:
+            # The config holds the WireGuard PrivateKey: the daemon has read it once the port is open
+            # (or start failed), so it must not stay in %TEMP%.
+            try:
+                tmp_conf.unlink(missing_ok=True)
+            except OSError as e:
+                logger.warning("Could not remove WireGuard temp config %s: %s", tmp_conf, e)
 
     def stop(self) -> None:
         """Stops the bridge and ensures spawned processes are terminated."""
