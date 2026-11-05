@@ -14,13 +14,13 @@ from pathlib import Path
 from PyQt6.QtCore import QModelIndex, QPointF, QRect, QRectF, Qt
 from PyQt6.QtGui import (
     QColor,
-    QFont,
     QPainter,
     QPainterPath,
     QPen,
     QPixmap,
 )
-from PyQt6.QtWidgets import QStyle, QStyledItemDelegate, QStyleOptionViewItem
+from PyQt6.QtWidgets import QStyledItemDelegate, QStyleOptionViewItem
+from qfluentwidgets import isDarkTheme
 
 _AVATAR_PIXMAP_CACHE: dict[str, QPixmap] = {}
 # Paths known to be missing -> monotonic time of the check. Without this, every repaint of every
@@ -103,6 +103,27 @@ def draw_circular_avatar(painter: QPainter, pixmap: QPixmap, center: QPointF, ra
     painter.restore()
 
 
+def draw_person_placeholder(painter: QPainter, center: QPointF, size: float) -> None:
+    """Crisp vector "person" outline (head circle + shoulder arc), stroked in a neutral grey.
+
+    Replaces the old "👤" emoji glyph, which is a bitmap font image and looks blurry at table size.
+    """
+    color = QColor("#A3A3A3") if isDarkTheme() else QColor("#7A7A7A")
+    pen = QPen(color, max(1.4, size * 0.065))
+    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    painter.save()
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+    painter.setPen(pen)
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    # Head
+    head_r = size * 0.17
+    painter.drawEllipse(QPointF(center.x(), center.y() - size * 0.14), head_r, head_r)
+    # Shoulders: upper half of an ellipse whose ends sit near the bottom of the icon box
+    shoulders = QRectF(center.x() - size * 0.39, center.y() + size * 0.05, size * 0.78, size * 0.62)
+    painter.drawArc(shoulders, 0, 180 * 16)
+    painter.restore()
+
+
 class CircularAvatarDelegate(QStyledItemDelegate):
     """Custom Qt delegate rendering crisp circular avatars for TikTok MMO profiles."""
 
@@ -125,23 +146,7 @@ class CircularAvatarDelegate(QStyledItemDelegate):
         if pixmap and not pixmap.isNull():
             draw_circular_avatar(painter, pixmap, center, radius)
         else:
-            # Fallback placeholder circle
-            painter.save()
-            painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-            painter.setBrush(QColor("#E2E8F0"))
-            painter.setPen(QPen(QColor("#CBD5E1"), 1))
-            painter.drawEllipse(center, radius, radius)
-
-            # Draw default icon text
-            painter.setPen(QColor("#64748B"))
-            font = QFont("Segoe UI", 10)
-            painter.setFont(font)
-            painter.drawText(
-                QRectF(center.x() - radius, center.y() - radius, radius * 2, radius * 2),
-                Qt.AlignmentFlag.AlignCenter,
-                "👤",
-            )
-            painter.restore()
+            draw_person_placeholder(painter, center, float(icon_size))
 
     def paint(
         self,
@@ -149,13 +154,12 @@ class CircularAvatarDelegate(QStyledItemDelegate):
         option: QStyleOptionViewItem,
         index: QModelIndex,
     ) -> None:
-        """Paints the table cell with a circular avatar."""
-        # Draw cell selection background
-        self.initStyleOption(option, index)
-        widget = option.widget
-        style = widget.style() if widget else None
-        if style:
-            style.drawControl(QStyle.ControlElement.CE_ItemViewItem, option, painter, widget)
+        """Paints the table cell with a circular avatar (or the vector placeholder)."""
+        # Row hover/selection/alternate background shared with the rest of the row; the cell's own
+        # text ("👤") must not be painted by the native item style.
+        row_delegate = getattr(self.parent(), "delegate", None)
+        if row_delegate is not None and hasattr(row_delegate, "paint_row_background"):
+            row_delegate.paint_row_background(painter, option, index)
 
         # Retrieve avatar path from item data
         avatar_path = str(index.data(Qt.ItemDataRole.UserRole + 1) or index.data() or "")
