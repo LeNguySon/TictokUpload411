@@ -224,13 +224,7 @@ def test_main_window_has_upload_log_widget_and_toggle(qapp):
 
     with patch.object(TikTokManagerMainWindow, "refresh_all_data"):
         win = TikTokManagerMainWindow()
-        assert hasattr(win, "upload_log_widget")
-        assert hasattr(win, "video_splitter")
-        assert hasattr(win, "btn_toggle_upload_log")
-
-        # Initially log widget is not hidden
-        assert not win.upload_log_widget.isHidden()
-        win._on_toggle_upload_log_panel(False)
-        assert win.upload_log_widget.isHidden()
-        win._on_toggle_upload_log_panel(True)
-        assert not win.upload_log_widget.isHidden()
+        # Verify console drawer is removed and video_table takes full container
+        assert not hasattr(win, "upload_log_widget")
+        assert not hasattr(win, "btn_toggle_upload_log")
+        assert hasattr(win, "video_table")

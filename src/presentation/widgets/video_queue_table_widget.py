@@ -64,6 +64,7 @@ class VideoQueueTableWidget(TableWidget):
         self.cellDoubleClicked.connect(self._on_cell_double_clicked)
 
         self._progress_bars: dict[int, ProgressBar] = {}
+        self._video_logs: dict[int, list[str]] = {}
 
         # Set column widths matching UI snapshot
         self.setColumnWidth(0, 45)  # STT
@@ -76,11 +77,12 @@ class VideoQueueTableWidget(TableWidget):
         self.setColumnWidth(7, 110)  # Lên lịch
         self.setColumnWidth(8, 120)  # Upload To
         self.setColumnWidth(9, 90)  # Tình trạng
-        self.setColumnWidth(10, 130)  # Source (Progress bar)
-        self.setColumnWidth(11, 150)  # Link gốc
-        self.setColumnWidth(12, 120)  # ID Video
-        self.setColumnWidth(13, 100)  # PVF URL
-        self.setColumnWidth(14, 100)  # PAF URL
+        self.setColumnWidth(10, 120)  # Tiến trình (Progress bar)
+        self.setColumnWidth(11, 240)  # Nhật Ký Upload (Step logs & Error text)
+        self.setColumnWidth(12, 150)  # Link gốc
+        self.setColumnWidth(13, 120)  # ID Video
+        self.setColumnWidth(14, 100)  # PVF URL
+        self.setColumnWidth(15, 100)  # PAF URL
 
     def load_videos(self, videos: list[dict[str, Any]]) -> None:
         """Populates the table with video records."""
@@ -189,7 +191,7 @@ class VideoQueueTableWidget(TableWidget):
                 status_item.setForeground(QColor("#0078D4"))
             self.setItem(row_idx, 9, status_item)
 
-            # Col 10: Source (Fluent Progress Bar)
+            # Col 10: Tiến trình (Fluent Progress Bar)
             progress_pct = int(v.get("download_progress", 100))
             container = QWidget()
             layout = QHBoxLayout(container)
@@ -200,17 +202,26 @@ class VideoQueueTableWidget(TableWidget):
             self.setCellWidget(row_idx, 10, container)
             self._progress_bars[video_id] = pbar
 
-            # Col 11: Link gốc
-            self.setItem(row_idx, 11, make_item(v.get("source_url", "")))
+            # Col 11: Nhật Ký Upload
+            log_text = v.get("error_message") or "-"
+            log_item = make_item(log_text)
+            if v.get("error_message"):
+                log_item.setText(f"❌ Lỗi: {v['error_message']}")
+                log_item.setForeground(QColor("#D83B01"))
+                log_item.setToolTip(v["error_message"])
+            self.setItem(row_idx, 11, log_item)
 
-            # Col 12: ID Video
-            self.setItem(row_idx, 12, make_item(v.get("tiktok_video_id", "")))
+            # Col 12: Link gốc
+            self.setItem(row_idx, 12, make_item(v.get("source_url", "")))
 
-            # Col 13: PVF URL
-            self.setItem(row_idx, 13, make_item(v.get("pvf_url", "")))
+            # Col 13: ID Video
+            self.setItem(row_idx, 13, make_item(v.get("tiktok_video_id", "")))
 
-            # Col 14: PAF URL
-            self.setItem(row_idx, 14, make_item(v.get("paf_url", "")))
+            # Col 14: PVF URL
+            self.setItem(row_idx, 14, make_item(v.get("pvf_url", "")))
+
+            # Col 15: PAF URL
+            self.setItem(row_idx, 15, make_item(v.get("paf_url", "")))
 
         self.setSortingEnabled(True)
 
@@ -222,10 +233,68 @@ class VideoQueueTableWidget(TableWidget):
                 data = item.data(Qt.ItemDataRole.UserRole)
                 if isinstance(data, dict) and data.get("id") == video_id:
                     return row
-            id_item = self.item(row, 12)
+            id_item = self.item(row, 13)
             if id_item and id_item.text() == str(video_id):
                 return row
         return None
+
+    def append_log(
+        self,
+        video_id: int,
+        timestamp: str,
+        stage: str,
+        message: str,
+        level: str = "INFO",
+    ) -> None:
+        """Appends log entry into the dedicated 'Nhật Ký Upload' column (Col 11) for the video."""
+        if video_id not in self._video_logs:
+            self._video_logs[video_id] = []
+        log_line = f"[{timestamp}] [{stage}] {message}"
+        self._video_logs[video_id].append(log_line)
+
+        row = self.find_row_by_video_id(video_id)
+        if row is None:
+            return
+
+        item = self.item(row, 11)
+        if not item:
+            item = QTableWidgetItem()
+            self.setItem(row, 11, item)
+
+        display_text = f"[{stage}] {message}"
+        item.setText(display_text)
+        item.setToolTip("\n".join(self._video_logs[video_id][-10:]))
+
+        stage_up = stage.upper()
+        if stage_up in ("SUCCESS", "COMPLETED"):
+            item.setForeground(QColor("#107C41"))
+            self.update_stage(video_id, "Hoàn tất")
+        elif stage_up in ("ERROR", "FAIL", "FAILED"):
+            item.setText(f"❌ Lỗi: {message}")
+            item.setForeground(QColor("#D83B01"))
+            self.update_stage(video_id, "Thất bại")
+        elif stage_up in ("CHUNK", "STREAM", "UPLOAD"):
+            item.setForeground(QColor("#0078D4"))
+        elif stage_up in ("START", "INIT", "RESERVE"):
+            item.setForeground(QColor("#5C2D91"))
+
+    def set_video_error(self, video_id: int, error_message: str) -> None:
+        """Displays error directly in Col 11 and marks status failed in Col 9."""
+        if video_id not in self._video_logs:
+            self._video_logs[video_id] = []
+        self._video_logs[video_id].append(f"[ERROR] {error_message}")
+
+        row = self.find_row_by_video_id(video_id)
+        if row is not None:
+            item = self.item(row, 11)
+            if not item:
+                item = QTableWidgetItem()
+                self.setItem(row, 11, item)
+            item.setText(f"❌ Lỗi: {error_message}")
+            item.setForeground(QColor("#D83B01"))
+            item.setToolTip("\n".join(self._video_logs[video_id]))
+
+        self.update_stage(video_id, "Thất bại")
 
     def update_stage(self, video_id: int, stage_text: str) -> None:
         """Updates the status column (Col 9) with detailed stage text and color."""
@@ -277,7 +346,7 @@ class VideoQueueTableWidget(TableWidget):
                 if isinstance(data, dict):
                     videos.append(data)
                     continue
-            id_item = self.item(row, 12)
+            id_item = self.item(row, 13)
             vid = int(id_item.text()) if id_item and id_item.text().isdigit() else row
             videos.append({"id": vid, "row_index": row})
         return videos
@@ -295,7 +364,7 @@ class VideoQueueTableWidget(TableWidget):
             if isinstance(data, dict) and "id" in data:
                 self.edit_metadata_requested.emit(data["id"])
                 return
-        id_item = self.item(row, 12)
+        id_item = self.item(row, 13)
         if id_item and id_item.text().isdigit():
             self.edit_metadata_requested.emit(int(id_item.text()))
 

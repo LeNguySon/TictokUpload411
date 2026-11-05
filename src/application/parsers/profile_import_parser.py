@@ -184,3 +184,4 @@ class ProfileImportParser:
             result["user"] = auto_name
 
         return result
+

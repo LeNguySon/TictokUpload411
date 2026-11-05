@@ -75,7 +75,7 @@ def get_profile_table_headers() -> list[str]:
 
 
 def get_video_table_headers() -> list[str]:
-    """Returns the 15-column headers for the Video Queue Table."""
+    """Returns the 16-column headers for the Video Queue Table."""
     return [
         "STT",
         "Tiêu đề",
@@ -87,7 +87,8 @@ def get_video_table_headers() -> list[str]:
         "Lên lịch",
         "Upload To",
         "Tình trạng",
-        "Source",
+        "Tiến trình",
+        "Nhật Ký Upload",
         "Link gốc",
         "ID Video",
         "PVF URL",

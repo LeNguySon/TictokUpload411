@@ -21,3 +21,4 @@
 3. **AgentShield Masking trên Giao Diện**:
    - `BulkAddProfileDialog` tự động mask mật khẩu thành `••••••••` và cookie thành `sessionid=xxxx*** (N ký tự)`.
    - Lưu trữ song song vào `WindowsCredentialVault` thông qua mã hóa Windows DPAPI.
+
