@@ -108,6 +108,36 @@ class ProxyRepository:
             )
             return int(cur.lastrowid or 0)
 
+    def import_line(self, raw_line: str) -> int | None:
+        """Imports one proxy line and returns THAT proxy's id (existing proxy reused), None if unparsable.
+
+        Callers that need the id of the proxy they just imported must use this, never "last row of
+        the table" (wrong for existing/duplicate proxies and for invalid lines).
+        """
+        parsed = parse_proxy_line(raw_line or "")
+        if not parsed:
+            return None
+        host, port, username, password, protocol, change_ip_url = parsed
+        proxy_type = "rotating" if change_ip_url else "static"
+        with db_session(self.db_path) as conn:
+            # "IS" matches NULL usernames too (the UNIQUE index treats NULLs as distinct).
+            row = conn.execute(
+                "SELECT id FROM proxies WHERE host = ? AND port = ? AND username IS ? ORDER BY id LIMIT 1;",
+                (host, port, username),
+            ).fetchone()
+            if row:
+                conn.execute(
+                    "UPDATE proxies SET password = ?, protocol = ?, change_ip_url = ? WHERE id = ?;",
+                    (password, protocol, change_ip_url, row["id"]),
+                )
+                return int(row["id"])
+            cur = conn.execute(
+                "INSERT INTO proxies (host, port, username, password, protocol, proxy_type, change_ip_url) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?);",
+                (host, port, username, password, protocol, proxy_type, change_ip_url),
+            )
+            return int(cur.lastrowid) if cur.lastrowid is not None else None
+
     def bulk_import(self, raw_lines: list[str]) -> int:
         """Parses and imports a batch of proxy strings. Unique proxies counted."""
         seen_keys: set[tuple[str, int, str | None]] = set()

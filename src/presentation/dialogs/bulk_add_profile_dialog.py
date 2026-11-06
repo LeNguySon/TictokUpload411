@@ -346,6 +346,7 @@ class BulkAddProfileDialog(QDialog):
         auto_inject = self.chk_auto_inject_cookie.isChecked()
         created_count = 0
         injected_count = 0
+        bad_proxy_rows: list[str] = []
 
         from src.application.services.gologin_sync_service import GoLoginSyncService
 
@@ -367,12 +368,11 @@ class BulkAddProfileDialog(QDialog):
             cookie_email = r.get("cookie_email")
             note = r.get("note")
 
-            proxy_id = None
-            if proxy_raw:
-                self.proxy_repo.bulk_import([proxy_raw])
-                all_px = self.proxy_repo.list_all()
-                if all_px:
-                    proxy_id = all_px[-1]["id"]
+            # The id of THIS row's proxy (it used to take the last proxy of the table: wrong proxy for
+            # existing/duplicate proxies and a random one for an unparsable line).
+            proxy_id = self.proxy_repo.import_line(proxy_raw) if proxy_raw else None
+            if proxy_raw and proxy_id is None:
+                bad_proxy_rows.append(user_name)
 
             extra_fields = {
                 "password": password,
@@ -395,12 +395,18 @@ class BulkAddProfileDialog(QDialog):
             except Exception:
                 import uuid
 
+                from src.infrastructure.browser.orbita_launcher import OrbitaLauncher
+
+                p_uuid = str(uuid.uuid4())
+                prof_dir = OrbitaLauncher.resolve_profile_dir({"uuid": p_uuid, "name": user_name})
+                prof_dir.mkdir(parents=True, exist_ok=True)
+
                 profile_data = {
-                    "uuid": str(uuid.uuid4()),
+                    "uuid": p_uuid,
                     "name": user_name,
                     "project_id": target_project_id,
                     "proxy_id": proxy_id,
-                    "storage_dir": f"profiles/{user_name}",
+                    "storage_dir": str(prof_dir),
                     "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/152.0.0.0",
                     "status": "LIVE" if (cookie and "sessionid=" in cookie) else "stopped",
                     "cookie": cookie,
@@ -415,12 +421,15 @@ class BulkAddProfileDialog(QDialog):
                 except Exception:
                     pass
 
-            # Auto inject cookies into local Chromium SQLite if available
+            # Auto inject cookies into local Chromium SQLite
             if auto_inject and cookie:
                 p_row = self.profile_repo.get_by_id(prof_id)
-                if p_row and p_row.get("storage_dir"):
+                if p_row:
                     try:
-                        BrowserCookieInjector.inject_to_chromium_sqlite(p_row["storage_dir"], cookie)
+                        from src.infrastructure.browser.orbita_launcher import OrbitaLauncher
+
+                        target_p_dir = OrbitaLauncher.resolve_profile_dir(p_row)
+                        BrowserCookieInjector.seed_profile_cookies(target_p_dir, cookie)
                     except Exception:
                         pass
                 injected_count += 1
@@ -428,6 +437,17 @@ class BulkAddProfileDialog(QDialog):
             created_count += 1
 
         inject_msg = f" Đã nạp cookie tự động đăng nhập cho {injected_count} tài khoản." if injected_count > 0 else ""
+        if bad_proxy_rows:
+            InfoBar.warning(
+                title="Proxy sai định dạng",
+                content=(
+                    f"{len(bad_proxy_rows)} hồ sơ được tạo KHÔNG có proxy (dòng proxy không đọc được): "
+                    f"{', '.join(bad_proxy_rows[:5])}{'…' if len(bad_proxy_rows) > 5 else ''}. Hãy gán proxy trước khi mở."
+                ),
+                position=InfoBarPosition.TOP,
+                duration=8000,
+                parent=self.parent() or self,
+            )
         InfoBar.success(
             title="Nhập Thành Công",
             content=f"Đã tạo {created_count} hồ sơ vào chiến dịch.{inject_msg}",

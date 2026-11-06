@@ -139,6 +139,7 @@ class OrbitaLaunchWorker(QRunnable):
                             sync=False,
                             db_profile_id=profile_id,
                             direct_connection=direct,
+                            cookie_raw=p.get("cookies_json") or p.get("cookie") or p.get("cookies_browser"),
                         )
                     except Exception as sdk_err:
                         logger.warning(

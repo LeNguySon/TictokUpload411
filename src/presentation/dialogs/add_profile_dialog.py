@@ -212,17 +212,37 @@ class AddProfileDialog(QDialog):
             # Resilient fallback if daemon is unreachable
             import uuid
 
+            from src.infrastructure.browser.cookie_injector import BrowserCookieInjector
+            from src.infrastructure.browser.orbita_launcher import OrbitaLauncher
+
+            # One uuid / one folder per profile (the uuid used to be generated twice: orphan empty folder).
+            p_uuid = str(uuid.uuid4())
+            prof_dir = OrbitaLauncher.resolve_profile_dir({"uuid": p_uuid, "name": name})
+            prof_dir.mkdir(parents=True, exist_ok=True)
+
             profile_data = {
-                "uuid": str(uuid.uuid4()),
+                "uuid": p_uuid,
                 "name": name,
                 "project_id": project_id,
                 "proxy_id": proxy_id,
-                "storage_dir": f"profiles/{name}",
+                "storage_dir": str(prof_dir),
                 "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/152.0.0.0",
                 "status": "LIVE" if cookie or token else "stopped",
                 "cookie": cookie if cookie else None,
             }
             profile_id = self.profile_repo.create(profile_data)
+
+            # Auto inject cookies and initialize profile environment
+            if cookie:
+                try:
+                    BrowserCookieInjector.seed_profile_cookies(prof_dir, cookie)
+                except Exception:
+                    pass
+            try:
+                launcher = OrbitaLauncher()
+                launcher.prepare_profile_environment(prof_dir, profile_data)
+            except Exception:
+                pass
 
         # AgentShield: Save access token to Windows Vault DPAPI
         if token and profile_id:

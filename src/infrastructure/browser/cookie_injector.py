@@ -136,6 +136,105 @@ class BrowserCookieInjector:
             return False
 
     @classmethod
+    def ensure_chromium_cookies_db(cls, db_path: Path) -> None:
+        """
+        Creates Chromium Cookies SQLite database with schema version 24 if it does not already exist.
+        """
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(str(db_path))
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS meta (
+                    key LONGVARCHAR NOT NULL UNIQUE PRIMARY KEY,
+                    value LONGVARCHAR
+                );
+                """
+            )
+            cur.execute("INSERT OR REPLACE INTO meta (key, value) VALUES ('version', '24');")
+            cur.execute("INSERT OR REPLACE INTO meta (key, value) VALUES ('last_compatible_version', '24');")
+            cur.execute("INSERT OR REPLACE INTO meta (key, value) VALUES ('mmap_status', '-1');")
+
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS cookies (
+                    creation_utc INTEGER NOT NULL,
+                    host_key TEXT NOT NULL,
+                    top_frame_site_key TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    value TEXT NOT NULL,
+                    encrypted_value BLOB NOT NULL,
+                    path TEXT NOT NULL,
+                    expires_utc INTEGER NOT NULL,
+                    is_secure INTEGER NOT NULL,
+                    is_httponly INTEGER NOT NULL,
+                    last_access_utc INTEGER NOT NULL,
+                    has_expires INTEGER NOT NULL,
+                    is_persistent INTEGER NOT NULL,
+                    priority INTEGER NOT NULL,
+                    samesite INTEGER NOT NULL,
+                    source_scheme INTEGER NOT NULL,
+                    source_port INTEGER NOT NULL,
+                    last_update_utc INTEGER NOT NULL,
+                    source_type INTEGER NOT NULL,
+                    has_cross_site_ancestor INTEGER NOT NULL,
+                    PRIMARY KEY (host_key, top_frame_site_key, name, path, source_type, has_cross_site_ancestor)
+                );
+                """
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    SEED_MARKER = "tavm_cookie_seed.sha256"
+
+    @classmethod
+    def _plain_cookie(cls, cookie_raw: str) -> str:
+        if isinstance(cookie_raw, str) and cookie_raw.startswith("gloglin:dpapi:v1:"):
+            from src.infrastructure.credentials.dpapi import unprotect_text
+
+            return unprotect_text(cookie_raw) or ""
+        return str(cookie_raw or "")
+
+    @classmethod
+    def seed_profile_cookies(cls, profile_dir: str | Path, cookie_raw: str | None) -> bool:
+        """Writes the user's imported cookies into the profile ONCE per distinct cookie value.
+
+        After that the browser owns its cookie jar: re-writing the imported cookies on every launch
+        (INSERT OR REPLACE) overwrote the session the browser had refreshed and could log the account
+        out. A changed cookie value (user edited/re-imported the cookies) is applied once again.
+        The marker holds only a SHA-256 of the cookie, never the cookie itself.
+        Returns True when cookies were written now.
+        """
+        if not cookie_raw or not str(cookie_raw).strip():
+            return False
+        import hashlib
+
+        try:
+            plain = cls._plain_cookie(cookie_raw).strip()
+        except Exception as exc:
+            logger.warning("Could not read protected cookies for seeding: %s", exc)
+            return False
+        if not plain:
+            return False
+        digest = hashlib.sha256(plain.encode("utf-8")).hexdigest()
+        marker = Path(profile_dir) / cls.SEED_MARKER
+        try:
+            if marker.read_text(encoding="utf-8").strip() == digest:
+                return False
+        except OSError:
+            pass
+        if not cls.inject_to_chromium_sqlite(profile_dir, plain):
+            return False
+        try:
+            marker.parent.mkdir(parents=True, exist_ok=True)
+            marker.write_text(digest, encoding="utf-8")
+        except OSError as exc:
+            logger.warning("Could not write cookie seed marker in %s: %s", profile_dir, exc)
+        return True
+
+    @classmethod
     def inject_to_chromium_sqlite(
         cls,
         storage_dir: str | Path,
@@ -143,9 +242,25 @@ class BrowserCookieInjector:
         domain: str = ".tiktok.com",
     ) -> bool:
         """
-        Injects cookies directly into local Chromium Network/Cookies SQLite file if available.
+        Injects cookies directly into local Chromium Network/Cookies SQLite file.
+        Automatically unprotects DPAPI envelopes and creates the Cookies DB schema if missing.
         """
-        cookie_items = cls.parse_cookie_string(cookie_raw, domain=domain)
+        if not cookie_raw or not str(cookie_raw).strip():
+            return True
+
+        # AgentShield: Automatically unprotect DPAPI ciphertext if present
+        plain_cookie_raw = cookie_raw
+        if isinstance(cookie_raw, str) and cookie_raw.startswith("gloglin:dpapi:v1:"):
+            try:
+                from src.infrastructure.credentials.dpapi import unprotect_text
+
+                unwrapped = unprotect_text(cookie_raw)
+                if unwrapped:
+                    plain_cookie_raw = unwrapped
+            except Exception as e:
+                logger.warning("Could not unprotect DPAPI cookie envelope: %s", e)
+
+        cookie_items = cls.parse_cookie_string(plain_cookie_raw, domain=domain)
         if not cookie_items:
             return True
 
@@ -164,41 +279,104 @@ class BrowserCookieInjector:
                 target_db = cand
                 break
 
+        # If DB does not exist, initialize Default/Network/Cookies with schema v24
         if not target_db:
-            return False
+            target_db = p_dir / "Default" / "Network" / "Cookies"
+            try:
+                cls.ensure_chromium_cookies_db(target_db)
+            except Exception as dbe:
+                logger.error("Failed to initialize Chromium cookies SQLite database at %s: %s", target_db, dbe)
+                return False
 
+        conn: sqlite3.Connection | None = None
         try:
             now_epoch = int(time.time())
             expires_utc = (now_epoch + 31536000) * 1000000 + 11644473600000000  # Chrome microsecond timestamp
 
-            with sqlite3.connect(str(target_db)) as conn:
-                cur = conn.cursor()
-                # Inspect schema to check columns
-                col_info = cur.execute("PRAGMA table_info(cookies);").fetchall()
-                if not col_info:
-                    return False
-                col_names = {r[1] for r in col_info}
+            conn = sqlite3.connect(str(target_db))
+            cur = conn.cursor()
+            col_info = cur.execute("PRAGMA table_info(cookies);").fetchall()
+            if not col_info:
+                return False
+            col_names = {r[1] for r in col_info}
 
-                for c in cookie_items:
-                    k = c["name"]
-                    v = c["value"]
-                    d = c["domain"]
-                    p = c["path"]
-                    sec = 1 if c.get("secure") else 0
-                    httponly = 1 if c.get("httpOnly") else 0
+            for c in cookie_items:
+                k = c["name"]
+                v = c["value"]
+                d = c["domain"]
+                p = c["path"]
+                sec = 1 if c.get("secure") else 0
+                httponly = 1 if c.get("httpOnly") else 0
 
-                    if "host_key" in col_names:
-                        cur.execute(
-                            """
-                            INSERT OR REPLACE INTO cookies
-                            (creation_utc, host_key, top_frame_site_key, name, value, encrypted_value, path, expires_utc, is_secure, is_httponly, last_access_utc, has_expires, is_persistent, priority, samesite, source_scheme, source_port, is_same_party)
-                            VALUES (?, ?, '', ?, ?, X'', ?, ?, ?, ?, ?, 1, 1, 1, 1, 2, 443, 0);
-                            """,
-                            (now_epoch * 1000000, d, k, v, p, expires_utc, sec, httponly, now_epoch * 1000000),
-                        )
-                conn.commit()
-                logger.info("Successfully injected %d cookies directly to SQLite DB: %s", len(cookie_items), target_db)
-                return True
+                if "host_key" in col_names:
+                    # Construct insert parameters compatible with both newer v24 and legacy schema
+                    cols = [
+                        "creation_utc",
+                        "host_key",
+                        "top_frame_site_key",
+                        "name",
+                        "value",
+                        "encrypted_value",
+                        "path",
+                        "expires_utc",
+                        "is_secure",
+                        "is_httponly",
+                        "last_access_utc",
+                        "has_expires",
+                        "is_persistent",
+                        "priority",
+                        "samesite",
+                        "source_scheme",
+                        "source_port",
+                    ]
+                    vals = [
+                        now_epoch * 1000000,
+                        d,
+                        "",
+                        k,
+                        v,
+                        sqlite3.Binary(b""),
+                        p,
+                        expires_utc,
+                        sec,
+                        httponly,
+                        now_epoch * 1000000,
+                        1,
+                        1,
+                        1,
+                        1,
+                        2,
+                        443,
+                    ]
+
+                    if "last_update_utc" in col_names:
+                        cols.append("last_update_utc")
+                        vals.append(now_epoch * 1000000)
+                    if "source_type" in col_names:
+                        cols.append("source_type")
+                        vals.append(0)
+                    if "has_cross_site_ancestor" in col_names:
+                        cols.append("has_cross_site_ancestor")
+                        vals.append(0)
+                    if "is_same_party" in col_names:
+                        cols.append("is_same_party")
+                        vals.append(0)
+
+                    placeholders = ", ".join("?" for _ in cols)
+                    col_str = ", ".join(cols)
+                    cur.execute(
+                        f"INSERT OR REPLACE INTO cookies ({col_str}) VALUES ({placeholders});",
+                        tuple(vals),
+                    )
+            conn.commit()
+            logger.info("Successfully injected %d cookies directly to SQLite DB: %s", len(cookie_items), target_db)
+            return True
         except Exception as e:
             logger.debug("Could not write direct cookies into SQLite %s: %s", target_db, e)
             return False
+        finally:
+            if conn:
+                try:
+                    conn.close()
+                except Exception:
+                    pass

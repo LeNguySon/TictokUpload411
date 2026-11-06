@@ -165,13 +165,26 @@ class GoLoginSyncService:
             except Exception as ce:
                 logger.warning("Could not post initial cookie via GoLogin SDK: %s", ce)
 
-        # 3. Store record into local repository
+        # 3. Resolve physical profile directory and inject direct Chromium SQLite cookies
+        from src.infrastructure.browser.orbita_launcher import OrbitaLauncher
+
+        prof_dir = OrbitaLauncher.resolve_profile_dir({"uuid": gologin_uuid, "name": name})
+        prof_dir.mkdir(parents=True, exist_ok=True)
+        if cookie:
+            try:
+                from src.infrastructure.browser.cookie_injector import BrowserCookieInjector
+
+                BrowserCookieInjector.seed_profile_cookies(prof_dir, cookie)
+            except Exception as se:
+                logger.warning("Could not inject sqlite cookies into %s: %s", prof_dir, se)
+
+        # 4. Store record into local repository
         profile_data = {
             "uuid": gologin_uuid,
             "name": name,
             "project_id": project_id,
             "proxy_id": proxy_id,
-            "storage_dir": f"profiles/{gologin_uuid}",
+            "storage_dir": str(prof_dir),
             "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/152.0.0.0",
             "status": "LIVE" if cookie else "stopped",
             "canvas_noise": 8.0,

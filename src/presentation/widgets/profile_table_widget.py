@@ -61,6 +61,7 @@ class ProfileTableWidget(FastTableWidget):
     edit_profile_requested = pyqtSignal(int)
     open_web_profile_requested = pyqtSignal(str)
     open_folder_requested = pyqtSignal(str)
+    open_profile_folder_requested = pyqtSignal(int)  # profile id
     change_status_requested = pyqtSignal(list, str)
     soft_delete_requested = pyqtSignal(list)
     remove_proxy_requested = pyqtSignal(list)
@@ -539,9 +540,9 @@ class ProfileTableWidget(FastTableWidget):
         act_project.triggered.connect(lambda: self.change_project_requested.emit(selected_ids))
         profile_mgmt_menu.addAction(act_project)
 
-        profile_path = first_profile.get("storage_path") or first_profile.get("name", "")
         act_folder = Action(FluentIcon.FOLDER_ADD, "Mở Thư Mục Hồ Sơ (Local Profile)", self)
-        act_folder.triggered.connect(lambda: self.open_folder_requested.emit(str(profile_path)))
+        # Emit the profile id: the window locates the real folder from the full record.
+        act_folder.triggered.connect(lambda: self.open_profile_folder_requested.emit(int(first_id or 0)))
         profile_mgmt_menu.addAction(act_folder)
 
         menu.addMenu(profile_mgmt_menu)

@@ -91,6 +91,22 @@ from src.presentation.widgets.video_queue_table_widget import VideoQueueTableWid
 from src.version import __version__
 
 PROFILE_PATCH_COALESCE_MS = 250
+
+
+def open_profile_folder(parent: QWidget, profile: dict[str, Any], label: str) -> None:
+    """Opens the folder that really holds the profile's browser data; never creates one."""
+    from src.infrastructure.browser.orbita_launcher import OrbitaLauncher
+
+    folder_path = OrbitaLauncher.locate_profile_dir(profile)
+    if folder_path is not None:
+        os.startfile(str(folder_path))
+        return
+    InfoBar.warning(
+        title="Thư Mục Không Tồn Tại",
+        content=f"Hồ sơ {label} chưa có thư mục dữ liệu trên máy này (chưa mở trình duyệt lần nào, hoặc đã bị xóa).",
+        position=InfoBarPosition.TOP,
+        parent=parent,
+    )
 PROFILE_SEARCH_WIDTH = 340
 SEARCH_DEBOUNCE_MS = 200
 UPLOAD_NOTICE_COALESCE_MS = 1500
@@ -437,6 +453,7 @@ class TikTokManagerMainWindow(QMainWindow):
         self.profile_table.edit_profile_requested.connect(self._on_edit_profile)
         self.profile_table.open_web_profile_requested.connect(self._on_open_tiktok_web)
         self.profile_table.open_folder_requested.connect(self._on_open_profile_folder)
+        self.profile_table.open_profile_folder_requested.connect(self._on_open_profile_folder_by_id)
         self.profile_table.change_status_requested.connect(self._on_change_profile_status)
         self.profile_table.soft_delete_requested.connect(self._on_soft_delete_profiles)
         self.profile_table.remove_proxy_requested.connect(self._on_remove_proxy_selected)
@@ -1697,21 +1714,16 @@ class TikTokManagerMainWindow(QMainWindow):
         url = f"https://www.tiktok.com/@{clean_user}"
         QDesktopServices.openUrl(QUrl(url))
 
-    def _on_open_profile_folder(self, folder_or_name: str) -> None:
-        folder_path = Path(folder_or_name)
-        if not folder_path.is_absolute():
-            base_dir = Path.home() / ".gologin" / "browser"
-            folder_path = base_dir / folder_or_name
+    def _on_open_profile_folder_by_id(self, profile_id: int) -> None:
+        profile = self.profile_repo.get_by_id(profile_id) if profile_id else None
+        if not profile:
+            return
+        open_profile_folder(self, profile, label=profile.get("name") or f"#{profile_id}")
 
-        if folder_path.exists():
-            os.startfile(str(folder_path))
-        else:
-            InfoBar.warning(
-                title="Thư Mục Không Tồn Tại",
-                content=f"Chưa tìm thấy thư mục hồ sơ: {folder_path}",
-                position=InfoBarPosition.TOP,
-                parent=self,
-            )
+    def _on_open_profile_folder(self, folder_or_name: str) -> None:
+        open_profile_folder(
+            self, {"storage_dir": folder_or_name, "name": Path(str(folder_or_name)).name}, label=str(folder_or_name)
+        )
 
     def _on_change_profile_status(self, profile_id_or_ids: list[int] | int, status: str) -> None:
         ids = profile_id_or_ids if isinstance(profile_id_or_ids, list) else [profile_id_or_ids]

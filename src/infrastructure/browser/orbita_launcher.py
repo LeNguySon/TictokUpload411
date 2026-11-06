@@ -67,6 +67,82 @@ class OrbitaLauncher:
     def _find_browser_executable(self) -> Path:
         return discover_orbita_executable() or Path("chrome.exe")
 
+    @classmethod
+    def resolve_profile_dir(cls, profile_or_dir: dict[str, Any] | str | Path) -> Path:
+        """
+        Resolves the true physical directory for a profile on disk.
+        Prioritizes daemon_profiles_dir() where real profiles reside, then explicit absolute paths,
+        then relative storage paths. If the directory does not exist yet (brand new profile),
+        it initializes the folder in daemon_profiles_dir() and returns it.
+        """
+        base_daemon = daemon_profiles_dir()
+
+        if isinstance(profile_or_dir, (str, Path)):
+            p = Path(profile_or_dir)
+            if p.is_absolute():
+                p.mkdir(parents=True, exist_ok=True)
+                return p
+            # Check daemon dir with name
+            cand_daemon_name = base_daemon / p.name
+            if cand_daemon_name.exists():
+                return cand_daemon_name
+            # Check daemon dir with path
+            cand_daemon = base_daemon / p
+            if cand_daemon.exists():
+                return cand_daemon
+            # Check current working directory
+            cand_cwd = (Path.cwd() / p).resolve()
+            if cand_cwd.exists():
+                return cand_cwd
+            # Fallback for folder_or_name: default to daemon directory
+            target = base_daemon / p.name
+            target.mkdir(parents=True, exist_ok=True)
+            return target
+
+        if isinstance(profile_or_dir, dict):
+            uuid_val = profile_or_dir.get("uuid")
+            storage_dir = profile_or_dir.get("storage_dir")
+            name = profile_or_dir.get("name")
+
+            # 1. Check if storage_dir is absolute
+            if storage_dir:
+                sp = Path(storage_dir)
+                if sp.is_absolute():
+                    sp.mkdir(parents=True, exist_ok=True)
+                    return sp
+
+            # 2. Check daemon_profiles_dir with uuid
+            if uuid_val:
+                cand = base_daemon / str(uuid_val)
+                if cand.exists():
+                    return cand
+
+            # 3. Check daemon_profiles_dir with storage_dir name
+            if storage_dir:
+                sp = Path(storage_dir)
+                cand = base_daemon / sp.name
+                if cand.exists():
+                    return cand
+
+            # 4. Check workspace/local paths
+            if storage_dir:
+                cand = (Path.cwd() / storage_dir).resolve()
+                if cand.exists():
+                    return cand
+
+            if name:
+                cand = base_daemon / str(name)
+                if cand.exists():
+                    return cand
+
+            # 5. New profile creation fallback: establish folder under daemon profiles dir
+            target_key = str(uuid_val or name or "default")
+            target = base_daemon / target_key
+            target.mkdir(parents=True, exist_ok=True)
+            return target
+
+        return (Path.cwd() / "profiles" / "default").resolve()
+
     def prepare_profile_environment(
         self,
         user_data_dir: str | Path,
@@ -225,6 +301,25 @@ class OrbitaLauncher:
         except Exception as pe:
             logger.warning("Failed to write Preferences file to %s: %s", pref_path, pe)
 
+        # 3. Seed the imported cookies into Chromium SQLite once per distinct cookie value; the browser
+        # owns its cookie jar afterwards (re-writing on every launch overwrote refreshed sessions).
+        cookie_raw = (
+            profile_data.get("cookies_json")
+            or profile_data.get("cookie")
+            or profile_data.get("cookies_browser")
+        )
+        if cookie_raw:
+            try:
+                from src.infrastructure.browser.cookie_injector import BrowserCookieInjector
+
+                BrowserCookieInjector.seed_profile_cookies(p_dir, cookie_raw)
+            except Exception as ce:
+                logger.warning(
+                    "Could not auto-inject cookies into SQLite for profile %s: %s",
+                    profile_data.get("name"),
+                    ce,
+                )
+
         return p_dir
 
     def build_launch_args(
@@ -317,8 +412,8 @@ class OrbitaLauncher:
             self.vpn_bridges[p_id_key] = bridge
             proxy_data = bridge.as_proxy_dict()
 
-        storage_dir = profile_data.get("storage_dir") or f"profiles/{profile_data.get('name', 'default')}"
-        p_dir = self.prepare_profile_environment(storage_dir, profile_data, proxy_data)
+        p_dir = self.resolve_profile_dir(profile_data)
+        p_dir = self.prepare_profile_environment(p_dir, profile_data, proxy_data)
 
         proxy_uri = None
         if proxy_data:
@@ -468,6 +563,7 @@ class OrbitaLauncher:
         port: int = 36912,
         db_profile_id: int | None = None,
         direct_connection: bool = False,
+        cookie_raw: str | None = None,
     ) -> str:
         """
         Launches profile through SamMonny GoLogin SDK compatibility layer.
@@ -481,6 +577,8 @@ class OrbitaLauncher:
         from sammonny.gologin.gologin import GoLogin
 
         gl = GoLogin({"profile_id": profile_id, "port": port, "sync": sync, "headless": headless})
+        if cookie_raw:
+            self._seed_daemon_profile_cookies(gl, profile_id, cookie_raw)
         debugger_address = gl.start()
         logger.info("GoLogin SDK launched profile %s at debugger address %s", profile_id, debugger_address)
         if debugger_address:
@@ -488,6 +586,49 @@ class OrbitaLauncher:
             if db_profile_id is not None:
                 self._active_sdk_sessions[db_profile_id] = str(debugger_address)
         return debugger_address
+
+    def _seed_daemon_profile_cookies(self, gl: Any, profile_uuid: str, cookie_raw: str) -> None:
+        """SDK launch path: seed the imported cookies (once per value) before the browser starts.
+
+        Only the binary fallback used to inject cookies, so profiles opened via the SDK started logged out.
+        """
+        from src.infrastructure.browser.cookie_injector import BrowserCookieInjector
+
+        try:
+            seeded = BrowserCookieInjector.seed_profile_cookies(self.DAEMON_PROFILES_DIR / str(profile_uuid), cookie_raw)
+        except Exception as exc:
+            logger.warning("Could not seed cookies for SDK profile %s: %s", profile_uuid, exc)
+            return
+        if seeded:  # also hand them to the daemon's own cookie store (best effort)
+            try:
+                plain = BrowserCookieInjector._plain_cookie(cookie_raw)
+                BrowserCookieInjector.inject_to_gologin(profile_uuid, plain, gl_instance=gl)
+            except Exception as exc:
+                logger.debug("Daemon cookie post skipped for %s: %s", profile_uuid, exc)
+
+    @classmethod
+    def locate_profile_dir(cls, profile: dict[str, Any]) -> Path | None:
+        """Existing on-disk folder of a profile, or None. Never creates anything (unlike resolve_profile_dir).
+
+        Used by "Mở Thư Mục Hồ Sơ": opening a freshly created empty folder hid where the data really is.
+        """
+        base_daemon = daemon_profiles_dir()
+        uuid_val = profile.get("uuid")
+        storage_dir = profile.get("storage_dir") or profile.get("storage_path")
+        name = profile.get("name")
+        candidates: list[Path] = []
+        if uuid_val:
+            candidates.append(base_daemon / str(uuid_val))
+        if storage_dir:
+            sp = Path(str(storage_dir))
+            candidates += [sp] if sp.is_absolute() else [Path.cwd() / sp, base_daemon / sp.name]
+        for key in (uuid_val, name):
+            if key:
+                candidates += [Path.cwd() / "profiles" / str(key), base_daemon / str(key)]
+        for cand in candidates:
+            if cand.exists():
+                return cand
+        return None
 
     def stop_via_gologin_sdk(self, profile_id: str, port: int = 36912) -> bool:
         """Stops profile session through SamMonny GoLogin SDK."""
