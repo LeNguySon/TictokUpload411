@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 
-from PyQt6.QtWidgets import QApplication, QDialog, QHBoxLayout, QLabel, QVBoxLayout
+from PyQt6.QtWidgets import QApplication, QDialog, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 from qfluentwidgets import FluentIcon, LineEdit, PlainTextEdit, PrimaryPushButton, PushButton
 
 from src.application.services.license_service import LicenseService
@@ -25,7 +25,7 @@ def _date(epoch: int) -> str:
 
 
 class LicenseActivationDialog(QDialog):
-    def __init__(self, service: LicenseService, state: LicenseState | None = None, parent=None) -> None:
+    def __init__(self, service: LicenseService, state: LicenseState | None = None, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.service = service
         self.setWindowTitle("Kích hoạt bản quyền")

@@ -20,7 +20,9 @@ _H_PADDING = 8.0
 
 
 class ProgressBarDelegate(QStyledItemDelegate):
-    def paint(self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex) -> None:
+    def paint(self, painter: QPainter | None, option: QStyleOptionViewItem, index: QModelIndex) -> None:
+        if painter is None:
+            return
         # Row background (hover / selection / alternate) from the table's main delegate.
         table = self.parent()
         row_delegate = getattr(table, "delegate", None)

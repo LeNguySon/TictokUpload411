@@ -15,8 +15,8 @@ from __future__ import annotations
 from typing import Any
 
 from PyQt6.QtCore import QModelIndex, QRect, Qt
-from PyQt6.QtGui import QBrush, QColor, QPainter, QPalette
-from PyQt6.QtWidgets import QStyledItemDelegate, QStyleOptionViewItem, QTableView, QTableWidgetItem
+from PyQt6.QtGui import QBrush, QColor, QPainter, QPalette, QResizeEvent
+from PyQt6.QtWidgets import QStyledItemDelegate, QStyleOptionViewItem, QTableView, QTableWidgetItem, QWidget
 from qfluentwidgets import TableWidget, isDarkTheme
 from qfluentwidgets.common.font import getFont
 from qfluentwidgets.components.widgets.table_view import TableItemDelegate
@@ -71,7 +71,8 @@ class FastTableItemDelegate(TableItemDelegate):
             else:
                 c = 255 if is_dark else 0
                 brush = QBrush(QColor(c, c, c, alpha))
-            last_col = index.model().columnCount(index.parent()) - 1
+            model = index.model()
+            last_col = (model.columnCount(index.parent()) - 1) if model is not None else col
             if col == 0 or col == last_col:
                 painter.save()
                 painter.setPen(Qt.PenStyle.NoPen)
@@ -100,7 +101,7 @@ class FastTableItemDelegate(TableItemDelegate):
 class FastTableWidget(TableWidget):
     """Fluent TableWidget that repaints only rows whose visual state changed."""
 
-    def __init__(self, parent=None) -> None:
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setItemDelegate(FastTableItemDelegate(self))
 
@@ -162,7 +163,7 @@ class FastTableWidget(TableWidget):
             delegate.pressedRow = -1
         self._update_rows(old ^ new)
 
-    def resizeEvent(self, e) -> None:  # noqa: N802
+    def resizeEvent(self, e: QResizeEvent | None) -> None:  # noqa: N802
         # Qt already repaints exposed areas on resize; Fluent's extra full update is redundant.
         QTableView.resizeEvent(self, e)
 

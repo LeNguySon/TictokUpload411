@@ -442,7 +442,7 @@ class SamMonnyTikTokAdapter:
 
     def _sync_vault_token(self, profile_id: int | str, force_refresh: bool = False) -> str | None:
         """Valid OAuth access token (refreshed when needed) registered with the publisher."""
-        token = self.token_manager.get_valid_access_token(profile_id, force=force_refresh)
+        token: str | None = self.token_manager.get_valid_access_token(profile_id, force=force_refresh)
         if token:
             self.publisher.register_access_token(str(profile_id), token)
         return token
@@ -612,7 +612,8 @@ class SamMonnyTikTokAdapter:
 
         proxy_url = self._profile_egress(profile_id)  # raises EgressBlocked: never direct
 
-        return self.direct_client.query_creator_info(token, proxy_url=proxy_url)
+        info: dict[str, Any] = self.direct_client.query_creator_info(token, proxy_url=proxy_url)
+        return info
 
     def reconcile_status(self, publish_id: str, profile_id: int | str | None = None) -> RemoteStatus:
         """Polls authoritative post status from TikTok for ambiguous or pending uploads."""

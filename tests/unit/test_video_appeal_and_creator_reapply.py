@@ -196,10 +196,12 @@ def test_reapply_creator_rewards_success(isolated_env):
 
 def test_account_health_dialog_renders_appeal_actions_and_reapply(isolated_env, app_instance):
     """Verifies AccountHealthDialog contains Creator Rewards reapply card, appeal button, and check appeals button."""
+    from src.application.workers.task_worker import drain_ui_tasks
     from src.presentation.dialogs.account_health_dialog import AccountHealthDialog
 
     p_id = isolated_env["profile_id"]
     dialog = AccountHealthDialog(profile_id=p_id, db_path=isolated_env["db_file"])
+    assert drain_ui_tasks()  # data loads off the GUI thread
 
     assert hasattr(dialog, "btn_appeal_video")
     assert hasattr(dialog, "btn_check_appeals")

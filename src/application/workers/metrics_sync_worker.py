@@ -5,7 +5,9 @@ Metrics Sync Worker pulling author metrics and creator capabilities without bloc
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
+
+from PyQt6.QtCore import pyqtBoundSignal
 
 from src.application.services.profile_service import ProfileService
 from src.application.signals.app_signals import AppSignalBus
@@ -39,7 +41,7 @@ class MetricsSyncWorker(BaseWorker):
         self.proxy_repo = proxy_repo or getattr(profile_service, "proxy_repo", None)
         self.profile_repo = profile_repo or getattr(profile_service, "profile_repo", None)
 
-    def _safe_emit(self, signal, *args) -> None:
+    def _safe_emit(self, signal: pyqtBoundSignal, *args: Any) -> None:
         try:
             signal.emit(*args)
         except RuntimeError:

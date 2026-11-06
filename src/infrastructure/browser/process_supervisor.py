@@ -92,7 +92,8 @@ class BrowserProcessSupervisor:
         if not path.is_file():
             return None
         try:
-            return json.loads(path.read_text(encoding="utf-8"))
+            data: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+            return data
         except Exception as e:
             logger.debug("Failed reading lock %s: %s", path, e)
             return None
@@ -123,7 +124,7 @@ class BrowserProcessSupervisor:
                 return False
 
             if psutil is not None:
-                return psutil.pid_exists(pid)
+                return bool(psutil.pid_exists(pid))
             else:
                 try:
                     os.kill(pid, 0)

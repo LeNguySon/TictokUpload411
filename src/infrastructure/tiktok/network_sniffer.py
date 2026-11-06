@@ -494,7 +494,8 @@ class TikTokNetworkSniffer:
 
             stat_records.append((profile_id, vid_id, title, views, likes, comments, shares, eng_rate))
 
-            video_obj = it.get("video") if isinstance(it.get("video"), dict) else {}
+            raw_video = it.get("video")
+            video_obj: dict[str, Any] = raw_video if isinstance(raw_video, dict) else {}
             duration = int(video_obj.get("duration") or it.get("duration") or 0)
             thumbnail = str(
                 video_obj.get("cover")
@@ -503,13 +504,15 @@ class TikTokNetworkSniffer:
                 or it.get("thumbnail_url")
                 or ""
             )
+            raw_display = it.get("display")
             display = int(
-                it.get("display")
-                if it.get("display") is not None
+                raw_display
+                if raw_display is not None
                 else (it.get("privacy_type") or it.get("privacy") or 1)
             )
 
-            control = it.get("item_control") if isinstance(it.get("item_control"), dict) else {}
+            raw_control = it.get("item_control")
+            control: dict[str, Any] = raw_control if isinstance(raw_control, dict) else {}
             allow_comment = 1 if control.get("can_comment", True) else 0
             allow_duet = 1 if control.get("can_duet", True) else 0
             allow_stitch = 1 if control.get("can_stitch", True) else 0

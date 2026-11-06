@@ -8,6 +8,7 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QVBoxLayout,
+    QWidget,
 )
 from qfluentwidgets import (
     FluentIcon,
@@ -32,7 +33,7 @@ class ApiCookieDialog(QDialog):
     Dialog for configuring Global TikTok API client parameters and inspecting stored cookie vault.
     """
 
-    def __init__(self, vault: WindowsCredentialVault | None = None, parent=None) -> None:
+    def __init__(self, vault: WindowsCredentialVault | None = None, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.vault = vault or WindowsCredentialVault()
 

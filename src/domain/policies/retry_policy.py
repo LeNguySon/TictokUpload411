@@ -108,4 +108,4 @@ class RetryPolicy:
         exponential = self.base_delay_sec * (2**attempt)
         capped = min(self.max_delay_sec, exponential)
         jitter = random.uniform(0.0, 1.0)
-        return capped + jitter
+        return float(capped + jitter)

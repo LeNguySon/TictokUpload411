@@ -47,7 +47,7 @@ class VideoImportWorker(QRunnable):
         self.target_profile_ids = [int(pid) for pid in target_profile_ids] if target_profile_ids else []
         self.schedule_time = schedule_time
 
-        self.signals = VideoImportSignals()
+        self.signals: VideoImportSignals = VideoImportSignals()
         self._cancelled: bool = False
         self.setAutoDelete(True)
 

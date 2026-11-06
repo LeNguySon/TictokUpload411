@@ -14,6 +14,7 @@ from PyQt6.QtWidgets import (
     QLabel,
     QTableWidgetItem,
     QVBoxLayout,
+    QWidget,
 )
 from qfluentwidgets import (
     ColorPickerButton,
@@ -46,7 +47,7 @@ class ProjectManagerDialog(QDialog):
     Cell clicking does not directly edit data; editing is handled through dedicated actions.
     """
 
-    def __init__(self, project_repo: ProjectRepository, parent=None) -> None:
+    def __init__(self, project_repo: ProjectRepository, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.project_repo = project_repo
         self.setWindowTitle("Quản Lý Dự Án & Chiến Dịch")
@@ -133,7 +134,7 @@ class ProjectManagerDialog(QDialog):
 
         for row_idx, agg in enumerate(aggregates):
 
-            def make_item(text: str, align=Qt.AlignmentFlag.AlignCenter):
+            def make_item(text: str, align: Qt.AlignmentFlag = Qt.AlignmentFlag.AlignCenter) -> QTableWidgetItem:
                 item = QTableWidgetItem(str(text))
                 item.setTextAlignment(align)
                 item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)

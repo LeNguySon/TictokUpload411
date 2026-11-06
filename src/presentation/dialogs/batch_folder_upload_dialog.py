@@ -48,6 +48,7 @@ from src.presentation.dialogs.dialog_helpers import (
     style_group_box,
     style_plain_table,
 )
+from src.presentation.widgets.table_helpers import h_header, v_header
 
 logger = logging.getLogger(__name__)
 
@@ -94,7 +95,7 @@ class BatchFolderUploadDialog(QDialog):
         project_id: int | None = None,
         project_name: str | None = None,
         project_repo: ProjectRepository | None = None,
-        parent=None,
+        parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         # Folder scans (recursive rglob) run on the UI pool; generations drop stale results (T7).
@@ -179,14 +180,14 @@ class BatchFolderUploadDialog(QDialog):
                 "Số Kênh LIVE",
             ]
         )
-        self.project_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        self.project_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        self.project_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-        self.project_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
-        self.project_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
-        self.project_table.verticalHeader().setVisible(False)
+        h_header(self.project_table).setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        h_header(self.project_table).setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        h_header(self.project_table).setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        h_header(self.project_table).setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        h_header(self.project_table).setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        v_header(self.project_table).setVisible(False)
         # Rows host a LineEdit + button: give them room and show 3 rows without scrolling.
-        self.project_table.verticalHeader().setDefaultSectionSize(40)
+        v_header(self.project_table).setDefaultSectionSize(40)
         self.project_table.setMinimumHeight(40 * 3 + 34)
         layout_proj_v.addWidget(self.project_table)
 
@@ -221,12 +222,12 @@ class BatchFolderUploadDialog(QDialog):
         self.profile_table = style_plain_table(QTableWidget(self))
         self.profile_table.setColumnCount(5)
         self.profile_table.setHorizontalHeaderLabels(["Chọn", "ID", "Dự Án / Nhóm", "Tên Tài Khoản", "Quốc Gia"])
-        self.profile_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        self.profile_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        self.profile_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        self.profile_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
-        self.profile_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
-        self.profile_table.verticalHeader().setVisible(False)
+        h_header(self.profile_table).setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        h_header(self.profile_table).setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        h_header(self.profile_table).setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        h_header(self.profile_table).setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        h_header(self.profile_table).setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        v_header(self.profile_table).setVisible(False)
         self.profile_table.setMinimumHeight(120)
         layout_profiles.addWidget(self.profile_table)
 
@@ -719,7 +720,9 @@ class BatchFolderUploadDialog(QDialog):
         self.worker.signals.progress.connect(self._on_worker_progress)
         self.worker.signals.completed.connect(self._on_worker_completed)
         self.worker.signals.failed.connect(self._on_worker_failed)
-        QThreadPool.globalInstance().start(self.worker)
+        pool = QThreadPool.globalInstance()
+        assert pool is not None  # exists once QApplication does
+        pool.start(self.worker)
 
     def _on_worker_progress(self, current: int, total: int, msg: str) -> None:
         """Updates progress bar and label smoothly on main thread."""

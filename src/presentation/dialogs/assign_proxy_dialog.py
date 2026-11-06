@@ -54,7 +54,7 @@ class AssignProxyDialog(QDialog):
         profile_ids: list[int],
         profile_repo: ProfileRepository,
         proxy_repo: ProxyRepository,
-        parent=None,
+        parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self.profile_ids = profile_ids

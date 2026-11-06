@@ -7,6 +7,7 @@ from PyQt6.QtWidgets import (
     QDialog,
     QHBoxLayout,
     QVBoxLayout,
+    QWidget,
 )
 from qfluentwidgets import (
     ComboBox,
@@ -40,7 +41,7 @@ class AssignProjectDialog(QDialog):
         profile_ids: list[int],
         profile_repo: ProfileRepository,
         project_repo: ProjectRepository,
-        parent=None,
+        parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self.profile_ids = profile_ids

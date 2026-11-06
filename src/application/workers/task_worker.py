@@ -48,7 +48,7 @@ class TaskWorker(BaseWorker):
 
     def __init__(self, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> None:
         super().__init__()
-        self.signals = TaskSignals()
+        self.signals: TaskSignals = TaskSignals()
         self._fn = fn
         self._args = args
         self._kwargs = kwargs

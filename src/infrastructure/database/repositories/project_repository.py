@@ -29,6 +29,7 @@ class ProjectRepository:
                 "INSERT INTO projects (name, description, color, video_folder) VALUES (?, ?, ?, ?);",
                 (name, description, color, video_folder),
             )
+            assert cur.lastrowid is not None  # always set after a successful INSERT
             return int(cur.lastrowid)
 
     def get_by_id(self, project_id: int) -> dict[str, Any] | None:
@@ -54,7 +55,7 @@ class ProjectRepository:
         video_folder: str | None = None,
     ) -> bool:
         updates = []
-        params = []
+        params: list[str | int] = []
         if name is not None:
             updates.append("name = ?")
             params.append(name)

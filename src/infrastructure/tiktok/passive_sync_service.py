@@ -296,7 +296,8 @@ class PassiveTikTokSyncService:
         )
         try:
             with opener.open(req, timeout=5.0) as resp:
-                return resp.read().decode("utf-8", errors="ignore")
+                body: bytes = resp.read()
+                return body.decode("utf-8", errors="ignore")
         except Exception as e:
             logger.debug("Failed to fetch DOM content for %s: %s", url, e)
             return ""

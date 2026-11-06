@@ -19,7 +19,7 @@ from PyQt6.QtGui import (
     QPen,
     QPixmap,
 )
-from PyQt6.QtWidgets import QStyledItemDelegate, QStyleOptionViewItem
+from PyQt6.QtWidgets import QStyledItemDelegate, QStyleOptionViewItem, QWidget
 from qfluentwidgets import isDarkTheme
 
 _AVATAR_PIXMAP_CACHE: dict[str, QPixmap] = {}
@@ -127,7 +127,7 @@ def draw_person_placeholder(painter: QPainter, center: QPointF, size: float) -> 
 class CircularAvatarDelegate(QStyledItemDelegate):
     """Custom Qt delegate rendering crisp circular avatars for TikTok MMO profiles."""
 
-    def __init__(self, parent=None) -> None:
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
 
     def paint_avatar(
@@ -150,11 +150,13 @@ class CircularAvatarDelegate(QStyledItemDelegate):
 
     def paint(
         self,
-        painter: QPainter,
+        painter: QPainter | None,
         option: QStyleOptionViewItem,
         index: QModelIndex,
     ) -> None:
         """Paints the table cell with a circular avatar (or the vector placeholder)."""
+        if painter is None:
+            return
         # Row hover/selection/alternate background shared with the rest of the row; the cell's own
         # text ("👤") must not be painted by the native item style.
         row_delegate = getattr(self.parent(), "delegate", None)

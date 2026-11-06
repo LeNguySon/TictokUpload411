@@ -58,7 +58,7 @@ class VideoUploadLogWidget(QWidget):
     MAX_LINES_PER_VIDEO = 500
     MAX_ALL_LINES = 2000
 
-    def __init__(self, parent=None) -> None:
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._logs_by_video: dict[int, deque[dict[str, Any]]] = {}
         self._all_logs: deque[dict[str, Any]] = deque(maxlen=self.MAX_ALL_LINES)

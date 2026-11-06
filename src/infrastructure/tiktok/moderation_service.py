@@ -16,7 +16,7 @@ import math
 import sqlite3
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from src.domain.licensing import entitlements
 from src.domain.licensing.plans import Feature
@@ -80,6 +80,7 @@ class TikTokModerationService:
 
         try:
             from curl_cffi import requests
+            from curl_cffi.requests import HttpMethod, ProxySpec
 
             headers = {
                 "User-Agent": user_agent or "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
@@ -99,16 +100,17 @@ class TikTokModerationService:
             proxies = {"http": p_url, "https": p_url} if p_url else None
 
             resp = requests.request(
-                method,
+                cast("HttpMethod", method.upper()),
                 url,
                 headers=headers,
                 json=json_data,
-                proxies=proxies,
+                proxies=cast("ProxySpec | None", proxies),
                 impersonate="chrome120",
                 timeout=timeout,
             )
             if resp.status_code == 200:
-                return resp.json()
+                payload: dict[str, Any] = resp.json()
+                return payload
             return {"status_code": resp.status_code, "error": f"HTTP {resp.status_code}"}
         except Exception as e:
             logger.debug("TikTok Moderation API request failed for %s: %s", url, e)
@@ -275,9 +277,9 @@ class TikTokModerationService:
                 )
 
                 # Check if legacy violation_list was returned by mock
-                raw_list = resp_items.get("violation_list") or resp_items.get("violations")
-                if raw_list and isinstance(raw_list, list):
-                    for raw in raw_list:
+                legacy_list = resp_items.get("violation_list") or resp_items.get("violations")
+                if legacy_list and isinstance(legacy_list, list):
+                    for raw in legacy_list:
                         item_id = str(raw.get("item_id") or raw.get("video_id") or "")
                         if not item_id:
                             continue

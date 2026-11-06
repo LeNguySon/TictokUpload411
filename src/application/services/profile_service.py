@@ -35,7 +35,8 @@ class ProfileService:
         and updates the profile record in SQLite.
         """
         if self.sync_service:
-            return self.sync_service.sync_single_profile(profile_id)
+            result: dict[str, Any] = self.sync_service.sync_single_profile(profile_id)
+            return result
 
         if self.tiktok_adapter:
             try:

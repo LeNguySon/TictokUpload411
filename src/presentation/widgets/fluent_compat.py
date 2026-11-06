@@ -45,7 +45,8 @@ def _needs_patch(spin_cls: type) -> bool:
         from PyQt6.QtGui import QResizeEvent
 
         probe.resizeEvent(QResizeEvent(probe.size(), probe.size()))
-        return probe.lineEdit().width() < 40
+        line_edit = probe.lineEdit()
+        return line_edit is not None and bool(line_edit.width() < 40)
     finally:
         probe.deleteLater()
 
@@ -82,11 +83,11 @@ def apply_fluent_compat_patches() -> bool:
     for cls in classes:
         original = cls.resizeEvent
 
-        def resizeEvent(self, e, _original=original):  # noqa: N802 - Qt API
+        def resizeEvent(self: Any, e: Any, _original: Any = original) -> None:  # noqa: N802 - Qt API
             _original(self, e)
             _layout_line_edit(self)
 
-        def showEvent(self, e, _original_show=cls.showEvent):  # noqa: N802 - Qt API
+        def showEvent(self: Any, e: Any, _original_show: Any = cls.showEvent) -> None:  # noqa: N802 - Qt API
             _original_show(self, e)
             _layout_line_edit(self)
 

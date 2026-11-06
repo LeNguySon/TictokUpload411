@@ -6,7 +6,9 @@ import logging
 import time
 from collections.abc import Callable
 from datetime import datetime
+from typing import Any
 
+from PyQt6.QtCore import pyqtBoundSignal
 from sammonny import RemoteStatus
 
 from src.application.services.upload_service import UploadService
@@ -46,7 +48,7 @@ class UploadWorker(BaseWorker):
         self._last_progress_emit = float("-inf")
         self._last_progress_pct = -1
 
-    def _safe_emit(self, signal, *args) -> None:
+    def _safe_emit(self, signal: pyqtBoundSignal, *args: Any) -> None:
         try:
             signal.emit(*args)
         except RuntimeError:

@@ -52,7 +52,7 @@ class OrbitaLaunchWorker(QRunnable):
         self.orbita_launcher = orbita_launcher
         self.daemon_supervisor = daemon_supervisor
 
-        self.signals = OrbitaLaunchSignals()
+        self.signals: OrbitaLaunchSignals = OrbitaLaunchSignals()
         self._cancelled: bool = False
         self.setAutoDelete(True)
 

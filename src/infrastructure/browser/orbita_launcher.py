@@ -127,7 +127,7 @@ class OrbitaLauncher:
 
             # 4. Check workspace/local paths
             if storage_dir:
-                cand = (Path.cwd() / storage_dir).resolve()
+                cand = Path((Path.cwd() / storage_dir).resolve())
                 if cand.exists():
                     return cand
 
@@ -458,6 +458,7 @@ class OrbitaLauncher:
 
     def close_profile(self, profile_data: dict[str, Any] | int) -> bool:
         """Closes browser process and GoLogin session for a specific profile."""
+        p_id: int | None
         if isinstance(profile_data, int):
             p_id = profile_data
             uuid_val = None
@@ -590,7 +591,7 @@ class OrbitaLauncher:
             self._active_sdk_sessions[str(profile_id)] = str(debugger_address)
             if db_profile_id is not None:
                 self._active_sdk_sessions[db_profile_id] = str(debugger_address)
-        return debugger_address
+        return str(debugger_address) if debugger_address else ""
 
     def _seed_daemon_profile_cookies(self, gl: Any, profile_uuid: str, cookie_raw: str) -> None:
         """SDK launch path: seed the imported cookies (once per value) before the browser starts.
@@ -641,7 +642,7 @@ class OrbitaLauncher:
         from sammonny.gologin.gologin import GoLogin
 
         gl = GoLogin({"profile_id": profile_id, "port": port})
-        return gl.stop()
+        return bool(gl.stop())
 
     def batch_check_profiles_running(self, profiles: list[dict[str, Any]]) -> dict[int, bool]:
         """

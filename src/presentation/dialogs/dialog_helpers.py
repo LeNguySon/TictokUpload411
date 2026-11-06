@@ -28,6 +28,7 @@ from PyQt6.QtWidgets import (
 from qfluentwidgets import FluentIcon, IconWidget, isDarkTheme, themeColor
 
 from src.presentation.widgets.fluent_compat import apply_fluent_compat_patches
+from src.presentation.widgets.table_helpers import v_header
 
 # Industrial standard geometry for all application dialogs
 STANDARD_DIALOG_MARGINS = (20, 18, 20, 18)
@@ -188,7 +189,7 @@ def style_plain_table(table: QTableWidget) -> QTableWidget:
     sel = themeColor().name()
     table.setShowGrid(False)
     table.setAlternatingRowColors(True)
-    table.verticalHeader().setVisible(False)
+    v_header(table).setVisible(False)
     table.setStyleSheet(
         f"""
         QTableWidget {{

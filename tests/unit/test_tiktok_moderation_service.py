@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 import pytest
 from PyQt6.QtWidgets import QApplication
+from src.application.workers.task_worker import drain_ui_tasks
 from src.infrastructure.database.migrations.runner import run_all_migrations
 from src.infrastructure.database.repositories.profile_repository import ProfileRepository
 from src.infrastructure.tiktok.moderation_service import TikTokModerationService
@@ -165,6 +166,7 @@ def test_account_health_dialog_renders_correctly(isolated_db, app_instance):
     conn.close()
 
     dialog = AccountHealthDialog(profile_id=p_id, db_path=isolated_db["db_file"])
+    assert drain_ui_tasks()  # data loads off the GUI thread
     assert dialog.profile_id == p_id
     assert dialog.card_standing.value_label.text() == "Warning"
     assert dialog.card_strikes.value_label.text() == "1 / 3 Gậy"

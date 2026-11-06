@@ -9,6 +9,7 @@ from PyQt6.QtWidgets import (
     QFormLayout,
     QHBoxLayout,
     QVBoxLayout,
+    QWidget,
 )
 from qfluentwidgets import (
     ComboBox,
@@ -48,7 +49,7 @@ class AddProfileDialog(QDialog):
         proxy_repo: ProxyRepository,
         vault: WindowsCredentialVault | None = None,
         profile_data: dict[str, Any] | None = None,
-        parent=None,
+        parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self.profile_repo = profile_repo

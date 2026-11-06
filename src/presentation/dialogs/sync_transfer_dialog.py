@@ -176,7 +176,7 @@ class SyncTransferDialog(QDialog):
         project_repo: ProjectRepository,
         profile_repo: ProfileRepository,
         proxy_repo: ProxyRepository,
-        parent=None,
+        parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self.project_repo = project_repo

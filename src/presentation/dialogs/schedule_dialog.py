@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import (
     QFormLayout,
     QHBoxLayout,
     QVBoxLayout,
+    QWidget,
 )
 from qfluentwidgets import (
     CheckBox,
@@ -84,7 +85,7 @@ class ScheduleVideoDialog(QDialog):
     Supports both Local Queue dispatch and TikTok Studio Native Cloud scheduling.
     """
 
-    def __init__(self, video_count: int, parent=None) -> None:
+    def __init__(self, video_count: int, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.video_count = max(1, video_count)
         self.generated_schedules: list[str] = []

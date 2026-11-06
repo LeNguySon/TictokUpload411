@@ -67,7 +67,8 @@ class WindowsCredentialVault:
             raw_json = keyring.get_password(key, "oauth_payload")
             if not raw_json:
                 return None
-            return json.loads(raw_json)
+            tokens: dict[str, Any] = json.loads(raw_json)
+            return tokens
         except Exception as e:
             logger.error(f"Failed to read tokens from Windows Vault for profile {profile_id}: {e}")
             return None

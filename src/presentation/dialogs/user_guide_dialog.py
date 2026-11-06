@@ -133,7 +133,7 @@ class UserGuideDialog(QDialog):
     Industrial-grade User Guide & Operational Runbook Dialog with multi-tab Markdown viewers.
     """
 
-    def __init__(self, parent=None) -> None:
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Hướng Dẫn Sử Dụng & Vận Hành Hệ Thống SonBetaPro")
         self.resize(800, 600)

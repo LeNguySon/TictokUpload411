@@ -6,7 +6,7 @@ import logging
 from typing import Any
 
 from PyQt6 import sip
-from PyQt6.QtCore import QCoreApplication, QObject, QThreadPool
+from PyQt6.QtCore import QCoreApplication, QObject, QRunnable, QThreadPool
 
 from src.application.workers.base_worker import BaseWorker
 
@@ -56,7 +56,7 @@ class ThreadPoolManager(QObject):
         self.upload_pool: QThreadPool = upload_thread_pool()
         # Keyed by id(): membership tests on a list compare sip wrappers with ==, which can touch
         # QRunnables already auto-deleted by the pool (access violation).
-        self._tracked_workers: dict[int, BaseWorker] = {}
+        self._tracked_workers: dict[int, QRunnable] = {}
 
     @classmethod
     def instance(cls, max_threads: int = 10) -> "ThreadPoolManager":
@@ -98,7 +98,7 @@ class ThreadPoolManager(QObject):
         self.upload_pool.setMaxThreadCount(count)
         self.pool.setMaxThreadCount(max(count, MIN_GENERAL_THREADS))
 
-    def track_worker(self, worker: BaseWorker) -> None:
+    def track_worker(self, worker: QRunnable) -> None:
         """Adds worker to tracking list for cooperative cancellation."""
         key = id(worker)
         self._tracked_workers[key] = worker
@@ -113,7 +113,7 @@ class ThreadPoolManager(QObject):
         if hasattr(worker, "signals") and hasattr(worker.signals, "finished"):
             worker.signals.finished.connect(_cleanup)
 
-    def dispatch(self, worker: BaseWorker) -> None:
+    def dispatch(self, worker: QRunnable) -> None:
         """Tracks and launches worker onto the QThreadPool."""
         self.track_worker(worker)
         self.pool.start(worker)
@@ -145,8 +145,11 @@ class ThreadPoolManager(QObject):
         """Cooperatively signals all active workers to abort."""
         logger.info("Cancelling %d active background workers", len(self._tracked_workers))
         for worker in list(self._tracked_workers.values()):
+            cancel = getattr(worker, "cancel", None)
+            if cancel is None:
+                continue  # plain QRunnable: nothing to cancel
             try:
-                worker.cancel()
+                cancel()
             except Exception as e:
                 logger.warning("Error cancelling worker: %s", e)
         self._tracked_workers.clear()

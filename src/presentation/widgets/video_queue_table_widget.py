@@ -6,11 +6,12 @@ from pathlib import Path
 from typing import Any
 
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QDragEnterEvent, QDropEvent
+from PyQt6.QtGui import QColor, QContextMenuEvent, QDragEnterEvent, QDragMoveEvent, QDropEvent, QKeyEvent, QMouseEvent
 from PyQt6.QtWidgets import (
     QApplication,
     QHeaderView,
     QTableWidgetItem,
+    QWidget,
 )
 from qfluentwidgets import Action, FluentIcon, RoundMenu
 
@@ -66,7 +67,7 @@ class VideoQueueTableWidget(FastTableWidget):
     files_dropped = pyqtSignal(list)
     view_upload_logs_requested = pyqtSignal(int)
 
-    def __init__(self, parent=None) -> None:
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._video_rows = RowIndex()
         self.headers = get_video_table_headers()
@@ -131,7 +132,7 @@ class VideoQueueTableWidget(FastTableWidget):
             status = v.get("status", "available")
 
             def make_item(
-                text: str, align=Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft
+                text: str, align: Qt.AlignmentFlag = Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft
             ) -> QTableWidgetItem:
                 item = QTableWidgetItem(str(text))
                 item.setTextAlignment(align)
@@ -141,7 +142,7 @@ class VideoQueueTableWidget(FastTableWidget):
             def make_num_item(
                 val: int | float | None,
                 display_text: str | None = None,
-                align=Qt.AlignmentFlag.AlignCenter,
+                align: Qt.AlignmentFlag = Qt.AlignmentFlag.AlignCenter,
             ) -> NumericTableWidgetItem:
                 item = NumericTableWidgetItem(val, display_text)
                 item.setTextAlignment(align)
@@ -392,24 +393,26 @@ class VideoQueueTableWidget(FastTableWidget):
         if id_item and id_item.text().isdigit():
             self.edit_metadata_requested.emit(int(id_item.text()))
 
-    def mousePressEvent(self, e) -> None:
+    def mousePressEvent(self, e: QMouseEvent | None) -> None:
         super().mousePressEvent(e)
-        if e.buttons() & Qt.MouseButton.LeftButton:
+        if e is not None and e.buttons() & Qt.MouseButton.LeftButton:
             self.updateSelectedRows()
 
-    def mouseMoveEvent(self, e) -> None:
+    def mouseMoveEvent(self, e: QMouseEvent | None) -> None:
         super().mouseMoveEvent(e)
-        if e.buttons() & Qt.MouseButton.LeftButton:
+        if e is not None and e.buttons() & Qt.MouseButton.LeftButton:
             self.updateSelectedRows()
 
-    def keyPressEvent(self, e) -> None:
+    def keyPressEvent(self, e: QKeyEvent | None) -> None:
         super().keyPressEvent(e)
-        if e.key() == Qt.Key.Key_Delete:
+        if e is not None and e.key() == Qt.Key.Key_Delete:
             selected_ids = self.get_selected_video_ids()
             if selected_ids:
                 self.delete_video_requested.emit(selected_ids)
 
-    def contextMenuEvent(self, event) -> None:
+    def contextMenuEvent(self, event: QContextMenuEvent | None) -> None:
+        if event is None:
+            return
         pos = event.pos()
         item = self.itemAt(pos)
         if not item:
@@ -519,21 +522,31 @@ class VideoQueueTableWidget(FastTableWidget):
 
         menu.exec(event.globalPos())
 
-    def dragEnterEvent(self, event: QDragEnterEvent) -> None:
-        if event.mimeData().hasUrls():
+    def dragEnterEvent(self, event: QDragEnterEvent | None) -> None:
+        if event is None:
+            return
+        mime = event.mimeData()
+        if mime is not None and mime.hasUrls():
             event.acceptProposedAction()
         else:
             event.ignore()
 
-    def dragMoveEvent(self, event) -> None:
-        if event.mimeData().hasUrls():
+    def dragMoveEvent(self, event: QDragMoveEvent | None) -> None:
+        if event is None:
+            return
+        mime = event.mimeData()
+        if mime is not None and mime.hasUrls():
             event.acceptProposedAction()
         else:
             event.ignore()
 
-    def dropEvent(self, event: QDropEvent) -> None:
+    def dropEvent(self, event: QDropEvent | None) -> None:
         """Accepts dropped files/folders at once; recursive folder scanning runs off the GUI thread (T7)."""
-        paths = [url.toLocalFile() for url in event.mimeData().urls() if url.isLocalFile()]
+        if event is None:
+            return
+        mime = event.mimeData()
+        urls = mime.urls() if mime is not None else []
+        paths = [url.toLocalFile() for url in urls if url.isLocalFile()]
         if not paths:
             event.ignore()
             return

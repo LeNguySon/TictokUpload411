@@ -9,13 +9,15 @@ Bổ sung:
 
 from __future__ import annotations
 
+import logging
 import math
-import sqlite3
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
-from PyQt6.QtCore import QTimer
-from PyQt6.QtGui import QColor
+from PyQt6 import sip
+from PyQt6.QtGui import QCloseEvent, QColor
 from PyQt6.QtWidgets import (
     QDialog,
     QFrame,
@@ -31,6 +33,8 @@ from PyQt6.QtWidgets import (
 )
 from qfluentwidgets import FluentIcon, InfoBar, InfoBarPosition, PrimaryPushButton, PushButton
 
+from src.application.workers.task_worker import run_task
+from src.infrastructure.database.connection import db_session
 from src.infrastructure.tiktok.moderation_service import TikTokModerationService
 from src.presentation.dialogs.dialog_helpers import (
     STANDARD_DIALOG_MARGINS,
@@ -41,6 +45,29 @@ from src.presentation.dialogs.dialog_helpers import (
     style_plain_table,
     style_tab_widget,
 )
+from src.presentation.widgets.table_helpers import h_header, v_header
+
+logger = logging.getLogger(__name__)
+
+
+def fetch_health_data(db_path: Path | str, profile_id: int) -> dict[str, Any] | None:
+    """Reads the profile, its violated videos and its appeals. Pure DB read: runs on any thread."""
+    with db_session(db_path, write=False) as conn:
+        profile = conn.execute("SELECT * FROM profiles WHERE id=?", (profile_id,)).fetchone()
+        if not profile:
+            return None
+        violations = conn.execute(
+            "SELECT * FROM violateVideos WHERE profile_id=? ORDER BY id DESC", (profile_id,)
+        ).fetchall()
+        appeals = conn.execute(
+            "SELECT * FROM accountAppeals WHERE profile_id=? ORDER BY id DESC", (profile_id,)
+        ).fetchall()
+        return {
+            "profile": dict(profile),
+            "violations": [dict(v) for v in violations],
+            "appeals": [dict(a) for a in appeals],
+        }
+
 
 # Legacy hex colors (picked for a dark background) -> semantic Fluent status colors that read well
 # on the app's light theme and follow dark mode.
@@ -69,7 +96,7 @@ def _semantic(color: str) -> str:
 class HealthKpiCard(QFrame):
     """Modern KPI metric card with title, large value, and color badge."""
 
-    def __init__(self, title: str, initial_value: str = "—", color: str = "#64748B", parent=None) -> None:
+    def __init__(self, title: str, initial_value: str = "—", color: str = "#64748B", parent: QWidget | None = None) -> None:
         super().__init__(parent)
         style_card(self, object_name="kpiCard")
         layout = QVBoxLayout(self)
@@ -102,6 +129,7 @@ class AccountHealthDialog(QDialog):
         self.profile_id = profile_id
         self.db_path = Path(db_path or "data/app.db")
         self.moderation_service = TikTokModerationService(db_path=self.db_path)
+        self._closed = False
 
         self.setWindowTitle(f"Kiểm Tra Chất Lượng & Gậy Vi Phạm TikTok — Profile #{profile_id}")
         self.setMinimumSize(850, 560)
@@ -204,11 +232,11 @@ class AccountHealthDialog(QDialog):
         self.table_violate.setHorizontalHeaderLabels(
             ["Video ID", "Tiêu đề video", "Loại gậy vi phạm", "Hạn nộp đơn kháng cáo", "Trạng thái"]
         )
-        self.table_violate.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        self.table_violate.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        self.table_violate.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        h_header(self.table_violate).setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        h_header(self.table_violate).setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        h_header(self.table_violate).setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
         self.table_violate.setAlternatingRowColors(True)
-        self.table_violate.verticalHeader().setVisible(False)
+        v_header(self.table_violate).setVisible(False)
         self.table_violate.itemSelectionChanged.connect(self._on_violate_selection_changed)
         v_layout.addWidget(self.table_violate, 1)
 
@@ -233,16 +261,17 @@ class AccountHealthDialog(QDialog):
         self.table_appeals.setHorizontalHeaderLabels(
             ["Mã Vé", "Loại kháng cáo", "Đối tượng", "Lý do nộp", "Trạng thái xét duyệt"]
         )
-        self.table_appeals.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        h_header(self.table_appeals).setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
         self.table_appeals.setAlternatingRowColors(True)
-        self.table_appeals.verticalHeader().setVisible(False)
+        v_header(self.table_appeals).setVisible(False)
         a_layout.addWidget(self.table_appeals, 1)
 
         self.tabs.addTab(tab_appeals, "Lịch Sử Vé Kháng Cáo (Appeals)")
 
     def _on_violate_selection_changed(self) -> None:
         """Enables or disables the appeal button based on row selection."""
-        selected_rows = self.table_violate.selectionModel().selectedRows()
+        selection = self.table_violate.selectionModel()
+        selected_rows = selection.selectedRows() if selection is not None else []
         if not selected_rows:
             self.btn_appeal_video.setEnabled(False)
             return
@@ -253,136 +282,164 @@ class AccountHealthDialog(QDialog):
         # If already appealed, disable button
         self.btn_appeal_video.setEnabled(status != "Đã nộp kháng cáo")
 
+    def _alive(self) -> bool:
+        """False once the dialog is closed or its C++ object destroyed (late results are dropped)."""
+        return not self._closed and not sip.isdeleted(self)
+
+    def _guard(self, fn: Callable[..., None]) -> Callable[..., None]:
+        """Wraps a GUI callback so a background result arriving after close is ignored."""
+
+        def guarded(*args: Any) -> None:
+            if self._alive():
+                fn(*args)
+
+        return guarded
+
+    def done(self, result: int) -> None:
+        self._closed = True
+        super().done(result)
+
+    def closeEvent(self, event: QCloseEvent | None) -> None:
+        self._closed = True
+        super().closeEvent(event)
+
+    def _run(
+        self,
+        fn: Callable[..., Any],
+        *args: Any,
+        on_result: Callable[[Any], None],
+        on_error: Callable[[str], None],
+    ) -> None:
+        """Runs ``fn`` on the UI thread pool; callbacks come back on the GUI thread, if still open."""
+        run_task(fn, *args, on_result=self._guard(on_result), on_error=self._guard(on_error))
+
     def _load_data(self) -> None:
-        """Loads profile health, creator rewards countdown, and video violations from database."""
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        try:
-            p = conn.execute("SELECT * FROM profiles WHERE id=?", (self.profile_id,)).fetchone()
-            if not p:
-                return
+        """Loads profile health, creator rewards countdown and violations off the GUI thread."""
+        self._run(
+            fetch_health_data,
+            self.db_path,
+            self.profile_id,
+            on_result=self._apply_health_data,
+            on_error=lambda err: logger.warning("Account health load failed: %s", err),
+        )
 
-            standing = str(p["account_standing"] or "Chưa xác minh").strip()
-            strikes = int(p["strike_count"] or 0)
-            points = int(p["total_penalty_points"] or 0)
-            sdb = str(p["sdb"] or "0").strip()
-            date_reapply = p["date_reapply"]
+    def _apply_health_data(self, data: dict[str, Any] | None) -> None:
+        """Renders data from fetch_health_data (GUI thread)."""
+        if not data:
+            return
+        p = data["profile"]
+        violations = data["violations"]
+        appeals = data["appeals"]
 
-            # 1. Update KPI Cards
-            if standing == "Good":
-                self.card_standing.set_value("Good", "#10B981")
-            elif standing == "Warning":
-                self.card_standing.set_value("Warning", "#F59E0B")
-            elif standing in ("High Risk", "high_risk"):
-                self.card_standing.set_value("High Risk", "#EF4444")
-            elif standing in ("Suspended", "banned"):
-                self.card_standing.set_value("Đình chỉ", "#DC2626")
-            else:
-                self.card_standing.set_value(standing, "#38BDF8")
+        standing = str(p["account_standing"] or "Chưa xác minh").strip()
+        strikes = int(p["strike_count"] or 0)
+        points = int(p["total_penalty_points"] or 0)
+        sdb = str(p["sdb"] or "0").strip()
+        date_reapply = p["date_reapply"]
 
-            if strikes == 0:
-                self.card_strikes.set_value("0 / 3 Gậy", "#10B981")
-            elif strikes == 1:
-                self.card_strikes.set_value("1 / 3 Gậy", "#F59E0B")
-            elif strikes == 2:
-                self.card_strikes.set_value("2 / 3 Gậy", "#EA580C")
-            else:
-                self.card_strikes.set_value(f"{strikes} / 3 Gậy", "#EF4444")
+        # 1. Update KPI Cards
+        if standing == "Good":
+            self.card_standing.set_value("Good", "#10B981")
+        elif standing == "Warning":
+            self.card_standing.set_value("Warning", "#F59E0B")
+        elif standing in ("High Risk", "high_risk"):
+            self.card_standing.set_value("High Risk", "#EF4444")
+        elif standing in ("Suspended", "banned"):
+            self.card_standing.set_value("Đình chỉ", "#DC2626")
+        else:
+            self.card_standing.set_value(standing, "#38BDF8")
 
-            self.card_penalty.set_value(f"{points} đ", "#0284C7" if points == 0 else "#EF4444")
+        if strikes == 0:
+            self.card_strikes.set_value("0 / 3 Gậy", "#10B981")
+        elif strikes == 1:
+            self.card_strikes.set_value("1 / 3 Gậy", "#F59E0B")
+        elif strikes == 2:
+            self.card_strikes.set_value("2 / 3 Gậy", "#EA580C")
+        else:
+            self.card_strikes.set_value(f"{strikes} / 3 Gậy", "#EF4444")
 
-            if sdb == "1":
-                self.card_shadowban.set_value("Dấu hiệu Shadowban", "#EF4444")
-            else:
-                self.card_shadowban.set_value("Bình thường (FYF OK)", "#10B981")
+        self.card_penalty.set_value(f"{points} đ", "#0284C7" if points == 0 else "#EF4444")
 
-            # 2. Update Creator Rewards Countdown & Button
-            if date_reapply:
-                try:
-                    target_dt = datetime.fromisoformat(str(date_reapply))
-                    now_dt = datetime.now()
-                    if target_dt.tzinfo is not None and now_dt.tzinfo is None:
-                        now_dt = now_dt.astimezone()
-                    elif target_dt.tzinfo is None and now_dt.tzinfo is not None:
-                        target_dt = target_dt.astimezone()
+        if sdb == "1":
+            self.card_shadowban.set_value("Dấu hiệu Shadowban", "#EF4444")
+        else:
+            self.card_shadowban.set_value("Bình thường (FYF OK)", "#10B981")
 
-                    seconds = (target_dt - now_dt).total_seconds()
-                    if seconds > 0:
-                        days_left = max(1, math.ceil(seconds / 86400))
-                        self.card_reapply_countdown.set_value(f"Còn {days_left} ngày", "#F59E0B")
-                        self.lbl_reapply_status.setText(
-                            f"Đang chịu thời gian phạt Quỹ Sáng Tạo: Mở lại ngày {str(date_reapply)[:10]} (còn {days_left} ngày)."
-                        )
-                        self.btn_reapply_creator.setEnabled(False)
-                        self.btn_reapply_creator.setText(f"Còn {days_left} ngày để nộp lại")
-                    else:
-                        self._set_reapply_eligible()
-                except Exception:
+        # 2. Update Creator Rewards Countdown & Button
+        if date_reapply:
+            try:
+                target_dt = datetime.fromisoformat(str(date_reapply))
+                now_dt = datetime.now()
+                if target_dt.tzinfo is not None and now_dt.tzinfo is None:
+                    now_dt = now_dt.astimezone()
+                elif target_dt.tzinfo is None and now_dt.tzinfo is not None:
+                    target_dt = target_dt.astimezone()
+
+                seconds = (target_dt - now_dt).total_seconds()
+                if seconds > 0:
+                    days_left = max(1, math.ceil(seconds / 86400))
+                    self.card_reapply_countdown.set_value(f"Còn {days_left} ngày", "#F59E0B")
+                    self.lbl_reapply_status.setText(
+                        f"Đang chịu thời gian phạt Quỹ Sáng Tạo: Mở lại ngày {str(date_reapply)[:10]} (còn {days_left} ngày)."
+                    )
+                    self.btn_reapply_creator.setEnabled(False)
+                    self.btn_reapply_creator.setText(f"Còn {days_left} ngày để nộp lại")
+                else:
                     self._set_reapply_eligible()
-            else:
+            except Exception:
                 self._set_reapply_eligible()
+        else:
+            self._set_reapply_eligible()
 
-            # 3. Update Diagnostic Content
-            if strikes > 0:
-                self.lbl_diag_content.setText(
-                    f"Cảnh báo: Kênh đang bị dính {strikes}/3 gậy vi phạm chính sách hoặc gậy nguyên tác. "
-                    "Vui lòng nộp đơn kháng cáo cho các video trước hạn chót để tránh bị đình chỉ kênh vĩnh viễn."
-                )
-                self.lbl_diag_content.setStyleSheet(f"color: {status_color('danger')}; font-size: 13px;")
+        # 3. Update Diagnostic Content
+        if strikes > 0:
+            self.lbl_diag_content.setText(
+                f"Cảnh báo: Kênh đang bị dính {strikes}/3 gậy vi phạm chính sách hoặc gậy nguyên tác. "
+                "Vui lòng nộp đơn kháng cáo cho các video trước hạn chót để tránh bị đình chỉ kênh vĩnh viễn."
+            )
+            self.lbl_diag_content.setStyleSheet(f"color: {status_color('danger')}; font-size: 13px;")
+        else:
+            self.lbl_diag_content.setText(
+                "Kênh ở trạng thái khỏe mạnh: Không có gậy tích lũy. Video phân phối bình thường trên For You Page (FYP)."
+            )
+            self.lbl_diag_content.setStyleSheet(f"color: {status_color('success')}; font-size: 13px;")
+        # 4. Violated videos
+        self.table_violate.setRowCount(len(violations))
+        for row_idx, v in enumerate(violations):
+            v_dict = v
+            self.table_violate.setItem(row_idx, 0, QTableWidgetItem(str(v_dict.get("video_id") or "")))
+            self.table_violate.setItem(
+                row_idx, 1, QTableWidgetItem(str(v_dict.get("title") or "Video không tiêu đề"))
+            )
+
+            v_title = str(v_dict.get("violate_title") or "Vi phạm Chính sách")
+            v_item = QTableWidgetItem(v_title)
+            if "nguyên tác" in v_title.lower() or "unoriginal" in v_title.lower():
+                v_item.setForeground(QColor(status_color("warning")))
             else:
-                self.lbl_diag_content.setText(
-                    "Kênh ở trạng thái khỏe mạnh: Không có gậy tích lũy. Video phân phối bình thường trên For You Page (FYP)."
-                )
-                self.lbl_diag_content.setStyleSheet(f"color: {status_color('success')}; font-size: 13px;")
+                v_item.setForeground(QColor(status_color("danger")))
+            self.table_violate.setItem(row_idx, 2, v_item)
 
-            # 4. Load violateVideos
-            violations = conn.execute(
-                "SELECT * FROM violateVideos WHERE profile_id=? ORDER BY id DESC",
-                (self.profile_id,),
-            ).fetchall()
-            self.table_violate.setRowCount(len(violations))
-            for row_idx, v in enumerate(violations):
-                v_dict = dict(v)
-                self.table_violate.setItem(row_idx, 0, QTableWidgetItem(str(v_dict.get("video_id") or "")))
-                self.table_violate.setItem(
-                    row_idx, 1, QTableWidgetItem(str(v_dict.get("title") or "Video không tiêu đề"))
-                )
+            self.table_violate.setItem(row_idx, 3, QTableWidgetItem(str(v_dict.get("appeal_date") or "—")))
 
-                v_title = str(v_dict.get("violate_title") or "Vi phạm Chính sách")
-                v_item = QTableWidgetItem(v_title)
-                if "nguyên tác" in v_title.lower() or "unoriginal" in v_title.lower():
-                    v_item.setForeground(QColor(status_color("warning")))
-                else:
-                    v_item.setForeground(QColor(status_color("danger")))
-                self.table_violate.setItem(row_idx, 2, v_item)
+            st_text = str(v_dict.get("status") or "pending")
+            if st_text == "appealed":
+                disp_status = "Đã nộp kháng cáo"
+            elif st_text == "pending":
+                disp_status = "Chờ giải trình"
+            else:
+                disp_status = st_text
+            self.table_violate.setItem(row_idx, 4, QTableWidgetItem(disp_status))
 
-                self.table_violate.setItem(row_idx, 3, QTableWidgetItem(str(v_dict.get("appeal_date") or "—")))
-
-                st_text = str(v_dict.get("status") or "pending")
-                if st_text == "appealed":
-                    disp_status = "Đã nộp kháng cáo"
-                elif st_text == "pending":
-                    disp_status = "Chờ giải trình"
-                else:
-                    disp_status = st_text
-                self.table_violate.setItem(row_idx, 4, QTableWidgetItem(disp_status))
-
-            # 5. Load accountAppeals
-            appeals = conn.execute(
-                "SELECT * FROM accountAppeals WHERE profile_id=? ORDER BY id DESC",
-                (self.profile_id,),
-            ).fetchall()
-            self.table_appeals.setRowCount(len(appeals))
-            for row_idx, a in enumerate(appeals):
-                a_dict = dict(a)
-                self.table_appeals.setItem(row_idx, 0, QTableWidgetItem(f"#{a_dict.get('id')}"))
-                self.table_appeals.setItem(row_idx, 1, QTableWidgetItem(str(a_dict.get("appeal_type") or "Kháng gậy")))
-                self.table_appeals.setItem(row_idx, 2, QTableWidgetItem(str(a_dict.get("object_id") or "")))
-                self.table_appeals.setItem(row_idx, 3, QTableWidgetItem(str(a_dict.get("reason") or "")))
-                self.table_appeals.setItem(row_idx, 4, QTableWidgetItem(str(a_dict.get("status") or "Đang xử lý")))
-
-        finally:
-            conn.close()
+        # 5. Account appeals
+        self.table_appeals.setRowCount(len(appeals))
+        for row_idx, a in enumerate(appeals):
+            a_dict = a
+            self.table_appeals.setItem(row_idx, 0, QTableWidgetItem(f"#{a_dict.get('id')}"))
+            self.table_appeals.setItem(row_idx, 1, QTableWidgetItem(str(a_dict.get("appeal_type") or "Kháng gậy")))
+            self.table_appeals.setItem(row_idx, 2, QTableWidgetItem(str(a_dict.get("object_id") or "")))
+            self.table_appeals.setItem(row_idx, 3, QTableWidgetItem(str(a_dict.get("reason") or "")))
+            self.table_appeals.setItem(row_idx, 4, QTableWidgetItem(str(a_dict.get("status") or "Đang xử lý")))
 
     def _set_reapply_eligible(self) -> None:
         """Sets UI state to allow re-applying to Creator Rewards."""
@@ -393,12 +450,16 @@ class AccountHealthDialog(QDialog):
 
     def _on_appeal_selected_video(self, mock_reason: str | None = None) -> None:
         """Submits an appeal for the currently selected video."""
-        selected_rows = self.table_violate.selectionModel().selectedRows()
+        selection = self.table_violate.selectionModel()
+        selected_rows = selection.selectedRows() if selection is not None else []
         if not selected_rows:
             return
 
         row = selected_rows[0].row()
-        video_id = self.table_violate.item(row, 0).text()
+        id_item = self.table_violate.item(row, 0)
+        if id_item is None:
+            return
+        video_id = id_item.text()
 
         reason = mock_reason
         if not reason:
@@ -423,176 +484,123 @@ class AccountHealthDialog(QDialog):
         self.table_violate.setItem(row, 4, QTableWidgetItem("Đã nộp kháng cáo"))
         self.btn_appeal_video.setEnabled(False)
 
-        import concurrent.futures
+        def on_result(res: dict[str, Any]) -> None:
+            self._load_data()
+            if res.get("ok"):
+                InfoBar.success(
+                    title="Đã Nộp Kháng Cáo",
+                    content=res.get("message") or f"Đơn kháng nghị cho video #{video_id} đã được gửi thành công.",
+                    position=InfoBarPosition.TOP,
+                    parent=self,
+                )
+            else:
+                InfoBar.error(
+                    title="Lỗi Nộp Kháng Cáo",
+                    content=res.get("error") or "Không thể nộp đơn kháng cáo.",
+                    position=InfoBarPosition.TOP,
+                    parent=self,
+                )
 
-        executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-        future = executor.submit(
+        def on_error(err: str) -> None:
+            InfoBar.error(title="Lỗi Nộp Kháng Cáo", content=err, position=InfoBarPosition.TOP, parent=self)
+
+        self._run(
             self.moderation_service.submit_video_appeal,
             self.profile_id,
             video_id,
             reason,
+            on_result=on_result,
+            on_error=on_error,
         )
-
-        def check_appeal():
-            if future.done():
-                timer.stop()
-                try:
-                    res = future.result()
-                    self._load_data()
-                    if res.get("ok"):
-                        InfoBar.success(
-                            title="Đã Nộp Kháng Cáo",
-                            content=res.get("message") or f"Đơn kháng nghị cho video #{video_id} đã được gửi thành công.",
-                            position=InfoBarPosition.TOP,
-                            parent=self,
-                        )
-                    else:
-                        InfoBar.error(
-                            title="Lỗi Nộp Kháng Cáo",
-                            content=res.get("error") or "Không thể nộp đơn kháng cáo.",
-                            position=InfoBarPosition.TOP,
-                            parent=self,
-                        )
-                except Exception as e:
-                    InfoBar.error(
-                        title="Lỗi Nộp Kháng Cáo",
-                        content=str(e),
-                        position=InfoBarPosition.TOP,
-                        parent=self,
-                    )
-
-        timer = QTimer(self)
-        timer.timeout.connect(check_appeal)
-        timer.start(100)
 
     def _on_check_appeals_async(self) -> None:
         """Checks appeal status and reconciles channel health asynchronously."""
         self.btn_check_appeals.setEnabled(False)
         self.btn_check_appeals.setText("Đang kiểm tra...")
 
-        import concurrent.futures
+        def restore_button() -> None:
+            self.btn_check_appeals.setEnabled(True)
+            self.btn_check_appeals.setText("Kiểm Tra Tiến Độ Kháng Cáo")
 
-        executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-        future = executor.submit(self.moderation_service.check_appeal_status, self.profile_id)
+        def on_result(res: dict[str, Any]) -> None:
+            restore_button()
+            self._load_data()
+            resolved = res.get("resolved_count", 0)
+            rejected = res.get("rejected_count", 0)
+            reviewing = res.get("reviewing_count", 0)
+            detail_str = f"Đã cập nhật {res.get('appeals_count', 0)} vé kháng cáo."
+            if resolved or rejected or reviewing:
+                detail_str += f" (Đã gỡ gậy: {resolved}, Bác bỏ: {rejected}, Đang thẩm định: {reviewing})"
+            InfoBar.success(
+                title="Đồng Bộ Vé Kháng Cáo Hoàn Tất",
+                content=detail_str,
+                position=InfoBarPosition.TOP,
+                parent=self,
+            )
 
-        def check_status():
-            if future.done():
-                timer.stop()
-                try:
-                    res = future.result()
-                    self._load_data()
-                    resolved = res.get("resolved_count", 0)
-                    rejected = res.get("rejected_count", 0)
-                    reviewing = res.get("reviewing_count", 0)
-                    detail_str = f"Đã cập nhật {res.get('appeals_count', 0)} vé kháng cáo."
-                    if resolved or rejected or reviewing:
-                        detail_str += f" (Đã gỡ gậy: {resolved}, Bác bỏ: {rejected}, Đang thẩm định: {reviewing})"
+        def on_error(err: str) -> None:
+            restore_button()
+            InfoBar.error(title="Lỗi Kiểm Tra Kháng Cáo", content=err, position=InfoBarPosition.TOP, parent=self)
 
-                    InfoBar.success(
-                        title="Đồng Bộ Vé Kháng Cáo Hoàn Tất",
-                        content=detail_str,
-                        position=InfoBarPosition.TOP,
-                        parent=self,
-                    )
-                except Exception as e:
-                    InfoBar.error(
-                        title="Lỗi Kiểm Tra Kháng Cáo",
-                        content=str(e),
-                        position=InfoBarPosition.TOP,
-                        parent=self,
-                    )
-                finally:
-                    self.btn_check_appeals.setEnabled(True)
-                    self.btn_check_appeals.setText("Kiểm Tra Tiến Độ Kháng Cáo")
-
-        timer = QTimer(self)
-        timer.timeout.connect(check_status)
-        timer.start(150)
+        self._run(self.moderation_service.check_appeal_status, self.profile_id, on_result=on_result, on_error=on_error)
 
     def _on_reapply_creator_rewards_async(self) -> None:
         """Submits re-application to Creator Rewards Program asynchronously."""
         self.btn_reapply_creator.setEnabled(False)
         self.btn_reapply_creator.setText("Đang gửi đơn...")
 
-        import concurrent.futures
+        def on_result(res: dict[str, Any]) -> None:
+            self._load_data()
+            if res.get("ok"):
+                InfoBar.success(
+                    title="Gia Nhập Quỹ Sáng Tạo Thành Công",
+                    content="Đã nộp lại đơn tham gia Quỹ Nhà Sáng Tạo thành công. Trạng thái kênh đã phục hồi.",
+                    position=InfoBarPosition.TOP,
+                    parent=self,
+                )
+            else:
+                InfoBar.warning(
+                    title="Chưa Thể Nộp Đơn",
+                    content=res.get("error", "Vui lòng chờ hết thời gian phạt."),
+                    position=InfoBarPosition.TOP,
+                    parent=self,
+                )
 
-        executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-        future = executor.submit(self.moderation_service.submit_creator_rewards_reapply, self.profile_id)
+        def on_error(err: str) -> None:
+            self._load_data()
+            InfoBar.error(title="Lỗi Nộp Đơn Quỹ Sáng Tạo", content=err, position=InfoBarPosition.TOP, parent=self)
 
-        def check_reapply():
-            if future.done():
-                timer.stop()
-                try:
-                    res = future.result()
-                    self._load_data()
-                    if res.get("ok"):
-                        InfoBar.success(
-                            title="Gia Nhập Quỹ Sáng Tạo Thành Công",
-                            content="Đã nộp lại đơn tham gia Quỹ Nhà Sáng Tạo thành công. Trạng thái kênh đã phục hồi.",
-                            position=InfoBarPosition.TOP,
-                            parent=self,
-                        )
-                    else:
-                        InfoBar.warning(
-                            title="Chưa Thể Nộp Đơn",
-                            content=res.get("error", "Vui lòng chờ hết thời gian phạt."),
-                            position=InfoBarPosition.TOP,
-                            parent=self,
-                        )
-                except Exception as e:
-                    InfoBar.error(
-                        title="Lỗi Nộp Đơn Quỹ Sáng Tạo",
-                        content=str(e),
-                        position=InfoBarPosition.TOP,
-                        parent=self,
-                    )
-                finally:
-                    self._load_data()
-
-        timer = QTimer(self)
-        timer.timeout.connect(check_reapply)
-        timer.start(150)
+        self._run(
+            self.moderation_service.submit_creator_rewards_reapply,
+            self.profile_id,
+            on_result=on_result,
+            on_error=on_error,
+        )
 
     def _run_scan_async(self) -> None:
         """Executes full moderation scan in background thread."""
         self.btn_refresh.setEnabled(False)
         self.btn_refresh.setText("Đang quét...")
 
-        import concurrent.futures
+        def restore_button() -> None:
+            self.btn_refresh.setEnabled(True)
+            self.btn_refresh.setText("Quét Toàn Kênh")
 
-        executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-        future = executor.submit(self.moderation_service.scan_full_channel_health, self.profile_id)
+        def on_result(res: dict[str, Any]) -> None:
+            restore_button()
+            self._load_data()
+            label = res.get("standing", {}).get("status_label", "OK")
+            InfoBar.success(
+                title="Quét Sức Khỏe Kênh Hoàn Tất",
+                content=f"Đã cập nhật tình trạng: {label} ({res.get('violations_count', 0)} video gậy).",
+                position=InfoBarPosition.TOP,
+                parent=self,
+            )
 
-        def on_done():
-            try:
-                res = future.result()
-                self._load_data()
-                InfoBar.success(
-                    title="Quét Sức Khỏe Kênh Hoàn Tất",
-                    content=f"Đã cập nhật tình trạng: {res.get('standing', {}).get('status_label', 'OK')} ({res.get('violations_count', 0)} video gậy).",
-                    position=InfoBarPosition.TOP,
-                    parent=self,
-                )
-            except Exception as e:
-                InfoBar.error(
-                    title="Lỗi Quét Sức Khỏe",
-                    content=str(e),
-                    position=InfoBarPosition.TOP,
-                    parent=self,
-                )
-            finally:
-                self.btn_refresh.setEnabled(True)
-                self.btn_refresh.setText("Quét Toàn Kênh")
+        def on_error(err: str) -> None:
+            restore_button()
+            InfoBar.error(title="Lỗi Quét Sức Khỏe", content=err, position=InfoBarPosition.TOP, parent=self)
 
-        poll_timer = QTimer(self)
-
-        def check_status():
-            if future.done():
-                poll_timer.stop()
-                on_done()
-
-        poll_timer.timeout.connect(check_status)
-        poll_timer.start(200)
-
+        self._run(self.moderation_service.scan_full_channel_health, self.profile_id, on_result=on_result, on_error=on_error)
 
 __all__ = ["AccountHealthDialog", "HealthKpiCard"]

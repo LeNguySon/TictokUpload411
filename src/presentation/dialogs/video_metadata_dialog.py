@@ -9,6 +9,7 @@ from PyQt6.QtWidgets import (
     QFormLayout,
     QHBoxLayout,
     QVBoxLayout,
+    QWidget,
 )
 from qfluentwidgets import (
     CheckBox,
@@ -31,7 +32,7 @@ class VideoMetadataDialog(QDialog):
     Dialog allowing creators to edit metadata (title, hashtags, privacy, stitch/duet flags) for a video.
     """
 
-    def __init__(self, video_data: dict[str, Any], parent=None) -> None:
+    def __init__(self, video_data: dict[str, Any], parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.video_data = dict(video_data)
 

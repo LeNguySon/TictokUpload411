@@ -10,7 +10,7 @@ authors = [{ name = "TAVM Engineering Team", email = "developer@tavm.local" }]
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "PyQt6>=6.8.0",
+    "PyQt6>=6.8.0,<6.12",  # 6.12.0 ships invalid .pyi stubs that break mypy
     "PyQt6-Fluent-Widgets>=1.7.0",
     "pydantic>=2.10.0",
     "requests>=2.32.0",

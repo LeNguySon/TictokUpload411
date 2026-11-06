@@ -6,6 +6,7 @@ flop/shadowban warnings, and strategic recommendations in Windows 11 Fluent Desi
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +19,7 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QVBoxLayout,
+    QWidget,
 )
 from qfluentwidgets import (
     FluentIcon,
@@ -42,6 +44,44 @@ from src.presentation.dialogs.dialog_helpers import (
     style_group_box,
 )
 
+logger = logging.getLogger(__name__)
+
+
+def _load_profile_videos(db_path: Path, profile_id: int) -> list[dict[str, Any]]:
+    """Loads video performance history for this profile from statisticTable or videoTables."""
+    try:
+        with db_session(db_path, write=False) as conn:
+            rows = conn.execute(
+                """
+                SELECT id_video AS video_id, title, views, likes, comments, shares, engagement_rate, updated_at
+                FROM statisticTable WHERE profile_id = ? ORDER BY id DESC LIMIT 50;
+                """,
+                (profile_id,),
+            ).fetchall()
+            if rows:
+                return [dict(r) for r in rows]
+
+            # Fallback to videoTables
+            v_rows = conn.execute(
+                """
+                SELECT video_id, title, views, likes, comments, shares, engagement_rate, created_at
+                FROM videoTables WHERE profile_id = ? ORDER BY id DESC LIMIT 50;
+                """,
+                (profile_id,),
+            ).fetchall()
+            return [dict(r) for r in v_rows]
+    except Exception as e:
+        logger.warning("Radar video history unreadable for profile %s: %s", profile_id, e)
+        return []
+
+
+def load_radar_inputs(
+    profile_repo: ProfileRepository, db_path: Path | str, profile_id: int
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Profile row + video history for the radar. Pure DB read: run it off the GUI thread."""
+    profile = profile_repo.get_by_id(profile_id) or {}
+    return profile, _load_profile_videos(Path(db_path), profile_id)
+
 
 class ChannelRadarDialog(QDialog):
     """Visual Radar Dialog evaluating TikTok MMO account quality, traffic health, and readiness."""
@@ -52,14 +92,17 @@ class ChannelRadarDialog(QDialog):
         profile_repo: ProfileRepository,
         videos: list[dict[str, Any]] | None = None,
         db_path: Path | str | None = None,
-        parent=None,
+        parent: QWidget | None = None,
+        profile: dict[str, Any] | None = None,
     ) -> None:
+        """Pass ``profile`` and ``videos`` from load_radar_inputs() (run off the GUI thread) to keep
+        the constructor free of DB I/O; whatever is missing is read synchronously (scripts/tests)."""
         super().__init__(parent)
         self.profile_id = profile_id
         self.profile_repo = profile_repo
         self.db_path = Path(db_path) if db_path else Path("data/app.db")
-        self.profile = self.profile_repo.get_by_id(profile_id) or {}
-        self.videos = videos if videos is not None else self._load_profile_videos()
+        self.profile = profile if profile is not None else (self.profile_repo.get_by_id(profile_id) or {})
+        self.videos = videos if videos is not None else _load_profile_videos(self.db_path, profile_id)
 
         self.setWindowTitle("Radar Đánh Giá Sức Khỏe Kênh TikTok MMO")
         self.resize(600, 640)
@@ -69,32 +112,6 @@ class ChannelRadarDialog(QDialog):
     def exec(self) -> int:
         """Explicit Python wrapper over QDialog.exec for testability and lifecycle hooks."""
         return super().exec()
-
-    def _load_profile_videos(self) -> list[dict[str, Any]]:
-        """Loads video performance history for this profile from statisticTable or videoTables."""
-        try:
-            with db_session(self.db_path, write=False) as conn:
-                rows = conn.execute(
-                    """
-                    SELECT id_video AS video_id, title, views, likes, comments, shares, engagement_rate, updated_at
-                    FROM statisticTable WHERE profile_id = ? ORDER BY id DESC LIMIT 50;
-                    """,
-                    (self.profile_id,),
-                ).fetchall()
-                if rows:
-                    return [dict(r) for r in rows]
-
-                # Fallback to videoTables
-                v_rows = conn.execute(
-                    """
-                    SELECT video_id, title, views, likes, comments, shares, engagement_rate, created_at
-                    FROM videoTables WHERE profile_id = ? ORDER BY id DESC LIMIT 50;
-                    """,
-                    (self.profile_id,),
-                ).fetchall()
-                return [dict(r) for r in v_rows]
-        except Exception:
-            return []
 
     def _analyze_and_init_ui(self) -> None:
         # 1. Run ChannelQualityRadar

@@ -10,7 +10,7 @@ import json
 import logging
 import sqlite3
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from src.infrastructure.credentials.dpapi import unprotect_text
 from src.infrastructure.database.connection import get_db_connection
@@ -128,6 +128,7 @@ class GoLoginTikTokClient:
     ) -> dict[str, Any]:
         """Executes HTTP request routed through GoLogin proxy and TLS fingerprint."""
         from curl_cffi import requests
+        from curl_cffi.requests import HttpMethod, ProxySpec
 
         conn = self._get_connection()
         try:
@@ -162,12 +163,12 @@ class GoLoginTikTokClient:
 
         try:
             resp = requests.request(
-                method,
+                cast("HttpMethod", method.upper()),
                 url,
                 headers=req_headers,
                 json=json_data,
                 data=data,
-                proxies=proxies,
+                proxies=cast("ProxySpec | None", proxies),
                 impersonate="chrome120",
                 timeout=timeout,
             )
@@ -191,7 +192,8 @@ class GoLoginTikTokClient:
         if res.get("status_code") == -1:
             return {"is_live": False, "error": res.get("error", "Network failure")}
 
-        data = res.get("data") if isinstance(res.get("data"), dict) else {}
+        raw_data = res.get("data")
+        data: dict[str, Any] = raw_data if isinstance(raw_data, dict) else {}
         msg = res.get("message")
         if msg == "success" and data.get("username"):
             return {

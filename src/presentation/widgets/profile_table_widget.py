@@ -5,8 +5,8 @@ Profile Table Widget displaying the 28 TikTok MMO attributes with Windows 11 Flu
 from typing import Any
 
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QColor
-from PyQt6.QtWidgets import QApplication, QHeaderView, QTableWidgetItem
+from PyQt6.QtGui import QColor, QContextMenuEvent, QKeyEvent, QMouseEvent
+from PyQt6.QtWidgets import QApplication, QHeaderView, QTableWidgetItem, QWidget
 from qfluentwidgets import Action, FluentIcon, RoundMenu
 
 from src.presentation.delegates.circular_avatar_delegate import CircularAvatarDelegate
@@ -96,7 +96,7 @@ class ProfileTableWidget(FastTableWidget):
     channel_radar_requested = pyqtSignal(int)
     account_health_requested = pyqtSignal(int)
 
-    def __init__(self, parent=None) -> None:
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._profile_rows = RowIndex()
         self.headers = get_profile_table_headers()
@@ -189,7 +189,7 @@ class ProfileTableWidget(FastTableWidget):
 
         # Helper to create non-editable items
         def make_item(
-            text: str, align=Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft
+            text: str, align: Qt.AlignmentFlag = Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft
         ) -> QTableWidgetItem:
             item = QTableWidgetItem(str(text))
             item.setTextAlignment(align)
@@ -199,7 +199,7 @@ class ProfileTableWidget(FastTableWidget):
         def make_num_item(
             val: int | float | None,
             display_text: str | None = None,
-            align=Qt.AlignmentFlag.AlignCenter,
+            align: Qt.AlignmentFlag = Qt.AlignmentFlag.AlignCenter,
         ) -> NumericTableWidgetItem:
             item = NumericTableWidgetItem(val, display_text)
             item.setTextAlignment(align)
@@ -430,24 +430,26 @@ class ProfileTableWidget(FastTableWidget):
         if id_item and id_item.text().isdigit():
             self.open_orbita_requested.emit([int(id_item.text())])
 
-    def mousePressEvent(self, e) -> None:
+    def mousePressEvent(self, e: QMouseEvent | None) -> None:
         super().mousePressEvent(e)
-        if e.buttons() & Qt.MouseButton.LeftButton:
+        if e is not None and e.buttons() & Qt.MouseButton.LeftButton:
             self.updateSelectedRows()
 
-    def mouseMoveEvent(self, e) -> None:
+    def mouseMoveEvent(self, e: QMouseEvent | None) -> None:
         super().mouseMoveEvent(e)
-        if e.buttons() & Qt.MouseButton.LeftButton:
+        if e is not None and e.buttons() & Qt.MouseButton.LeftButton:
             self.updateSelectedRows()
 
-    def keyPressEvent(self, e) -> None:
+    def keyPressEvent(self, e: QKeyEvent | None) -> None:
         super().keyPressEvent(e)
-        if e.key() == Qt.Key.Key_Delete:
+        if e is not None and e.key() == Qt.Key.Key_Delete:
             selected_ids = self.get_selected_profile_ids()
             if selected_ids:
                 self.soft_delete_requested.emit(selected_ids)
 
-    def contextMenuEvent(self, event) -> None:
+    def contextMenuEvent(self, event: QContextMenuEvent | None) -> None:
+        if event is None:
+            return
         pos = event.pos()
         item = self.itemAt(pos)
         if not item:

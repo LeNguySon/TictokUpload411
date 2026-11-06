@@ -2,8 +2,8 @@
 Proxy Manager Dialog for bulk import, async health checks, and leak protection.
 """
 
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QColor
+from PyQt6.QtCore import QPoint, Qt
+from PyQt6.QtGui import QCloseEvent, QColor
 from PyQt6.QtWidgets import (
     QApplication,
     QDialog,
@@ -12,6 +12,7 @@ from PyQt6.QtWidgets import (
     QLabel,
     QTableWidgetItem,
     QVBoxLayout,
+    QWidget,
 )
 from qfluentwidgets import (
     Action,
@@ -50,7 +51,7 @@ class ProxyManagerDialog(QDialog):
         self,
         proxy_repo: ProxyRepository,
         proxy_service: ProxyService,
-        parent=None,
+        parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self.proxy_repo = proxy_repo
@@ -155,7 +156,7 @@ class ProxyManagerDialog(QDialog):
 
         for row_idx, p in enumerate(proxies):
 
-            def make_item(text: str, align=Qt.AlignmentFlag.AlignCenter):
+            def make_item(text: str, align: Qt.AlignmentFlag = Qt.AlignmentFlag.AlignCenter) -> QTableWidgetItem:
                 item = QTableWidgetItem(str(text))
                 item.setTextAlignment(align)
                 item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
@@ -243,7 +244,7 @@ class ProxyManagerDialog(QDialog):
         except Exception:
             pass
 
-    def closeEvent(self, event) -> None:
+    def closeEvent(self, event: QCloseEvent | None) -> None:
         self._disconnect_signals()
         super().closeEvent(event)
 
@@ -265,7 +266,7 @@ class ProxyManagerDialog(QDialog):
             parent=self,
         )
 
-    def _on_table_context_menu(self, pos) -> None:
+    def _on_table_context_menu(self, pos: QPoint) -> None:
         item = self.table.itemAt(pos)
         if not item:
             return
@@ -276,13 +277,13 @@ class ProxyManagerDialog(QDialog):
             self.table.clearSelection()
             self.table.selectRow(clicked_row)
 
-        selected_rows = sorted({idx.row() for idx in self.table.selectedIndexes()})
-        if not selected_rows:
+        selected_row_list = sorted({idx.row() for idx in self.table.selectedIndexes()})
+        if not selected_row_list:
             return
 
         selected_ids: list[int] = []
         selected_proxies = []
-        for r in selected_rows:
+        for r in selected_row_list:
             id_item = self.table.item(r, 0)
             if id_item and id_item.text().isdigit():
                 pid = int(id_item.text())
@@ -374,7 +375,7 @@ class ProxyManagerDialog(QDialog):
         from PyQt6.QtCore import QRunnable
 
         class RotateRunnable(QRunnable):
-            def run(self_inner):
+            def run(self_inner) -> None:
                 try:
                     req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
                     urllib.request.urlopen(req, timeout=10)

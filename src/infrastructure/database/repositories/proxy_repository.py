@@ -43,12 +43,13 @@ def parse_proxy_line(raw_line: str) -> tuple[str, int, str | None, str | None, s
         change_ip_url = match_url.group(1)
         line = line[: match_url.start()]
 
-    protocol: str | None = "http"
+    protocol = "http"
     if "://" in line:
         scheme, line = line.split("://", 1)
-        protocol = normalize_protocol(scheme)
-        if protocol is None:
+        normalized = normalize_protocol(scheme)
+        if normalized is None:
             return None
+        protocol = normalized
 
     # Format 2 & 3: user:pass@host:port — the LAST "@" separates credentials from the host.
     if "@" in line:

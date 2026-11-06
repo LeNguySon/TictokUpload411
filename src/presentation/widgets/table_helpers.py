@@ -5,7 +5,21 @@ Presentation Table formatting helpers and canonical column definitions for Windo
 from typing import Any
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QTableWidgetItem
+from PyQt6.QtWidgets import QHeaderView, QTableView, QTableWidgetItem
+
+
+def h_header(table: QTableView) -> QHeaderView:
+    """The table's horizontal header (Qt's stubs type it Optional; a QTableView always has one)."""
+    header = table.horizontalHeader()
+    assert header is not None
+    return header
+
+
+def v_header(table: QTableView) -> QHeaderView:
+    """The table's vertical header (Qt's stubs type it Optional; a QTableView always has one)."""
+    header = table.verticalHeader()
+    assert header is not None
+    return header
 
 
 class NumericTableWidgetItem(QTableWidgetItem):

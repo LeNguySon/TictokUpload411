@@ -7,6 +7,7 @@ from PyQt6.QtWidgets import (
     QFormLayout,
     QHBoxLayout,
     QVBoxLayout,
+    QWidget,
 )
 from qfluentwidgets import (
     FluentIcon,
@@ -30,7 +31,7 @@ class PermissionsDialog(QDialog):
     Dialog assisting creators in generating TikTok OAuth authorization URLs and exchanging tokens.
     """
 
-    def __init__(self, parent=None) -> None:
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Cấp Quyền & Ủy Quyền TikTok OAuth 2.0")
         self.resize(520, 340)

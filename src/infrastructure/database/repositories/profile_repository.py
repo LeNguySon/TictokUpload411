@@ -79,6 +79,7 @@ class ProfileRepository:
             placeholders = ", ".join("?" for _ in cols)
             sql = f"INSERT INTO profiles ({', '.join(cols)}) VALUES ({placeholders});"
             cur = conn.execute(sql, tuple(clean_payload.values()))
+            assert cur.lastrowid is not None  # always set after a successful INSERT
             return int(cur.lastrowid)
 
     def get_by_id(self, profile_id: int) -> dict[str, Any] | None:

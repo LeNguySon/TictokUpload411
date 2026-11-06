@@ -43,7 +43,7 @@ class ProfileRuntimeSyncWorker(BaseWorker):
         self.profiles = profiles
         self.launcher = launcher
         self.profile_repo = profile_repo
-        self.signals = ProfileRuntimeSyncSignals(parent)
+        self.signals: ProfileRuntimeSyncSignals = ProfileRuntimeSyncSignals(parent)
         self.setAutoDelete(False)  # Managed cooperatively by caller / ThreadPoolManager
 
     def execute(self) -> None:

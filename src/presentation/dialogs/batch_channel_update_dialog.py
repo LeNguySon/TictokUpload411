@@ -18,6 +18,7 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QVBoxLayout,
+    QWidget,
 )
 from qfluentwidgets import (
     CheckBox,
@@ -56,7 +57,7 @@ class BatchChannelUpdateDialog(QDialog):
         profile_repo: ProfileRepository | None = None,
         db_path: Path | str | None = None,
         signal_bus: AppSignalBus | None = None,
-        parent=None,
+        parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self.selected_profile_ids = selected_profile_ids
@@ -244,10 +245,10 @@ class BatchChannelUpdateDialog(QDialog):
             signal_bus=self.signal_bus,
         )
 
-        def on_prog(cur, tot, pct):
+        def on_prog(cur: int, tot: int, pct: float) -> None:
             self.progress_bar.setValue(int(pct))
 
-        def on_done():
+        def on_done() -> None:
             self.progress_bar.setValue(100)
             InfoBar.success(
                 title="Cập Nhật Thành Công",

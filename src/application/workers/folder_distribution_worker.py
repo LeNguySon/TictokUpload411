@@ -68,7 +68,7 @@ class FolderDistributionWorker(QRunnable):
         self.allow_hd = allow_hd
         self.is_ai_generated = is_ai_generated
 
-        self.signals = FolderDistributionSignals()
+        self.signals: FolderDistributionSignals = FolderDistributionSignals()
         self._cancelled: bool = False
         self.setAutoDelete(True)
 
@@ -102,7 +102,7 @@ class FolderDistributionWorker(QRunnable):
                     cancel_token=lambda: self._cancelled,
                 )
             else:
-                items: list[dict[str, Any]] = self.upload_service.distribute_folder_videos_to_queue(
+                items = self.upload_service.distribute_folder_videos_to_queue(
                     folder_path=self.folder_path or "",
                     profile_ids=self.profile_ids,
                     min_interval_hours=self.min_interval_hours,

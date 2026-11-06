@@ -30,7 +30,7 @@ class TableSettingsDialog(QDialog):
     Dialog allowing creators to show or hide specific columns in the 28-column profile table.
     """
 
-    def __init__(self, hidden_columns: set[int] | None = None, parent=None) -> None:
+    def __init__(self, hidden_columns: set[int] | None = None, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.headers = get_profile_table_headers()
         self.hidden_columns: set[int] = set(hidden_columns or set())
@@ -65,8 +65,8 @@ class TableSettingsDialog(QDialog):
         grid.setSpacing(8)
 
         # 3 columns layout
-        for idx, header in enumerate(self.headers):
-            chk = CheckBox(f"{idx}. {header}", container)
+        for idx, column_name in enumerate(self.headers):
+            chk = CheckBox(f"{idx}. {column_name}", container)
             chk.setChecked(idx not in self.hidden_columns)
             self._checkboxes[idx] = chk
             row = idx // 3

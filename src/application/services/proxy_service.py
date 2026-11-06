@@ -95,7 +95,8 @@ class ProxyService:
             raise ValueError(f"Proxy {proxy_id} does not have an IP rotation URL configured")
 
         item = self._to_proxy_item(row)
-        return sammonny.trigger_ip_rotation(item)
+        rotation: dict[str, Any] = sammonny.trigger_ip_rotation(item)
+        return rotation
 
     def change_rotating_ip(self, proxy_id: int) -> dict[str, Any]:
         """Alias for rotate_proxy_ip for backward compatibility."""

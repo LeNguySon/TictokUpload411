@@ -4,7 +4,7 @@ Base Worker Class for QRunnable background tasks with cooperative cancellation a
 
 import logging
 
-from PyQt6.QtCore import QObject, QRunnable, pyqtSignal
+from PyQt6.QtCore import QObject, QRunnable, pyqtBoundSignal, pyqtSignal
 
 logger = logging.getLogger(__name__)
 
@@ -40,20 +40,12 @@ class BaseWorker(QRunnable):
         return self._cancelled
 
     @property
-    def started(self):
+    def started(self) -> pyqtBoundSignal:
         return self.signals.started
 
     @property
-    def finished(self):
+    def finished(self) -> pyqtBoundSignal:
         return self.signals.finished
-
-    @property
-    def completed(self):
-        return self.signals.completed
-
-    @property
-    def failed(self):
-        return self.signals.failed
 
     def run(self) -> None:
         """Template method wrapping execute() in try-except and lifecycle signals."""

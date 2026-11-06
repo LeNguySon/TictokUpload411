@@ -7,10 +7,10 @@ import os
 import subprocess
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from PyQt6.QtCore import QPoint, QSettings, QSize, Qt, QTimer, QUrl
-from PyQt6.QtGui import QDesktopServices, QKeySequence, QShortcut
+from PyQt6.QtGui import QCloseEvent, QDesktopServices, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QApplication,
     QDialog,
@@ -77,7 +77,7 @@ from src.presentation.dialogs.assign_proxy_dialog import AssignProxyDialog
 from src.presentation.dialogs.batch_folder_upload_dialog import BatchFolderUploadDialog
 from src.presentation.dialogs.bulk_add_profile_dialog import BulkAddProfileDialog
 from src.presentation.dialogs.bulk_edit_profile_dialog import BulkEditProfileDialog
-from src.presentation.dialogs.channel_radar_dialog import ChannelRadarDialog
+from src.presentation.dialogs.channel_radar_dialog import ChannelRadarDialog, load_radar_inputs
 from src.presentation.dialogs.license_activation_dialog import LicenseActivationDialog
 from src.presentation.dialogs.permissions_dialog import PermissionsDialog
 from src.presentation.dialogs.project_dialog import ProjectManagerDialog
@@ -114,10 +114,14 @@ PROFILE_SEARCH_WIDTH = 340
 SEARCH_DEBOUNCE_MS = 200
 UPLOAD_NOTICE_COALESCE_MS = 1500
 
+if TYPE_CHECKING:
+    from src.application.workers.profile_runtime_sync_worker import ProfileRuntimeSyncWorker
+
 logger = logging.getLogger(__name__)
 
 
 class TikTokManagerMainWindow(QMainWindow):
+    _active_status_sync_worker: "ProfileRuntimeSyncWorker | None" = None
     """
     Main Desktop Window implementing the dual-table vertical splitter layout
     with full Windows 11 Fluent UI aesthetics and multithreaded backend integration.
@@ -126,7 +130,7 @@ class TikTokManagerMainWindow(QMainWindow):
     def __init__(
         self,
         db_path: Path | str | None = None,
-        parent=None,
+        parent: QWidget | None = None,
         license_service: LicenseService | None = None,
     ) -> None:
         super().__init__(parent)
@@ -272,7 +276,8 @@ class TikTokManagerMainWindow(QMainWindow):
             # Clock-rollback guard: persist the latest time seen (file I/O, off the GUI thread).
             self.license_clock_timer = QTimer(self)
             self.license_clock_timer.setInterval(30 * 60_000)
-            self.license_clock_timer.timeout.connect(lambda: run_task(self.license_service.record_seen_time))
+            license_service = self.license_service
+            self.license_clock_timer.timeout.connect(lambda: run_task(license_service.record_seen_time))
             self.license_clock_timer.start()
 
     def _init_ui(self) -> None:
@@ -1642,13 +1647,32 @@ class TikTokManagerMainWindow(QMainWindow):
                 )
                 return
 
-        dlg = ChannelRadarDialog(
-            profile_id=target_id,
-            profile_repo=self.profile_repo,
-            db_path=self.db_path,
-            parent=self,
+        radar_profile_id = target_id
+
+        def open_radar(inputs: tuple[dict[str, Any], list[dict[str, Any]]]) -> None:
+            profile, videos = inputs
+            dlg = ChannelRadarDialog(
+                profile_id=radar_profile_id,
+                profile_repo=self.profile_repo,
+                db_path=self.db_path,
+                parent=self,
+                profile=profile,
+                videos=videos,
+            )
+            dlg.exec()
+
+        def radar_failed(err: str) -> None:
+            InfoBar.error(title="Lỗi Radar Kênh", content=err, position=InfoBarPosition.TOP, parent=self)
+
+        # Profile + video history are read off the GUI thread; the dialog opens when they arrive.
+        run_task(
+            load_radar_inputs,
+            self.profile_repo,
+            self.db_path,
+            radar_profile_id,
+            on_result=open_radar,
+            on_error=radar_failed,
         )
-        dlg.exec()
 
     def _on_open_account_health(self, profile_id: int | None = None) -> None:
         if not self._feature_allowed(Feature.CHANNEL_HEALTH):
@@ -2562,7 +2586,7 @@ class TikTokManagerMainWindow(QMainWindow):
         except Exception as e:
             logger.warning("Exit cache cleanup failed: %s", e)
 
-    def closeEvent(self, event) -> None:
+    def closeEvent(self, event: QCloseEvent | None) -> None:
         """Cleanup Chromium RAM working set and shutdown daemon before closing application."""
         try:
             if hasattr(self, "_active_status_sync_worker") and self._active_status_sync_worker:
@@ -2599,7 +2623,8 @@ class TikTokManagerMainWindow(QMainWindow):
             self.daemon_supervisor.shutdown()
         except Exception:
             pass
-        event.accept()
+        if event is not None:
+            event.accept()
 
 
 # Parity Alias

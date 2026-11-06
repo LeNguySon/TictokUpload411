@@ -15,6 +15,7 @@ from PyQt6.QtWidgets import (
     QLabel,
     QTableWidgetItem,
     QVBoxLayout,
+    QWidget,
 )
 from qfluentwidgets import (
     CheckBox,
@@ -67,7 +68,7 @@ class BulkAddProfileDialog(QDialog):
         profile_repo: ProfileRepository,
         project_repo: ProjectRepository,
         proxy_repo: ProxyRepository,
-        parent=None,
+        parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self.profile_repo = profile_repo
@@ -414,12 +415,8 @@ class BulkAddProfileDialog(QDialog):
                 }
                 prof_id = self.profile_repo.create(profile_data)
 
-            # Secure Vault credentials storage
-            if prof_id and password:
-                try:
-                    self.vault.save_credentials(prof_id, user_name, password)
-                except Exception:
-                    pass
+            # The account password is kept in extra_fields (profiles.password). A Vault copy used to be
+            # attempted here through a method the Vault never had (AttributeError, silently swallowed).
 
             # Auto inject cookies into local Chromium SQLite
             if auto_inject and cookie:
