@@ -8,6 +8,7 @@ Gracefully falls back to a clean placeholder icon if no avatar is cached.
 
 from __future__ import annotations
 
+import logging
 import time
 from pathlib import Path
 
@@ -21,6 +22,8 @@ from PyQt6.QtGui import (
 )
 from PyQt6.QtWidgets import QStyledItemDelegate, QStyleOptionViewItem, QWidget
 from qfluentwidgets import isDarkTheme
+
+logger = logging.getLogger(__name__)
 
 _AVATAR_PIXMAP_CACHE: dict[str, QPixmap] = {}
 # Paths known to be missing -> monotonic time of the check. Without this, every repaint of every
@@ -72,8 +75,8 @@ def get_cached_avatar_pixmap(path_str: str, size: int) -> QPixmap | None:
                 _AVATAR_PIXMAP_CACHE.clear()
             _AVATAR_PIXMAP_CACHE[cache_key] = scaled
             return scaled
-    except Exception:
-        pass
+    except Exception as ignored:
+        logger.debug("get_cached_avatar_pixmap: ignored error: %s", ignored)
     return None
 
 

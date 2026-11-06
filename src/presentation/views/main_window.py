@@ -144,8 +144,8 @@ class TikTokManagerMainWindow(QMainWindow):
 
             if isDarkTheme():
                 setTheme(Theme.LIGHT)
-        except Exception:
-            pass
+        except Exception as suppressed:
+            logger.debug("__init__: ignored error: %s", suppressed)
 
         # Repositories
         self.project_repo = ProjectRepository(self.db_path)
@@ -2594,8 +2594,8 @@ class TikTokManagerMainWindow(QMainWindow):
             if hasattr(self, "thread_pool"):
                 self.thread_pool.cancel_all()
                 self.thread_pool.pool.waitForDone(300)
-        except Exception:
-            pass
+        except Exception as suppressed:
+            logger.debug("closeEvent: ignored error: %s", suppressed)
 
         try:
             if hasattr(self, "scheduler_timer") and self.scheduler_timer.isActive():
@@ -2607,22 +2607,22 @@ class TikTokManagerMainWindow(QMainWindow):
             for name in ("license_timer", "license_clock_timer"):
                 if hasattr(self, name):
                     getattr(self, name).stop()
-        except Exception:
-            pass
+        except Exception as suppressed:
+            logger.debug("closeEvent: ignored error: %s", suppressed)
 
         try:
             self.signal_bus.profile_updated.disconnect(self._on_profile_updated)
             self.signal_bus.upload_completed.disconnect(self._on_upload_completed)
             self.signal_bus.upload_failed.disconnect(self._on_upload_failed)
-        except Exception:
-            pass
+        except Exception as suppressed:
+            logger.debug("closeEvent: ignored error: %s", suppressed)
 
         if hasattr(self, "chk_clean_exit") and self.chk_clean_exit.isChecked():
             self._clean_cache_on_exit()
         try:
             self.daemon_supervisor.shutdown()
-        except Exception:
-            pass
+        except Exception as suppressed:
+            logger.debug("closeEvent: ignored error: %s", suppressed)
         if event is not None:
             event.accept()
 

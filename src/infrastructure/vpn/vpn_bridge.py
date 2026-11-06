@@ -160,8 +160,8 @@ class UserspaceVpnBridge:
         if self._mock_server:
             try:
                 self._mock_server.close()
-            except Exception:
-                pass
+            except Exception as ignored:
+                logger.debug("stop: ignored error: %s", ignored)
             self._mock_server = None
 
         if self._process is not None:
@@ -171,8 +171,8 @@ class UserspaceVpnBridge:
             except Exception:
                 try:
                     self._process.kill()
-                except Exception:
-                    pass
+                except Exception as ignored:
+                    logger.debug("stop: ignored error: %s", ignored)
             self._process = None
 
         self.local_port = None

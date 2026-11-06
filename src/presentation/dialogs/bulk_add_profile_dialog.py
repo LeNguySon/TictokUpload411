@@ -3,6 +3,7 @@ Bulk Add Profile Dialog supporting multi-line account import, customizable field
 and automatic browser cookie injection for zero-click TikTok login.
 """
 
+import logging
 import time
 from typing import Any
 
@@ -55,6 +56,9 @@ def parse_bulk_profile_line(line: str, default_name_prefix: str = "TikTok") -> d
         "email": res.get("email"),
         "note": res.get("note"),
     }
+
+
+logger = logging.getLogger(__name__)
 
 
 class BulkAddProfileDialog(QDialog):
@@ -348,6 +352,7 @@ class BulkAddProfileDialog(QDialog):
         created_count = 0
         injected_count = 0
         bad_proxy_rows: list[str] = []
+        cookie_failed_rows: list[str] = []
 
         from src.application.services.gologin_sync_service import GoLoginSyncService
 
@@ -427,13 +432,25 @@ class BulkAddProfileDialog(QDialog):
 
                         target_p_dir = OrbitaLauncher.resolve_profile_dir(p_row)
                         BrowserCookieInjector.seed_profile_cookies(target_p_dir, cookie)
-                    except Exception:
-                        pass
-                injected_count += 1
+                        injected_count += 1
+                    except Exception as exc:
+                        logger.warning("Cookie seeding failed for imported profile %s: %s", user_name, exc)
+                        cookie_failed_rows.append(user_name)
 
             created_count += 1
 
         inject_msg = f" Đã nạp cookie tự động đăng nhập cho {injected_count} tài khoản." if injected_count > 0 else ""
+        if cookie_failed_rows:
+            InfoBar.warning(
+                title="Chưa nạp được cookie",
+                content=(
+                    f"{len(cookie_failed_rows)} hồ sơ đã tạo nhưng KHÔNG nạp được cookie đăng nhập: "
+                    f"{', '.join(cookie_failed_rows[:5])}{'…' if len(cookie_failed_rows) > 5 else ''}."
+                ),
+                position=InfoBarPosition.TOP,
+                duration=8000,
+                parent=self.parent() or self,
+            )
         if bad_proxy_rows:
             InfoBar.warning(
                 title="Proxy sai định dạng",

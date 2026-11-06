@@ -298,8 +298,8 @@ class BrowserProcessSupervisor:
             for proc in alive:
                 try:
                     proc.kill()
-                except Exception:
-                    pass
+                except Exception as ignored:
+                    logger.debug("shutdown_process_tree: ignored error: %s", ignored)
             psutil.wait_procs(alive, timeout=1.0)
 
         return True
@@ -346,8 +346,8 @@ class BrowserProcessSupervisor:
                     if handle:
                         if psapi.EmptyWorkingSet(handle) != 0:
                             trimmed_count += 1
-                except Exception:
-                    pass
+                except Exception as ignored:
+                    logger.debug("trim_working_set: ignored error: %s", ignored)
                 finally:
                     if handle:
                         kernel32.CloseHandle(handle)

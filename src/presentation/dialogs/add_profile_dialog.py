@@ -2,6 +2,7 @@
 Add Profile Dialog for creating individual or bulk TikTok MMO profiles.
 """
 
+import logging
 from typing import Any
 
 from PyQt6.QtWidgets import (
@@ -35,6 +36,8 @@ from src.presentation.dialogs.dialog_helpers import (
     STANDARD_DIALOG_SPACING,
     create_dialog_header,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class AddProfileDialog(QDialog):
@@ -242,13 +245,13 @@ class AddProfileDialog(QDialog):
             if cookie:
                 try:
                     BrowserCookieInjector.seed_profile_cookies(prof_dir, cookie)
-                except Exception:
-                    pass
+                except Exception as ignored:
+                    logger.debug("_on_save: ignored error: %s", ignored)
             try:
                 launcher = OrbitaLauncher()
                 launcher.prepare_profile_environment(prof_dir, profile_data)
-            except Exception:
-                pass
+            except Exception as ignored:
+                logger.debug("_on_save: ignored error: %s", ignored)
 
         # AgentShield: Save access token to Windows Vault DPAPI
         if token and profile_id:

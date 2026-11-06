@@ -64,6 +64,6 @@ class CookieSessionService:
             try:
                 public = {k: v for k, v in updates.items() if k != "cookies_browser"}
                 self.signal_bus.profile_updated.emit(profile_id, public)
-            except Exception:
-                pass
+            except Exception as ignored:
+                logger.debug("capture: ignored error: %s", ignored)
         return CaptureResult(True, True, expires_at, "Đã lưu phiên đăng nhập mới")

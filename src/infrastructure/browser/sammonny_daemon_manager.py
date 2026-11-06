@@ -70,8 +70,8 @@ class SamMonnyDaemonSupervisor:
                     data = json.loads(resp.read().decode("utf-8"))
                     result["daemon_7654"] = True
                     result["info_7654"] = data
-        except Exception:
-            pass
+        except Exception as ignored:
+            logger.debug("check_health: ignored error: %s", ignored)
 
         # Check GoLogin SDK port (36912)
         try:
@@ -80,8 +80,8 @@ class SamMonnyDaemonSupervisor:
             with urllib.request.urlopen(req, timeout=1.5) as resp:
                 if resp.getcode() == 200:
                     result["sdk_36912"] = True
-        except Exception:
-            pass
+        except Exception as ignored:
+            logger.debug("check_health: ignored error: %s", ignored)
 
         return result
 
@@ -156,7 +156,7 @@ class SamMonnyDaemonSupervisor:
             except Exception:
                 try:
                     self._spawned_process.kill()
-                except Exception:
-                    pass
+                except Exception as ignored:
+                    logger.debug("shutdown: ignored error: %s", ignored)
             finally:
                 self._spawned_process = None

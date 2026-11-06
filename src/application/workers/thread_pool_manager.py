@@ -66,8 +66,8 @@ class ThreadPoolManager(QObject):
 
                 if not shiboken6.isValid(cls._instance) or not shiboken6.isValid(cls._instance.pool):
                     cls._instance = None
-            except Exception:
-                pass
+            except Exception as ignored:
+                logger.debug("instance: ignored error: %s", ignored)
 
         if cls._instance is not None:
             try:

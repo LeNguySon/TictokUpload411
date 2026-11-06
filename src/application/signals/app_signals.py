@@ -2,7 +2,11 @@
 Central Typed PyQt6 Signal Bus for cross-thread event dispatching.
 """
 
+import logging
+
 from PyQt6.QtCore import QObject, pyqtSignal
+
+logger = logging.getLogger(__name__)
 
 
 class AppSignalBus(QObject):
@@ -45,8 +49,8 @@ class AppSignalBus(QObject):
 
                 if not shiboken6.isValid(cls._instance):
                     cls._instance = None
-            except Exception:
-                pass
+            except Exception as ignored:
+                logger.debug("instance: ignored error: %s", ignored)
 
         if cls._instance is not None:
             try:
@@ -54,8 +58,8 @@ class AppSignalBus(QObject):
 
                 if not shiboken6.isValid(cls._instance):
                     cls._instance = None
-            except Exception:
-                pass
+            except Exception as ignored:
+                logger.debug("instance: ignored error: %s", ignored)
 
         if cls._instance is not None:
             try:

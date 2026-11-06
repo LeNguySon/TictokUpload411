@@ -47,8 +47,8 @@ class ProfileService:
                 if update_fields:
                     self.profile_repo.update(profile_id, **update_fields)
                 return creator_data
-            except Exception:
-                pass
+            except Exception as ignored:
+                logger.debug("sync_metrics_from_tiktok: ignored error: %s", ignored)
 
         from src.infrastructure.tiktok.passive_sync_service import PassiveTikTokSyncService
 

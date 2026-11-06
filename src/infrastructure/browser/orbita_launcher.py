@@ -492,8 +492,8 @@ class OrbitaLauncher:
                 try:
                     proc.kill()
                     closed = True
-                except Exception:
-                    pass
+                except Exception as ignored:
+                    logger.debug("close_profile: ignored error: %s", ignored)
 
         # Remove lock file
         if p_id is not None and p_id in self._active_profile_dirs:
@@ -696,8 +696,8 @@ class OrbitaLauncher:
                         self._active_sdk_sessions.pop(p_id, None)
                         if uuid_val:
                             self._active_sdk_sessions.pop(str(uuid_val), None)
-                except Exception:
-                    pass
+                except Exception as ignored:
+                    logger.debug("batch_check_profiles_running: ignored error: %s", ignored)
 
             pending_check.append(p)
 
@@ -721,8 +721,8 @@ class OrbitaLauncher:
                             daemon_running_uuids.add(str(dp.id).lower())
                         if dp.name:
                             daemon_running_uuids.add(str(dp.name).lower())
-            except Exception:
-                pass
+            except Exception as ignored:
+                logger.debug("batch_check_profiles_running: ignored error: %s", ignored)
 
         # 3. Check supervisor locks & daemon UUID matches for pending
         remaining_for_psutil: list[dict[str, Any]] = []
@@ -803,8 +803,8 @@ class OrbitaLauncher:
                     self._active_sdk_sessions.pop(p_id, None)
                     if uuid_val:
                         self._active_sdk_sessions.pop(str(uuid_val), None)
-            except Exception:
-                pass
+            except Exception as ignored:
+                logger.debug("is_profile_running: ignored error: %s", ignored)
 
         # 3. Check SamMonny Daemon API (if uuid_val is present)
         if uuid_val:
@@ -824,8 +824,8 @@ class OrbitaLauncher:
                         return True
                     elif not prof.port:
                         return True
-            except Exception:
-                pass
+            except Exception as ignored:
+                logger.debug("is_profile_running: ignored error: %s", ignored)
 
         # 4. Check active profile directory lock via supervisor
         if p_id is not None and p_id in self._active_profile_dirs:

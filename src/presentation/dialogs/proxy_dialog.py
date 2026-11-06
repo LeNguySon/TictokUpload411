@@ -2,6 +2,8 @@
 Proxy Manager Dialog for bulk import, async health checks, and leak protection.
 """
 
+import logging
+
 from PyQt6.QtCore import QPoint, Qt
 from PyQt6.QtGui import QCloseEvent, QColor
 from PyQt6.QtWidgets import (
@@ -29,6 +31,7 @@ from qfluentwidgets import (
 from src.application.services.proxy_service import ProxyService
 from src.application.signals.app_signals import AppSignalBus
 from src.application.workers.proxy_check_worker import ProxyCheckWorker
+from src.application.workers.task_worker import run_task
 from src.application.workers.thread_pool_manager import ThreadPoolManager
 from src.infrastructure.database.repositories.proxy_repository import (
     ProxyRepository,
@@ -39,6 +42,17 @@ from src.presentation.dialogs.dialog_helpers import (
     create_dialog_header,
 )
 from src.presentation.widgets.fast_table import FastTableWidget
+
+logger = logging.getLogger(__name__)
+
+
+def rotate_ip_via_url(url: str, timeout: float = 10.0) -> int:
+    """Pokes a proxy provider's change-IP URL; raises on network/HTTP failure, returns the status."""
+    import urllib.request
+
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return int(resp.status)
 
 
 class ProxyManagerDialog(QDialog):
@@ -219,8 +233,8 @@ class ProxyManagerDialog(QDialog):
     def _on_proxy_checked(self, proxy_id: int, is_alive: bool, latency: float, status: str) -> None:
         try:
             self.refresh_proxies()
-        except Exception:
-            pass
+        except Exception as ignored:
+            logger.debug("_on_proxy_checked: ignored error: %s", ignored)
 
     def _on_proxy_leak_alert(self, proxy_id: int, reason: str) -> None:
         try:
@@ -231,18 +245,18 @@ class ProxyManagerDialog(QDialog):
                 duration=8000,
                 parent=self,
             )
-        except Exception:
-            pass
+        except Exception as ignored:
+            logger.debug("_on_proxy_leak_alert: ignored error: %s", ignored)
 
     def _disconnect_signals(self) -> None:
         try:
             self.signal_bus.proxy_checked.disconnect(self._on_proxy_checked)
-        except Exception:
-            pass
+        except Exception as ignored:
+            logger.debug("_disconnect_signals: ignored error: %s", ignored)
         try:
             self.signal_bus.proxy_leak_detected.disconnect(self._on_proxy_leak_alert)
-        except Exception:
-            pass
+        except Exception as ignored:
+            logger.debug("_disconnect_signals: ignored error: %s", ignored)
 
     def closeEvent(self, event: QCloseEvent | None) -> None:
         self._disconnect_signals()
@@ -370,22 +384,23 @@ class ProxyManagerDialog(QDialog):
         )
 
     def _trigger_rotate_ip(self, url: str) -> None:
-        import urllib.request
+        """Calls the provider's IP-rotation endpoint off the GUI thread and reports the real outcome."""
 
-        from PyQt6.QtCore import QRunnable
+        def rotated(_: object) -> None:
+            InfoBar.success(
+                title="Kích Hoạt Xoay IP",
+                content="Nhà cung cấp đã nhận lệnh đổi IP.",
+                position=InfoBarPosition.TOP,
+                parent=self,
+            )
 
-        class RotateRunnable(QRunnable):
-            def run(self_inner) -> None:
-                try:
-                    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-                    urllib.request.urlopen(req, timeout=10)
-                except Exception:
-                    pass
+        def failed(err: str) -> None:
+            logger.warning("IP rotation request failed: %s", err)
+            InfoBar.error(
+                title="Xoay IP Thất Bại",
+                content=f"Không gọi được endpoint đổi IP của nhà cung cấp: {err}",
+                position=InfoBarPosition.TOP,
+                parent=self,
+            )
 
-        ThreadPoolManager.instance().dispatch(RotateRunnable())
-        InfoBar.info(
-            title="Kích Hoạt Xoay IP",
-            content="Đã phát lệnh đổi IP tới endpoint nhà cung cấp.",
-            position=InfoBarPosition.TOP,
-            parent=self,
-        )
+        run_task(rotate_ip_via_url, url, on_result=rotated, on_error=failed)

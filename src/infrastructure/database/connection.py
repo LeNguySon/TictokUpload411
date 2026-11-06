@@ -5,12 +5,15 @@ Clean Architecture: Infrastructure Layer.
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 import threading
 import time
 from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_DB_PATH = Path("data/app.db")
 
@@ -78,8 +81,8 @@ def db_session(db_path: Path | str | None = None, *, write: bool = True) -> Gene
                 if conn is not None:
                     try:
                         conn.close()
-                    except Exception:
-                        pass
+                    except Exception as ignored:
+                        logger.debug("db_session: ignored error: %s", ignored)
                     conn = None
                 if "locked" not in str(exc).lower() or attempt == 9:
                     raise
@@ -96,14 +99,14 @@ def db_session(db_path: Path | str | None = None, *, write: bool = True) -> Gene
         if conn is not None and write:
             try:
                 conn.rollback()
-            except Exception:
-                pass
+            except Exception as ignored:
+                logger.debug("db_session: ignored error: %s", ignored)
         raise
     finally:
         if conn is not None:
             try:
                 conn.close()
-            except Exception:
-                pass
+            except Exception as ignored:
+                logger.debug("db_session: ignored error: %s", ignored)
         if lock is not None:
             lock.release()

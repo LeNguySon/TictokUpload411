@@ -3,10 +3,13 @@ Network Leak Policy (AgentShield Tier-1 Security Rule).
 Verifies that outbound proxy egress IP does not match any local machine/host IP address.
 """
 
+import logging
 import socket
 import time
 import urllib.request
 from dataclasses import dataclass
+
+logger = logging.getLogger(__name__)
 
 _PUBLIC_IP_SERVICES = ("https://api.ipify.org", "https://ifconfig.me/ip", "https://icanhazip.com")
 _PUBLIC_IP_CACHE: dict[str, tuple[float, str | None]] = {}
@@ -64,8 +67,8 @@ class NetworkLeakPolicy:
             for item in addr_info:
                 ip = item[4][0]
                 ips.add(str(ip))
-        except Exception:
-            pass
+        except Exception as ignored:
+            logger.debug("_discover_local_ips: ignored error: %s", ignored)
         return ips
 
     def evaluate(self, proxy_egress_ip: str | None) -> LeakAuditResult:

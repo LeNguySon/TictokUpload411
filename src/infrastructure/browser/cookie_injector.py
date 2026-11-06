@@ -406,5 +406,5 @@ class BrowserCookieInjector:
             if conn:
                 try:
                     conn.close()
-                except Exception:
-                    pass
+                except Exception as ignored:
+                    logger.debug("inject_to_chromium_sqlite: ignored error: %s", ignored)

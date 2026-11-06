@@ -558,8 +558,8 @@ class TikTokModerationService:
                             "date_reapply": str(date_reapply),
                             "error": f"Thời gian nộp lại đơn chưa đến hạn (còn {days_left} ngày).",
                         }
-                except Exception:
-                    pass
+                except Exception as ignored:
+                    logger.debug("submit_creator_rewards_reapply: ignored error: %s", ignored)
 
             if not mock_success:
                 url = "https://www.tiktok.com/creator-center/api/creator/rewards/reapply"

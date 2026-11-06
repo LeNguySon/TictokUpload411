@@ -595,8 +595,8 @@ def attach_playwright_sniffer(
                 body = response.json()
                 if isinstance(body, dict):
                     sniffer.process_api_response(profile_id, url, body)
-            except Exception:
-                pass
+            except Exception as ignored:
+                logger.debug("on_response: ignored error: %s", ignored)
         except Exception as exc:
             logger.debug("Passive sniffer error on response: %s", exc)
 

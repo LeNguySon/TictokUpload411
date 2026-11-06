@@ -416,8 +416,8 @@ class UploadService:
                     log_callback(stage, msg, level)
                 except TypeError:
                     log_callback(stage, msg)
-                except Exception:
-                    pass
+                except Exception as ignored:
+                    logger.debug("_safe_log: ignored error: %s", ignored)
 
         lock = get_profile_upload_lock(profile_id)
         with lock:

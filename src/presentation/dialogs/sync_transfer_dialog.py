@@ -108,8 +108,8 @@ def import_project_dataset(
                     new_id = project_repo.create(name=name, description=proj.get("description"))
                     project_id_map[proj["id"]] = new_id
                     existing_projects[name] = new_id
-                except Exception:
-                    pass
+                except Exception as ignored:
+                    logger.debug("import_project_dataset: ignored error: %s", ignored)
 
     # Import proxies
     proxy_id_map: dict[int, int] = {}
@@ -125,8 +125,8 @@ def import_project_dataset(
             proxies_imported += 1
             if "id" in px and px_id:
                 proxy_id_map[px["id"]] = px_id
-        except Exception:
-            pass
+        except Exception as ignored:
+            logger.debug("import_project_dataset: ignored error: %s", ignored)
 
     # Import profiles
     for pf in manifest.get("profiles", []):

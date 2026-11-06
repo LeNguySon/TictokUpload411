@@ -29,8 +29,8 @@ def parse_cookies_to_header(cookies_raw: Any) -> str:
                 unprotected = unprotect_text(cookies_str)
                 if unprotected:
                     cookies_str = unprotected.strip()
-            except Exception:
-                pass
+            except Exception as ignored:
+                logger.debug("parse_cookies_to_header: ignored error: %s", ignored)
         if cookies_str.startswith("[") or cookies_str.startswith("{"):
             try:
                 parsed = json.loads(cookies_str)
@@ -90,8 +90,8 @@ class GoLoginTikTokClient:
                     gl_cookies = gl.get_cookies()
                     if gl_cookies:
                         header = parse_cookies_to_header(gl_cookies)
-                except Exception:
-                    pass
+                except Exception as ignored:
+                    logger.debug("get_profile_cookie_header: ignored error: %s", ignored)
             return header
         finally:
             conn.close()
