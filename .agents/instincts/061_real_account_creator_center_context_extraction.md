@@ -1,4 +1,4 @@
-# Instinct 049: Real Account Creator Center Context Extraction & Modern.js Hydration
+# Instinct 061: Real Account Creator Center Context Extraction & Modern.js Hydration
 
 ## Context
 Khi thực hiện trích xuất dữ liệu chuyên sâu cho tài khoản TikTok thực tế (@swall.pain) từ phiên cookie hợp lệ, các endpoint REST truyền thống (`/api/creator/...`) trả về lỗi `"url doesn't match"` do kiến trúc định tuyến mới của TikTok Web.

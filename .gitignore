@@ -34,7 +34,7 @@ htmlcov/
 *.db-shm
 *.sqlite
 *.sqlite3
-gloglin.db*
+gologin.db*
 
 # Profiles & browser storage
 profiles/

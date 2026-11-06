@@ -1,4 +1,4 @@
-# Instinct 060: API chính thức: chia khối, đọc theo khối, tự làm mới token (SDK 1.8.3, 2026-11-07)
+# Instinct 062: API chính thức: chia khối, đọc theo khối, tự làm mới token (SDK 1.8.3, 2026-11-07)
 
 ## Quy tắc TikTok (đã đối chiếu tài liệu, đừng đoán)
 - FILE_UPLOAD: khối 5–64 MB; `total_chunk_count = size // chunk` (làm tròn XUỐNG), khối cuối gánh phần dư (≤ 128 MB);
