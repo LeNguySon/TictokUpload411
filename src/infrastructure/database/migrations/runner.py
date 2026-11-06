@@ -44,6 +44,12 @@ def run_all_migrations(db_path: Path | str | None = None) -> list[str]:
                 conn.execute("ALTER TABLE profiles ADD COLUMN cookie_email TEXT DEFAULT NULL;")
             if "direct_connection" not in prof_cols:
                 conn.execute("ALTER TABLE profiles ADD COLUMN direct_connection INTEGER DEFAULT 0;")
+            if "traffic_source_json" not in prof_cols:
+                conn.execute("ALTER TABLE profiles ADD COLUMN traffic_source_json TEXT DEFAULT NULL;")
+            if "optimal_hour" not in prof_cols:
+                conn.execute("ALTER TABLE profiles ADD COLUMN optimal_hour INTEGER DEFAULT 12;")
+            if "retention_stats_json" not in prof_cols:
+                conn.execute("ALTER TABLE profiles ADD COLUMN retention_stats_json TEXT DEFAULT NULL;")
 
         conn.executescript(DDL_BASE_SCHEMAS)
 

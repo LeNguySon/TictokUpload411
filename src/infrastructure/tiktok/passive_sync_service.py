@@ -302,11 +302,12 @@ class PassiveTikTokSyncService:
 
     def sync_profile_deep_creator_api(self, profile_id: int) -> bool:
         """
-        Executes Authenticated TikTok Creator Center APIs using GoLogin proxy & Chrome 120 TLS:
-        1. /api/user/detail/?uniqueId=... (Channel info, SecUID, Followers, Likes)
-        2. /api/creator/item/list/?count=20 (Recent videos, 30-day views, statisticTable & videoTables)
-        3. /api/creator/dashboard/overview/ (RPM, Revenue, Balance, KYC status)
-        4. /api/creator/violation/ (Policy violations & strikes into violateVideos)
+        Executes Authenticated TikTok Creator Center APIs using GoLogin proxy and Chrome 120 TLS:
+        1. /tiktokstudio/api/web/counter/getHashCount (Item counts, likes, total uploaded videos)
+        2. /tiktok/creator/manage/item_list/v1/ (Recent videos, plays, views, engagement)
+        3. /tiktok/v1/analytics/insights/ and /aweme/v2/data/insight/ (Views history, RPM, rewards)
+        4. /mod/v1/getPenaltyDetails/ (Strikes and Community Guidelines violations)
+        5. Local avatar caching
         """
         row = self.profile_repo.get_by_id(profile_id)
         if not row:
@@ -319,7 +320,7 @@ class PassiveTikTokSyncService:
         clean_user = (row.get("username_on_tiktok") or row.get("name") or "").lstrip("@")
         any_success = False
 
-        # 1. User Detail
+        # 1. User Detail / Channel info
         try:
             url_user = f"https://www.tiktok.com/api/user/detail/?uniqueId={clean_user}"
             resp_user = self.client.request_api(profile_id, url_user, method="GET", timeout=12)
@@ -329,41 +330,108 @@ class PassiveTikTokSyncService:
         except Exception as e:
             logger.debug("Deep sync user detail error for profile %s: %s", profile_id, e)
 
-        # 2. Creator Item List (Videos & Views)
+        # 2. TikTok Studio Counter (Public videos vs Total uploaded videos, likes)
         try:
-            url_items = "https://www.tiktok.com/api/creator/item/list/?count=20"
-            resp_items = self.client.request_api(profile_id, url_items, method="GET", timeout=12)
-            if isinstance(resp_items, dict) and any(
-                k in resp_items for k in ("itemList", "items", "item_list", "creator_item_list")
-            ):
-                if self.sniffer.process_api_response(profile_id, url_items, resp_items):
+            url_counter = "https://www.tiktok.com/tiktokstudio/api/web/counter/getHashCount"
+            resp_counter = self.client.request_api(profile_id, url_counter, method="POST", json_data={}, timeout=10)
+            if isinstance(resp_counter, dict) and "item_count" in resp_counter:
+                if self.sniffer.process_api_response(profile_id, url_counter, resp_counter):
                     any_success = True
+        except Exception as e:
+            logger.debug("Deep sync counter error for profile %s: %s", profile_id, e)
+
+        # 3. TikTok Studio 2026 Item List (Videos & Views)
+        try:
+            url_items_2026 = "https://www.tiktok.com/tiktok/creator/manage/item_list/v1/"
+            resp_items_2026 = self.client.request_api(
+                profile_id,
+                url_items_2026,
+                method="POST",
+                json_data={"cursor": 0, "size": 50, "query": {}},
+                timeout=15,
+            )
+            if isinstance(resp_items_2026, dict) and "item_list" in resp_items_2026:
+                if self.sniffer.process_api_response(profile_id, url_items_2026, resp_items_2026):
+                    any_success = True
+            else:
+                # Fallback to legacy endpoint if available
+                url_items_legacy = "https://www.tiktok.com/api/creator/item/list/?count=20"
+                resp_legacy = self.client.request_api(profile_id, url_items_legacy, method="GET", timeout=12)
+                if isinstance(resp_legacy, dict) and any(
+                    k in resp_legacy for k in ("itemList", "items", "item_list", "creator_item_list")
+                ):
+                    if self.sniffer.process_api_response(profile_id, url_items_legacy, resp_legacy):
+                        any_success = True
         except Exception as e:
             logger.debug("Deep sync item list error for profile %s: %s", profile_id, e)
 
-        # 3. Creator Dashboard Overview (Revenue & Balance)
+        # 4. TikTok Studio 2026 Analytics Insights (Rewards & VV History)
         try:
-            url_dash = "https://www.tiktok.com/api/creator/dashboard/overview/"
-            resp_dash = self.client.request_api(profile_id, url_dash, method="GET", timeout=12)
-            if isinstance(resp_dash, dict) and any(k in resp_dash for k in ("overview", "data", "money_earned")):
-                if self.sniffer.process_api_response(profile_id, url_dash, resp_dash):
-                    any_success = True
-        except Exception as e:
-            logger.debug("Deep sync dashboard overview error for profile %s: %s", profile_id, e)
+            import json as _json
 
-        # 4. Creator Violations
+            type_requests = [
+                {"insight_type": "INSIGHT_TYPE_ANALYTICS_OVERVIEW_REWARDS", "data_date_range": "DATA_DATE_RANGE_7D"},
+                {"insight_type": "INSIGHT_TYPE_ANALYTICS_OVERVIEW_VIEWS", "data_date_range": "DATA_DATE_RANGE_7D"},
+                {"insight_type": "INSIGHT_TYPE_ANALYTICS_OVERVIEW_TRAFFIC_SOURCE", "data_date_range": "DATA_DATE_RANGE_7D"},
+                {"insight_type": "INSIGHT_TYPE_ANALYTICS_VIEWER_ACTIVE_HOURS", "data_date_range": "DATA_DATE_RANGE_7D"},
+                {"insight_type": "INSIGHT_TYPE_ANALYTICS_VIEWER_NEW_VIEWER", "data_date_range": "DATA_DATE_RANGE_7D"},
+            ]
+            req_str = _json.dumps(type_requests)
+            url_insights = f"https://www.tiktok.com/tiktok/v1/analytics/insights/?type_requests={req_str}&time_offset=25200&is_dark_mode=false"
+            resp_insights = self.client.request_api(profile_id, url_insights, method="GET", timeout=12)
+            insights_success = False
+            if isinstance(resp_insights, dict) and any(
+                k in resp_insights for k in ("analytics_overview_rewards", "analytics_overview_views", "analytics_overview_traffic_source")
+            ):
+                if self.sniffer.process_api_response(profile_id, url_insights, resp_insights):
+                    any_success = True
+                    insights_success = True
+
+            # Also query aweme/v2/data/insight for retention (returning & new viewers)
+            try:
+                url_aweme = (
+                    "https://www.tiktok.com/aweme/v2/data/insight/?aid=1988&tz_offset=25200&app_language=vi&"
+                    'type_requests=[{"insigh_type":"user_rewards_data"},{"insigh_type":"vv_history","days":7,"end_days":1},{"insigh_type":"new_viewer","days":7,"end_days":1},{"insigh_type":"returning_viewer","days":7,"end_days":1}]'
+                )
+                resp_aweme = self.client.request_api(profile_id, url_aweme, method="GET", timeout=12)
+                if isinstance(resp_aweme, dict) and any(
+                    k in resp_aweme for k in ("user_rewards_data", "vv_history", "returning_viewer", "new_viewer")
+                ):
+                    if self.sniffer.process_api_response(profile_id, url_aweme, resp_aweme):
+                        any_success = True
+                        insights_success = True
+            except Exception as e_aweme:
+                logger.debug("Deep sync aweme insight error for profile %s: %s", profile_id, e_aweme)
+
+            if not insights_success:
+                # Fallback to legacy dashboard overview
+                url_dash = "https://www.tiktok.com/api/creator/dashboard/overview/"
+                resp_dash = self.client.request_api(profile_id, url_dash, method="GET", timeout=12)
+                if isinstance(resp_dash, dict) and any(k in resp_dash for k in ("overview", "data", "money_earned")):
+                    if self.sniffer.process_api_response(profile_id, url_dash, resp_dash):
+                        any_success = True
+        except Exception as e:
+            logger.debug("Deep sync insights error for profile %s: %s", profile_id, e)
+
+        # 5. TikTok Moderation & Penalty Extraction
         try:
+            from src.infrastructure.tiktok.moderation_service import TikTokModerationService
+
+            mod_svc = TikTokModerationService(db_path=self.db_path, client=self.client)
+            mod_svc.fetch_account_standing(profile_id)
+            mod_svc.fetch_video_violations(profile_id)
+
+            # Fallback legacy violation check for backward compatibility
             url_viol = "https://www.tiktok.com/api/creator/violation/"
             resp_viol = self.client.request_api(profile_id, url_viol, method="GET", timeout=12)
             if isinstance(resp_viol, dict) and any(
                 k in resp_viol for k in ("violations", "violation_list", "active_strikes")
             ):
-                if self.sniffer.process_api_response(profile_id, url_viol, resp_viol):
-                    any_success = True
+                self.sniffer.process_api_response(profile_id, url_viol, resp_viol)
         except Exception as e:
-            logger.debug("Deep sync violations error for profile %s: %s", profile_id, e)
+            logger.debug("Deep sync moderation check error for profile %s: %s", profile_id, e)
 
-        # 5. Local Avatar Caching
+        # 6. Local Avatar Caching
         try:
             updated_row = self.profile_repo.get_by_id(profile_id)
             if updated_row and updated_row.get("avatar_url"):

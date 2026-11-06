@@ -10,6 +10,7 @@ Learned from Gloglin2609/engine/tiktok/moderation_service.py and monetization_se
 
 from __future__ import annotations
 
+import json
 import logging
 import math
 import sqlite3
@@ -28,6 +29,16 @@ from src.infrastructure.tiktok.gologin_tiktok_client import (
 logger = logging.getLogger(__name__)
 
 
+PAGE_TYPE_MAP: dict[int, str] = {
+    1: "PenaltyDetailPage",
+    2: "AppealRejectedPage",
+    3: "AppealReceivedPage",
+    4: "AppealExpiredPage",
+    5: "AppealApprovedPage",
+    6: "AppealSubmittedPage",
+}
+
+
 def parse_cookie_header_str(cookies_data: Any) -> str:
     """Parses various cookie representations into a valid HTTP Cookie header string."""
     return parse_cookies_to_header(cookies_data)
@@ -36,9 +47,13 @@ def parse_cookie_header_str(cookies_data: Any) -> str:
 class TikTokModerationService:
     """Service for querying and persisting TikTok channel health, strikes, video violations, and appeals."""
 
-    def __init__(self, db_path: Path | str | None = None) -> None:
+    def __init__(
+        self,
+        db_path: Path | str | None = None,
+        client: GoLoginTikTokClient | None = None,
+    ) -> None:
         self.db_path = Path(db_path or "data/app.db")
-        self.client = GoLoginTikTokClient(db_path=self.db_path)
+        self.client = client or GoLoginTikTokClient(db_path=self.db_path)
 
     def _get_connection(self) -> sqlite3.Connection:
         # Configured connection (busy_timeout 10 s, WAL, foreign keys): a bare sqlite3.connect
@@ -53,10 +68,14 @@ class TikTokModerationService:
         proxy_dict: dict[str, Any] | None = None,
         timeout: int = 15,
         profile_id: int | None = None,
+        method: str = "GET",
+        json_data: Any = None,
     ) -> dict[str, Any]:
         """Executes HTTP request routed through GoLogin TikTok client or fallback."""
         if profile_id is not None:
-            return self.client.request_api(profile_id, url, timeout=timeout)
+            return self.client.request_api(
+                profile_id, url, method=method, json_data=json_data, timeout=timeout
+            )
 
         try:
             from curl_cffi import requests
@@ -79,9 +98,11 @@ class TikTokModerationService:
                 p_url = f"{proto}://{auth}{host}:{port}"
                 proxies = {"http": p_url, "https": p_url}
 
-            resp = requests.get(
+            resp = requests.request(
+                method,
                 url,
                 headers=headers,
+                json=json_data,
                 proxies=proxies,
                 impersonate="chrome120",
                 timeout=timeout,
@@ -99,8 +120,10 @@ class TikTokModerationService:
         mock_data: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """
-        Fetches official TikTok account standing and accumulated community strikes.
-        Endpoints: https://www.tiktok.com/api/creator/account/standing/?aid=1988
+        Fetches official TikTok Studio 2026 account standing, active strikes, and video count ratio.
+        Endpoints:
+        - POST https://www.tiktok.com/tiktokstudio/api/web/counter/getHashCount
+        - POST https://www.tiktok.com/tiktok/creator/manage/item_list/v1/
         """
         entitlements.require(Feature.CHANNEL_HEALTH)  # Gói 3
         conn = self._get_connection()
@@ -123,14 +146,39 @@ class TikTokModerationService:
                         "ok": False,
                         "account_standing": "Unknown",
                         "strike_count": 0,
+                        "public_items": 0,
+                        "total_items": 0,
+                        "removed_items": 0,
                         "status_label": "Chưa có Cookie",
                     }
-                url = "https://www.tiktok.com/api/creator/account/standing/?aid=1988"
-                data = self._request_tiktok_api(url, cookie_hdr, ua, profile_id=profile_id)
+                # Query 2026 TikTok Studio Counter via _request_tiktok_api wrapper
+                url_counter = "https://www.tiktok.com/tiktokstudio/api/web/counter/getHashCount"
+                data = self._request_tiktok_api(
+                    url_counter, cookie_hdr, ua, profile_id=profile_id, method="POST", json_data={}
+                )
 
-            standing = data.get("standing_level") or "Good"
-            strikes = int(data.get("active_strikes") or 0)
-            restrictions = data.get("restricted_features") or []
+            # Check if direct/legacy standing mock was supplied
+            if "standing_level" in data or "active_strikes" in data:
+                standing = data.get("standing_level") or "Good"
+                strikes = int(data.get("active_strikes") or 0)
+                item_count = int(data.get("item_count") or p.get("total_videos") or 0)
+                total_item_count = int(data.get("total_item_count") or item_count)
+                restrictions = data.get("restricted_features") or []
+            else:
+                item_count = int(data.get("item_count") or p.get("total_videos") or 0)
+                total_item_count = int(data.get("total_item_count") or item_count)
+                violations = self.fetch_video_violations(profile_id)
+                strikes = len(violations)
+                restrictions = []
+
+                if strikes == 0:
+                    standing = "Good"
+                elif strikes == 1:
+                    standing = "Warning"
+                else:
+                    standing = "High Risk"
+
+            removed_items = max(0, total_item_count - item_count)
 
             # Label mapping
             if standing == "Good":
@@ -146,8 +194,8 @@ class TikTokModerationService:
 
             # Persist to database
             conn.execute(
-                "UPDATE profiles SET account_standing=?, strike_count=?, ttl_violations=? WHERE id=?",
-                (standing, strikes, str(strikes), profile_id),
+                "UPDATE profiles SET account_standing=?, strike_count=?, ttl_violations=?, total_videos=? WHERE id=?",
+                (standing, strikes, str(strikes), item_count, profile_id),
             )
             conn.commit()
 
@@ -156,6 +204,9 @@ class TikTokModerationService:
                 "ok": True,
                 "account_standing": standing,
                 "strike_count": strikes,
+                "public_items": item_count,
+                "total_items": total_item_count,
+                "removed_items": removed_items,
                 "restrictions": restrictions,
                 "status_label": label,
             }
@@ -168,8 +219,10 @@ class TikTokModerationService:
         mock_violations: list[dict[str, Any]] | None = None,
     ) -> list[dict[str, Any]]:
         """
-        Fetches penalized videos, originality strikes (ineligible for FYP/Rewards), and copyright mutes.
-        Endpoint: https://www.tiktok.com/api/creator/violation/list/?aid=1988&count=20
+        Fetches penalized videos, originality strikes (ineligible for FYP/Rewards), and policy sanctions.
+        Endpoints:
+        - POST https://www.tiktok.com/tiktok/creator/manage/item_list/v1/
+        - GET https://www.tiktok.com/mod/v1/getPenaltyDetails/?vid=<item_id>
         """
         entitlements.require(Feature.CHANNEL_HEALTH)  # Gói 3
         conn = self._get_connection()
@@ -187,42 +240,102 @@ class TikTokModerationService:
 
             if mock_violations is not None:
                 raw_list = mock_violations
+                for raw in raw_list:
+                    item_id = str(raw.get("item_id") or raw.get("video_id") or "")
+                    if not item_id:
+                        continue
+                    title = raw.get("item_title") or raw.get("title") or "Video TikTok"
+                    v_title = raw.get("violation_title") or raw.get("reason_title") or "Gậy Vi Phạm Chính Sách"
+                    v_desc = raw.get("violation_reason") or raw.get("reason") or "Không tuân thủ nguyên tắc cộng đồng"
+                    deadline = raw.get("appeal_deadline") or raw.get("appeal_date") or ""
+                    status_v = raw.get("status") or "pending"
+                    violations.append({
+                        "video_id": item_id,
+                        "title": title,
+                        "violate_title": v_title,
+                        "violate_description": v_desc,
+                        "video_posted_date": raw.get("create_time", ""),
+                        "appeal_date": deadline,
+                        "status": status_v,
+                    })
             else:
                 if not cookie_hdr:
                     return []
-                url = "https://www.tiktok.com/api/creator/violation/list/?aid=1988&count=20"
-                data = self._request_tiktok_api(url, cookie_hdr, ua, profile_id=profile_id)
 
-                raw_list = data.get("violation_list") or data.get("violations")
-                if raw_list is None and isinstance(data.get("data"), dict):
-                    raw_list = data["data"].get("violation_list") or data["data"].get("violations")
+                # Query authentic 2026 TikTok Studio Item List
+                url_items = "https://www.tiktok.com/tiktok/creator/manage/item_list/v1/"
+                resp_items = self._request_tiktok_api(
+                    url_items,
+                    cookie_hdr,
+                    ua,
+                    profile_id=profile_id,
+                    method="POST",
+                    json_data={"cursor": 0, "size": 50, "query": {}},
+                    timeout=15,
+                )
 
-            if not raw_list or not isinstance(raw_list, list):
-                return []
+                # Check if legacy violation_list was returned by mock
+                raw_list = resp_items.get("violation_list") or resp_items.get("violations")
+                if raw_list and isinstance(raw_list, list):
+                    for raw in raw_list:
+                        item_id = str(raw.get("item_id") or raw.get("video_id") or "")
+                        if not item_id:
+                            continue
+                        title = raw.get("item_title") or raw.get("title") or "Video TikTok"
+                        v_title = raw.get("violation_title") or raw.get("reason_title") or "Gậy Vi Phạm Chính Sách"
+                        v_desc = raw.get("violation_reason") or raw.get("reason") or "Không tuân thủ nguyên tắc cộng đồng"
+                        deadline = raw.get("appeal_deadline") or raw.get("appeal_date") or ""
+                        status_v = raw.get("status") or "pending"
+                        violations.append({
+                            "video_id": item_id,
+                            "title": title,
+                            "violate_title": v_title,
+                            "violate_description": v_desc,
+                            "video_posted_date": raw.get("create_time", ""),
+                            "appeal_date": deadline,
+                            "status": status_v,
+                        })
+                else:
+                    item_list = resp_items.get("item_list") or []
+                    for it in item_list:
+                        if not isinstance(it, dict):
+                            continue
+                        item_id = str(it.get("item_id") or it.get("id") or "")
+                        if not item_id:
+                            continue
 
-            for raw in raw_list:
-                item_id = str(raw.get("item_id") or raw.get("video_id") or "")
-                if not item_id:
-                    continue
+                        # Query penalty details for each item
+                        url_pen = f"https://www.tiktok.com/mod/v1/getPenaltyDetails/?vid={item_id}"
+                        resp_pen = self._request_tiktok_api(url_pen, cookie_hdr, ua, profile_id=profile_id, method="GET", timeout=8)
+                        penalties = resp_pen.get("penalties") or []
+                        appeal_st = resp_pen.get("appeal_status")
 
-                title = raw.get("item_title") or raw.get("title") or "Video TikTok"
-                v_title = raw.get("violation_title") or raw.get("reason_title") or "Gậy Vi Phạm Chính Sách"
-                v_desc = raw.get("violation_reason") or raw.get("reason") or "Không tuân thủ nguyên tắc cộng đồng"
-                deadline = raw.get("appeal_deadline") or raw.get("appeal_date") or ""
-                status_v = raw.get("status") or "pending"
+                        if penalties or (appeal_st is not None and appeal_st != 2):
+                            title = str(it.get("desc") or it.get("item_title") or it.get("title") or "#shorts")
+                            v_title = "Community Guidelines"
+                            v_desc = "Ineligible for the For You feed (FYF)"
+                            appeal_deadline = ""
 
-                item = {
-                    "video_id": item_id,
-                    "title": title,
-                    "violate_title": v_title,
-                    "violate_description": v_desc,
-                    "video_posted_date": raw.get("create_time", ""),
-                    "appeal_date": deadline,
-                    "status": status_v,
-                }
-                violations.append(item)
+                            if penalties:
+                                p0 = penalties[0]
+                                reasons = p0.get("penalty_reason_info_list") or []
+                                if reasons and isinstance(reasons[0], dict):
+                                    v_title = reasons[0].get("title") or v_title
+                                    v_desc = reasons[0].get("content") or v_desc
+                                appeal_deadline = str(p0.get("date") or "")
 
-                # Upsert into violateVideos
+                            status_str = "can_appeal" if appeal_st == 0 else ("under_review" if appeal_st == 1 else "penalized")
+                            violations.append({
+                                "video_id": item_id,
+                                "title": title,
+                                "violate_title": v_title,
+                                "violate_description": v_desc,
+                                "video_posted_date": str(it.get("create_time") or ""),
+                                "appeal_date": appeal_deadline,
+                                "status": status_str,
+                            })
+
+            for item in violations:
                 conn.execute(
                     """
                     INSERT INTO violateVideos (
@@ -252,6 +365,34 @@ class TikTokModerationService:
         finally:
             conn.close()
 
+    def fetch_video_appeal_info(self, profile_id: int, video_id: str) -> dict[str, Any]:
+        """
+        Queries authentic TikTok Studio 2026 transparency & penalty moderation page content.
+        Endpoint: GET https://www.tiktok.com/api/moderation/penalties/gettransparencypagecontent?entityId=<item_id>
+        """
+        entitlements.require(Feature.CHANNEL_HEALTH)
+        url = f"https://www.tiktok.com/api/moderation/penalties/gettransparencypagecontent?entityId={video_id}"
+        resp = self.client.request_api(profile_id, url, method="GET", timeout=12)
+
+        page_type = int(resp.get("transparencyModerationPageType") or 0)
+        show_appeal = bool(resp.get("showAppealBtn", False))
+        appeal_details = resp.get("appealDetails") or []
+        penalties = resp.get("penalties") or []
+        btn_desc = str(resp.get("appealBtnDescription") or "Appeal")
+        is_eea = bool(resp.get("isUserEEA", False))
+
+        return {
+            "video_id": str(video_id),
+            "show_appeal_btn": show_appeal,
+            "appeal_details": appeal_details,
+            "penalties": penalties,
+            "page_type": page_type,
+            "page_type_name": PAGE_TYPE_MAP.get(page_type, f"UnknownPage_{page_type}"),
+            "appeal_btn_desc": btn_desc,
+            "is_user_eea": is_eea,
+            "raw": resp,
+        }
+
     def submit_video_appeal(
         self,
         profile_id: int,
@@ -259,11 +400,14 @@ class TikTokModerationService:
         appeal_reason: str,
         *,
         mock_success: bool = False,
+        penalty_id: str | None = None,
+        penalty_source: int = 1,
     ) -> dict[str, Any]:
         """
-        Submits an official appeal for a penalized video or unoriginality strike.
+        Submits an official appeal for a penalized video using TikTok Studio 2026 endpoints:
+        - Primary: POST https://www.tiktok.com/api/moderation/penalties/submitappeal (SubmitAppealsV2)
+        - Fallback: POST https://www.tiktok.com/mod/v1/submitAppeals (ModV1)
         Updates violateVideos status to 'appealed' and logs a new ticket in accountAppeals.
-        Endpoint: https://www.tiktok.com/creator-center/api/violation/appeal
         """
         entitlements.require(Feature.CHANNEL_HEALTH)  # Gói 3
         conn = self._get_connection()
@@ -273,15 +417,67 @@ class TikTokModerationService:
                 return {"ok": False, "error": "Profile not found"}
 
             now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            endpoint_used = "mock"
 
             if not mock_success:
-                url = "https://www.tiktok.com/creator-center/api/violation/appeal"
-                payload = {"item_id": str(video_id), "appeal_reason": appeal_reason}
-                api_res = self.client.request_api(profile_id, url, method="POST", json_data=payload)
-                if api_res.get("status_code", 0) != 0 and api_res.get("_status_code", 200) not in (200, 201):
-                    err = api_res.get("status_msg") or api_res.get("error") or "appeal_rejected_by_api"
-                    # If API error, we still proceed if simulation/fallback is requested, else return error
-                    logger.warning("TikTok appeal API returned: %s", err)
+                # 1. Fetch live transparency and appealDetails if not explicitly provided
+                appeal_details: list[dict[str, Any]] = []
+                if penalty_id:
+                    appeal_details = [{"penaltyID": str(penalty_id), "penaltySource": penalty_source}]
+                else:
+                    info = self.fetch_video_appeal_info(profile_id, video_id)
+                    if not info.get("show_appeal_btn"):
+                        return {
+                            "ok": False,
+                            "error": f"Video không đủ điều kiện hoặc đã hết hạn kháng cáo (Trạng thái: {info.get('page_type_name')}).",
+                            "page_type": info.get("page_type"),
+                            "page_type_name": info.get("page_type_name"),
+                        }
+                    appeal_details = info.get("appeal_details") or []
+                    if not appeal_details and info.get("penalties"):
+                        p0 = info["penalties"][0]
+                        pid = p0.get("penalty_id", {}).get("id") or p0.get("id")
+                        if pid:
+                            appeal_details = [{"penaltyID": str(pid), "penaltySource": penalty_source}]
+
+                # 2. Try Primary Endpoint: SubmitAppealsV2 (/api/moderation/penalties/submitappeal)
+                url_v2 = "https://www.tiktok.com/api/moderation/penalties/submitappeal"
+                payload_v2 = {
+                    "appealDetails": appeal_details,
+                    "itemId": str(video_id),
+                }
+                api_res = self.client.request_api(profile_id, url_v2, method="POST", json_data=payload_v2)
+
+                v2_success = False
+                base_resp = api_res.get("BaseResp") or {}
+                if base_resp.get("StatusCode") == 0 or api_res.get("status_code") == 0:
+                    v2_success = True
+                    endpoint_used = "V2_submitappeal"
+                elif api_res.get("_status_code") in (200, 201) and not base_resp.get("StatusCode"):
+                    v2_success = True
+                    endpoint_used = "V2_submitappeal"
+
+                # 3. Fallback: Try ModV1 SubmitAppeals (/mod/v1/submitAppeals)
+                if not v2_success:
+                    logger.info("V2 appeal endpoint failed or returned non-zero, falling back to ModV1...")
+                    url_v1 = "https://www.tiktok.com/mod/v1/submitAppeals"
+                    mod_p_id = appeal_details[0]["penaltyID"] if appeal_details else str(video_id)
+                    mod_details = [{"issuer": "TNS", "penalty_id": str(mod_p_id)}]
+                    payload_v1 = {
+                        "vid": str(video_id),
+                        "appeal_details": json.dumps(mod_details),
+                    }
+                    api_res_v1 = self.client.request_api(profile_id, url_v1, method="POST", json_data=payload_v1)
+                    if api_res_v1.get("status_code") == 0 or api_res_v1.get("_status_code") in (200, 201):
+                        endpoint_used = "ModV1_submitAppeals"
+                    else:
+                        err = (
+                            api_res_v1.get("status_msg")
+                            or api_res.get("BaseResp", {}).get("StatusMessage")
+                            or "appeal_rejected_by_api"
+                        )
+                        logger.warning("TikTok appeal API returned error: %s", err)
+                        return {"ok": False, "error": f"TikTok API từ chối: {err}"}
 
             # 1. Update violateVideos
             conn.execute(
@@ -315,6 +511,7 @@ class TikTokModerationService:
                 "video_id": str(video_id),
                 "status": "appealed",
                 "appeal_date": now_str,
+                "endpoint_used": endpoint_used,
                 "message": f"Đã nộp đơn kháng nghị cho video #{video_id}.",
             }
         finally:
@@ -383,26 +580,90 @@ class TikTokModerationService:
             conn.close()
 
     def check_appeal_status(self, profile_id: int) -> dict[str, Any]:
-        """Checks status of pending appeals and reconciles violateVideos & accountAppeals."""
+        """
+        Checks status of pending appeals via authentic TikTok Studio transparency API.
+        Reconciles violateVideos & accountAppeals automatically based on transparencyModerationPageType:
+        - 1: PenaltyDetailPage (Penalized / Can appeal)
+        - 2: AppealRejectedPage (Rejected)
+        - 3/6: AppealReceivedPage / AppealSubmittedPage (Under review)
+        - 4: AppealExpiredPage (Expired)
+        - 5: AppealApprovedPage (Approved / Gậy đã gỡ!)
+        """
         entitlements.require(Feature.CHANNEL_HEALTH)  # Gói 3
         conn = self._get_connection()
         try:
+            # Query active appealed items
+            pending_violations = conn.execute(
+                "SELECT * FROM violateVideos WHERE profile_id=? AND status IN ('appealed', 'under_review', 'pending')",
+                (profile_id,),
+            ).fetchall()
+
+            now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            resolved_count = 0
+            rejected_count = 0
+            reviewing_count = 0
+
+            for v in pending_violations:
+                v_dict = dict(v)
+                vid = v_dict.get("video_id")
+                if not vid:
+                    continue
+
+                try:
+                    info = self.fetch_video_appeal_info(profile_id, vid)
+                    pt = info.get("page_type")
+                    if pt == 5:  # AppealApprovedPage
+                        conn.execute(
+                            "UPDATE violateVideos SET status='resolved', appeal_date=? WHERE profile_id=? AND video_id=?",
+                            (now_str, profile_id, vid),
+                        )
+                        conn.execute(
+                            "UPDATE accountAppeals SET status='approved', updated_at=? WHERE profile_id=? AND object_id=?",
+                            (now_str, profile_id, vid),
+                        )
+                        resolved_count += 1
+                    elif pt == 2:  # AppealRejectedPage
+                        conn.execute(
+                            "UPDATE violateVideos SET status='penalized', appeal_date=? WHERE profile_id=? AND video_id=?",
+                            (now_str, profile_id, vid),
+                        )
+                        conn.execute(
+                            "UPDATE accountAppeals SET status='rejected', updated_at=? WHERE profile_id=? AND object_id=?",
+                            (now_str, profile_id, vid),
+                        )
+                        rejected_count += 1
+                    elif pt in (3, 6):  # AppealReceivedPage / AppealSubmittedPage
+                        conn.execute(
+                            "UPDATE violateVideos SET status='under_review' WHERE profile_id=? AND video_id=?",
+                            (profile_id, vid),
+                        )
+                        conn.execute(
+                            "UPDATE accountAppeals SET status='under_review', updated_at=? WHERE profile_id=? AND object_id=?",
+                            (now_str, profile_id, vid),
+                        )
+                        reviewing_count += 1
+                except Exception as e:
+                    logger.warning("Failed to reconcile appeal status for video %s: %s", vid, e)
+
+            conn.commit()
+
+            # Refresh standing & strikes
+            try:
+                self.fetch_account_standing(profile_id)
+            except Exception as e:
+                logger.warning("Failed to refresh account standing in check_appeal_status: %s", e)
+
             appeals = conn.execute(
                 "SELECT * FROM accountAppeals WHERE profile_id=? ORDER BY id DESC",
                 (profile_id,),
             ).fetchall()
-            violations = conn.execute(
-                "SELECT * FROM violateVideos WHERE profile_id=? AND status='appealed'",
-                (profile_id,),
-            ).fetchall()
-
-            # For real or mock reconciliation, we refresh channel health
-            self.fetch_account_standing(profile_id)
 
             return {
                 "profile_id": profile_id,
                 "appeals_count": len(appeals),
-                "pending_violations_count": len(violations),
+                "resolved_count": resolved_count,
+                "rejected_count": rejected_count,
+                "reviewing_count": reviewing_count,
                 "status": "synchronized",
             }
         finally:
@@ -430,6 +691,67 @@ class TikTokModerationService:
             "violations_count": len(violations),
             "violations": violations,
         }
+
+    def precheck_video_content(
+        self,
+        profile_id: int,
+        video_path: str | Path | None = None,
+        video_title: str = "",
+        item_id: str | None = None,
+    ) -> dict[str, Any]:
+        """
+        Pre-publishes/checks video content against TikTok Community Guidelines and Music Copyright.
+        Endpoint: POST https://www.tiktok.com/tiktok/v1/creator/content/check/create
+        """
+        entitlements.require(Feature.CHANNEL_HEALTH)
+        conn = self._get_connection()
+        try:
+            row = conn.execute("SELECT * FROM profiles WHERE id=?", (profile_id,)).fetchone()
+            if not row:
+                return {"is_safe": False, "copyright_risk": "unknown", "message": "Profile not found"}
+
+            p = dict(row)
+            cookies_json = p.get("cookies_json") or p.get("cookies_browser") or ""
+            cookie_hdr = parse_cookie_header_str(cookies_json)
+            ua = p.get("user_agent") or "Mozilla/5.0"
+
+            url = "https://www.tiktok.com/tiktok/v1/creator/content/check/create"
+            payload = {
+                "title": video_title,
+                "item_id": item_id or "",
+                "check_type": 1,
+            }
+
+            resp = self._request_tiktok_api(
+                url,
+                cookie_hdr,
+                ua,
+                profile_id=profile_id,
+                method="POST",
+                json_data=payload,
+                timeout=12,
+            )
+
+            chk = resp.get("check_result") or {}
+            has_violation = bool(chk.get("has_violation", False))
+            risk = chk.get("copyright_risk") or ("high" if has_violation else "low")
+            audio_st = chk.get("audio_status") or ("muted" if has_violation else "clear")
+            msg = chk.get("message") or (
+                "Phát hiện cảnh báo vi phạm bản quyền hoặc nguyên tắc."
+                if has_violation
+                else "Nội dung an toàn, không phát hiện vi phạm bản quyền hoặc nguyên tắc."
+            )
+
+            return {
+                "profile_id": profile_id,
+                "is_safe": not has_violation,
+                "copyright_risk": risk,
+                "audio_status": audio_st,
+                "message": msg,
+                "raw": resp,
+            }
+        finally:
+            conn.close()
 
 
 __all__ = ["TikTokModerationService", "parse_cookie_header_str"]

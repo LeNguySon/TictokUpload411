@@ -437,14 +437,22 @@ class AccountHealthDialog(QDialog):
             if future.done():
                 timer.stop()
                 try:
-                    future.result()
+                    res = future.result()
                     self._load_data()
-                    InfoBar.success(
-                        title="Đã Nộp Kháng Cáo",
-                        content=f"Đơn kháng nghị cho video #{video_id} đã được gửi thành công.",
-                        position=InfoBarPosition.TOP,
-                        parent=self,
-                    )
+                    if res.get("ok"):
+                        InfoBar.success(
+                            title="Đã Nộp Kháng Cáo",
+                            content=res.get("message") or f"Đơn kháng nghị cho video #{video_id} đã được gửi thành công.",
+                            position=InfoBarPosition.TOP,
+                            parent=self,
+                        )
+                    else:
+                        InfoBar.error(
+                            title="Lỗi Nộp Kháng Cáo",
+                            content=res.get("error") or "Không thể nộp đơn kháng cáo.",
+                            position=InfoBarPosition.TOP,
+                            parent=self,
+                        )
                 except Exception as e:
                     InfoBar.error(
                         title="Lỗi Nộp Kháng Cáo",
@@ -473,9 +481,16 @@ class AccountHealthDialog(QDialog):
                 try:
                     res = future.result()
                     self._load_data()
+                    resolved = res.get("resolved_count", 0)
+                    rejected = res.get("rejected_count", 0)
+                    reviewing = res.get("reviewing_count", 0)
+                    detail_str = f"Đã cập nhật {res.get('appeals_count', 0)} vé kháng cáo."
+                    if resolved or rejected or reviewing:
+                        detail_str += f" (Đã gỡ gậy: {resolved}, Bác bỏ: {rejected}, Đang thẩm định: {reviewing})"
+
                     InfoBar.success(
                         title="Đồng Bộ Vé Kháng Cáo Hoàn Tất",
-                        content=f"Đã cập nhật {res.get('appeals_count', 0)} vé kháng cáo.",
+                        content=detail_str,
                         position=InfoBarPosition.TOP,
                         parent=self,
                     )

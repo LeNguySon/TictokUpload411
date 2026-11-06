@@ -152,7 +152,10 @@ CREATE TABLE IF NOT EXISTS profiles (
     user_extensions TEXT DEFAULT NULL,
     refresh_token TEXT DEFAULT NULL,
     client_id TEXT DEFAULT NULL,
-    cookie_email TEXT DEFAULT NULL
+    cookie_email TEXT DEFAULT NULL,
+    traffic_source_json TEXT DEFAULT NULL,
+    optimal_hour INTEGER DEFAULT 12,
+    retention_stats_json TEXT DEFAULT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_profiles_name ON profiles(name);

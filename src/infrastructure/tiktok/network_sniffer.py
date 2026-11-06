@@ -95,17 +95,129 @@ class TikTokNetworkSniffer:
                 updates["statistic_date_update"] = now_str
                 handled = True
 
-        # 2. Creator Dashboard / Revenue / Rewards (/api/creator/dashboard/overview, etc.)
+        # 2. Creator Dashboard / Revenue / Rewards / Insights 2026
         if any(
             ep in url_lower
             for ep in (
                 "/api/creator/dashboard/overview",
                 "/creator-center/api/income/overview",
                 "/creator-center/api/creator/rewards",
+                "/tiktok/v1/analytics/insights",
+                "/aweme/v2/data/insight",
             )
         ):
             overview = data.get("overview") or data.get("data") or data
             if isinstance(overview, dict):
+                # TikTok Studio 2026 Analytics Insights
+                if "analytics_overview_rewards" in overview:
+                    rew = overview["analytics_overview_rewards"]
+                    msg = rew.get("message") or {}
+                    st = msg.get("status")
+                    if st == 2:
+                        # Status 2: Not enrolled in rewards / Ineligible
+                        updates["money_earned"] = 0.0
+                        updates["rpm"] = 0.0
+                    elif st == 1 or st == 0:
+                        tot = rew.get("total") or {}
+                        updates["money_earned"] = float(tot.get("value") or 0.0)
+                        updates["rpm"] = float(rew.get("rpm", {}).get("value") or 0.0)
+
+                if "analytics_overview_views" in overview:
+                    v_info = overview["analytics_overview_views"]
+                    v_list = v_info.get("list", {}).get("value") or []
+                    if v_list:
+                        sum_vv = sum(int(item.get("value") or 0) for item in v_list if isinstance(item, dict))
+                        if sum_vv > 0:
+                            updates["views_month"] = sum_vv
+                            updates["total_views"] = sum_vv
+
+                # Traffic Source Matrix & Shadowban Detection
+                if "analytics_overview_traffic_source" in overview:
+                    ts_info = overview["analytics_overview_traffic_source"]
+                    kv_list = ts_info.get("key_value") or []
+                    ts_dict: dict[str, float] = {}
+                    for it in kv_list:
+                        if isinstance(it, dict):
+                            k = str(it.get("key", "")).lower()
+                            v = float(it.get("value") or 0.0)
+                            if "for you" in k:
+                                ts_dict["for_you"] = round(v * 100.0, 1)
+                            elif "search" in k:
+                                ts_dict["search"] = round(v * 100.0, 1)
+                            elif "profile" in k:
+                                ts_dict["profile"] = round(v * 100.0, 1)
+                            elif "follow" in k:
+                                ts_dict["following"] = round(v * 100.0, 1)
+                            elif "sound" in k:
+                                ts_dict["sound"] = round(v * 100.0, 1)
+
+                    if ts_dict:
+                        import json as _json
+                        updates["traffic_source_json"] = _json.dumps(ts_dict)
+                        fyf = ts_dict.get("for_you", 0.0)
+                        if fyf >= 70.0:
+                            updates["shadowban_status"] = "safe"
+                            updates["shadowban_reasons"] = ""
+                        elif fyf < 20.0:
+                            updates["shadowban_status"] = "shadowban"
+                            updates["shadowban_reasons"] = "Lượng người xem Dành cho bạn (FYF) tụt dưới 20%. Nghi vấn tài khoản dính shadowban hoặc hạn chế phân phối."
+                        else:
+                            updates["shadowban_status"] = "warning"
+                            updates["shadowban_reasons"] = "Lượng phân phối Dành cho bạn ở mức vừa phải (20-70%)."
+
+                # Hourly Activity & Optimal Posting Hour
+                if "analytics_viewer_active_hours" in overview:
+                    ah_info = overview["analytics_viewer_active_hours"]
+                    days_list = ah_info.get("list") or []
+                    hourly_totals: dict[int, int] = {}
+                    for day_data in days_list:
+                        inner_list = day_data.get("list", {}).get("key_value") or []
+                        for h_item in inner_list:
+                            if isinstance(h_item, dict):
+                                try:
+                                    h_idx = int(h_item.get("key", 0))
+                                    h_val = int(h_item.get("value", 0))
+                                    hourly_totals[h_idx] = hourly_totals.get(h_idx, 0) + h_val
+                                except (ValueError, TypeError):
+                                    continue
+                    if hourly_totals:
+                        best_h = max(hourly_totals.items(), key=lambda x: x[1])[0]
+                        updates["optimal_hour"] = int(best_h)
+
+                # Audience Retention: New Viewers vs Returning Viewers
+                new_v_data = overview.get("new_viewer")
+                ret_v_data = overview.get("returning_viewer")
+                if new_v_data is not None or ret_v_data is not None:
+                    total_new = 0
+                    total_returning = 0
+                    if isinstance(new_v_data, list):
+                        total_new = sum(int(it.get("value") or 0) for it in new_v_data if isinstance(it, dict))
+                    if isinstance(ret_v_data, list):
+                        total_returning = sum(int(it.get("value") or 0) for it in ret_v_data if isinstance(it, dict))
+
+                    tot_all = total_new + total_returning
+                    ret_ratio = round((total_returning / tot_all) * 100.0, 1) if tot_all > 0 else 0.0
+                    import json as _json
+                    updates["retention_stats_json"] = _json.dumps({
+                        "total_new": total_new,
+                        "total_returning": total_returning,
+                        "returning_ratio": ret_ratio,
+                    })
+
+                # aweme/v2/data/insight fallback
+                if "user_rewards_data" in overview:
+                    urd = overview["user_rewards_data"]
+                    if urd.get("status") == 2 or urd.get("est_rewards", {}).get("status") == 2:
+                        updates["money_earned"] = 0.0
+                        updates["rpm"] = 0.0
+
+                if "vv_history" in overview and isinstance(overview["vv_history"], list):
+                    vv_sum = sum(int(it.get("value") or 0) for it in overview["vv_history"] if isinstance(it, dict))
+                    if vv_sum > 0:
+                        updates["views_month"] = vv_sum
+                        updates["total_views"] = vv_sum
+
+                # Legacy keys
                 if "money_earned" in overview or "total_revenue" in overview or "revenue" in overview:
                     updates["money_earned"] = float(
                         overview.get("money_earned") or overview.get("total_revenue") or overview.get("revenue") or 0.0
@@ -125,6 +237,15 @@ class TikTokNetworkSniffer:
 
                 updates["statistic_date_update"] = now_str
                 handled = True
+
+        # 2b. Counter / HashCount (/tiktokstudio/api/web/counter/getHashCount)
+        if "/counter/gethashcount" in url_lower:
+            if "item_count" in data:
+                updates["total_videos"] = int(data["item_count"])
+            if "like_count" in data:
+                updates["total_likes"] = int(data["like_count"])
+            updates["statistic_date_update"] = now_str
+            handled = True
 
         # 3. Account Standing & Strikes (/api/creator/account/standing/)
         if "/api/creator/account/standing" in url_lower:
@@ -209,8 +330,8 @@ class TikTokNetworkSniffer:
                 updates["statistic_date_update"] = now_str
                 handled = True
 
-        # 5. Post item list / Videos & Views (/api/post/item_list, /api/creator/item/list)
-        if "/api/post/item_list" in url_lower or "/api/creator/item/list" in url_lower:
+        # 5. Post item list / Videos & Views (/api/post/item_list, /api/creator/item/list, /manage/item_list/v1)
+        if "/api/post/item_list" in url_lower or "/api/creator/item/list" in url_lower or "/manage/item_list/v1" in url_lower:
             items = data.get("creator_item_list") or data.get("itemList") or data.get("items") or data.get("item_list")
             if isinstance(items, list) and items:
                 # Extract embedded author information if present in first item

@@ -7,14 +7,11 @@ Verifies:
 4. Windows AppUserModelID is configured for taskbar branding.
 """
 
-from pathlib import Path
 import pytest
 from PyQt6.QtWidgets import QApplication
-from PyQt6.QtGui import QIcon
-
+from src.infrastructure.database.migrations.runner import run_all_migrations
 from src.presentation.app_icon import get_app_icon
 from src.presentation.views.main_window import TikTokManagerMainWindow
-from src.infrastructure.database.migrations.runner import run_all_migrations
 
 
 @pytest.fixture(scope="session")

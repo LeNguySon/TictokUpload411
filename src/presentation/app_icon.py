@@ -4,6 +4,7 @@ Loads the high-DPI multi-resolution Windows icon from icon.ico.
 """
 
 from pathlib import Path
+
 from PyQt6.QtGui import QIcon
 
 

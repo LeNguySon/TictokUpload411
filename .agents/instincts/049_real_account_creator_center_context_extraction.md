@@ -31,3 +31,4 @@ Khi thực hiện trích xuất dữ liệu chuyên sâu cho tài khoản TikTok
 3. **Bảo Mật AgentShield & Quy Chuẩn Đệm Cục Bộ**:
    - Cookie phiên thực tế bắt buộc phải được mã hóa ngay lập tức bằng Windows DPAPI (`protect_text()`) trước khi lưu trữ vào bảng `profiles` (`cookies_json`, `cookies_browser`).
    - Avatar người dùng từ CDN ByteDance được tải về cục bộ tại `data/avatars/{profile_id}.jpg` để `CircularAvatarDelegate` render mượt mà, không giật lag GUI.
+

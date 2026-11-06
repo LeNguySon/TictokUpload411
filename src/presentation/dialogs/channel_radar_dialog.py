@@ -132,7 +132,7 @@ class ChannelRadarDialog(QDialog):
         layout.setContentsMargins(*STANDARD_DIALOG_MARGINS)
         layout.setSpacing(STANDARD_DIALOG_SPACING)
 
-        prof_name = self.profile.get("username_on_tiktok") or self.profile.get("name") or f"Profile #{self.profile_id}"
+        prof_name = (self.profile.get("username_on_tiktok") or self.profile.get("name") or f"Profile #{self.profile_id}").lstrip("@")
         header = create_dialog_header(
             icon=FluentIcon.SPEED_HIGH,
             title=f"Chẩn Đoán Radar Kênh: @{prof_name}",
@@ -170,7 +170,7 @@ class ChannelRadarDialog(QDialog):
         grid = QGridLayout(grp_metrics)
         grid.setSpacing(10)
 
-        def make_card(title: str, val: str, kind: str = "info") -> QFrame:
+        def make_card(title: str, val: str, kind: str = "info") -> tuple[QFrame, QLabel]:
             card = style_card(QFrame(), object_name="metricCard")
             c_lay = QVBoxLayout(card)
             c_lay.setContentsMargins(12, 8, 12, 8)
@@ -181,19 +181,76 @@ class ChannelRadarDialog(QDialog):
             v_lbl.setStyleSheet(f"font-size: 16px; font-weight: 600; color: {status_color(kind)};")
             c_lay.addWidget(t_lbl)
             c_lay.addWidget(v_lbl)
-            return card
+            return card, v_lbl
 
-        grid.addWidget(make_card("Lượt Theo Dõi", f"{followers:,}"), 0, 0)
-        grid.addWidget(make_card("View 30 Ngày", f"{views_30d:,}"), 0, 1)
-        grid.addWidget(make_card("Tỷ Lệ Tương Tác", f"{report.signals.engagement_pct:.2f}%", "success"), 0, 2)
-        grid.addWidget(make_card("Trung Vị Lượt Xem", f"{int(report.signals.median_views):,}"), 1, 0)
-        grid.addWidget(make_card("Giờ Đăng Tối Ưu", f"{report.best_posting_hour}:00", "warning"), 1, 1)
+        c1, _ = make_card("Lượt Theo Dõi", f"{followers:,}")
+        c2, _ = make_card("View 30 Ngày", f"{views_30d:,}")
+        c3, _ = make_card("Tỷ Lệ Tương Tác", f"{report.signals.engagement_pct:.2f}%", "success")
+        grid.addWidget(c1, 0, 0)
+        grid.addWidget(c2, 0, 1)
+        grid.addWidget(c3, 0, 2)
+
+        c4, _ = make_card("Trung Vị Lượt Xem", f"{int(report.signals.median_views):,}")
+        grid.addWidget(c4, 1, 0)
+
+        opt_h = self.profile.get("optimal_hour")
+        best_hour_str = f"{opt_h:02d}:00" if opt_h is not None and opt_h >= 0 else f"{report.best_posting_hour:02d}:00"
+        c5, self.lbl_optimal_hour_stat = make_card("Giờ Đăng Tối Ưu", best_hour_str, "warning")
+        grid.addWidget(c5, 1, 1)
 
         alert_kind = "danger" if low_alert.get("alert") else "success"
         alert_text = f"Flop ({low_alert.get('risk_score', 0)}%)" if low_alert.get("alert") else "An Toàn (0%)"
-        grid.addWidget(make_card("Cảnh Báo Flop/Shadowban", alert_text, alert_kind), 1, 2)
+        c6, _ = make_card("Cảnh Báo Flop/Shadowban", alert_text, alert_kind)
+        grid.addWidget(c6, 1, 2)
 
         layout.addWidget(grp_metrics)
+
+        # Traffic Source Matrix GroupBox
+        import json as _json
+        ts_raw = self.profile.get("traffic_source_json")
+        ts_data: dict[str, Any] = {}
+        if ts_raw:
+            try:
+                ts_data = _json.loads(ts_raw) if isinstance(ts_raw, str) else ts_raw
+            except Exception:
+                ts_data = {}
+
+        ret_raw = self.profile.get("retention_stats_json")
+        ret_data: dict[str, Any] = {}
+        if ret_raw:
+            try:
+                ret_data = _json.loads(ret_raw) if isinstance(ret_raw, str) else ret_raw
+            except Exception:
+                ret_data = {}
+
+        grp_traffic = QGroupBox("Ma Trận Nguồn View && Chẩn Đoán Phân Phối (Traffic Matrix)", self)
+        style_group_box(grp_traffic)
+        t_grid = QGridLayout(grp_traffic)
+        t_grid.setSpacing(10)
+
+        fyf_val = ts_data.get("for_you")
+        fyf_str = f"{fyf_val:.1f}%" if fyf_val is not None else "Chưa có dữ liệu"
+        fyf_kind = (
+            "success"
+            if fyf_val is not None and fyf_val >= 70.0
+            else ("warning" if fyf_val is not None and fyf_val >= 20.0 else "danger")
+        )
+        c_fyf, self.lbl_for_you_stat = make_card("Dành Cho Bạn (FYF)", fyf_str, fyf_kind)
+        t_grid.addWidget(c_fyf, 0, 0)
+
+        search_val = ts_data.get("search")
+        search_str = f"{search_val:.1f}%" if search_val is not None else "0.0%"
+        c_search, _ = make_card("Tìm Kiếm (Search)", search_str, "info")
+        t_grid.addWidget(c_search, 0, 1)
+
+        ret_val = ret_data.get("returning_ratio")
+        ret_str = f"{ret_val:.1f}%" if ret_val is not None else "Chưa có dữ liệu"
+        c_ret, self.lbl_returning_stat = make_card(
+            "Fan Quay Lại (Retention)", ret_str, "success" if (ret_val or 0) >= 20.0 else "info"
+        )
+        t_grid.addWidget(c_ret, 0, 2)
+
+        layout.addWidget(grp_traffic)
 
         # Low View Alert Message Box
         if low_alert.get("alert"):

@@ -72,6 +72,14 @@ tmp/
 temp/
 run_output.log
 data/
-*cookie*
-*c?okie*
-tests/unit/*kie*
+# Live TikTok cookies / session dumps — never commit (AgentShield). Match the dump files only:
+# the former "*cookie*" / "*c?okie*" / "tests/unit/*kie*" also hid every new source, test or doc
+# whose name merely mentions cookies (e.g. cookie_injector tests, instincts).
+tests/unit/c*okie.md
+cookie.txt
+cookie.json
+cookies.txt
+cookies.json
+*.cookies.txt
+*.cookies.json
+secrets/
