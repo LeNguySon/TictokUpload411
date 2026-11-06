@@ -18,3 +18,4 @@ Trong `sammonny/platforms/tiktok.py` (cả repo nguồn `D:\SamMonnygocLiengXiPo
   - Thư viện runtime: `C:\Users\sonson\AppData\Roaming\Python\Python314\site-packages\sammonny\platforms\tiktok.py`
 - Tuyệt đối không bao giờ trả về ID giả dạng `studio_post_` khi không thể xác minh DOM một cách chắc chắn.
 - Không bao giờ cho phép một luồng upload tự ý gọi một luồng upload khác (silent fallback) khi bước publish trước đó đã gửi dữ liệu lên CDN/server, vì điều này tạo ra nguy cơ rất cao đăng trùng lặp video.
+
