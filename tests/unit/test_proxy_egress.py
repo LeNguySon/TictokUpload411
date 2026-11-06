@@ -127,10 +127,10 @@ def test_upload_video_binds_profile_proxy_and_refuses_unproxied(repos, tmp_path)
     adapter.publisher.upload.side_effect = lambda **kw: seen.append(client.current_proxy()) or MagicMock(success=True)
     video = tmp_path / "v.mp4"
     video.write_bytes(b"0" * 10)
-    adapter.upload_video(profile_id=good, video_path=video, title="t")
+    adapter.upload_video(profile_id=good, video_path=video, title="t", privacy="PUBLIC_TO_EVERYONE")
     assert seen == ["socks5h://a:b@198.51.100.4:1080"]
     with pytest.raises(EgressBlocked):
-        adapter.upload_video(profile_id=bare, video_path=video, title="t")
+        adapter.upload_video(profile_id=bare, video_path=video, title="t", privacy="PUBLIC_TO_EVERYONE")
     assert len(seen) == 1  # nothing was sent for the unproxied profile
 
 

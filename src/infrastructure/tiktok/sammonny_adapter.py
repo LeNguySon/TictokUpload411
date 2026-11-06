@@ -37,6 +37,9 @@ from src.infrastructure.proxy.egress import build_proxy_url, redact_proxy_url, r
 logger = logging.getLogger(__name__)
 
 PUBLIC_PRIVACY = "PUBLIC_TO_EVERYONE"
+# SamMonny SDK 1.8.3: the Cookie Hybrid media transfer is only simulated (execute_tos_upload sleeps for its
+# own tiktokcdn.com URL), so it can never publish a real video. Flip only when the SDK really uploads.
+COOKIE_HYBRID_AVAILABLE = False
 
 
 class UploadMethodError(RuntimeError):
@@ -395,10 +398,16 @@ class SamMonnyTikTokAdapter:
                 )
             return UploadMode.OFFICIAL_DIRECT_POST
         if method is UploadMethod.HYBRID:
+            if not COOKIE_HYBRID_AVAILABLE:
+                raise UploadMethodError(
+                    "Cookie API (Hybrid) hiện chưa hoạt động: SDK chưa truyền dữ liệu video thật. "
+                    "Chọn 'Tự động', 'API chính thức' hoặc 'Trình duyệt TikTok Studio' trong Cài Đặt Upload."
+                )
             return UploadMode.COOKIE_API_HYBRID
         if method is UploadMethod.STUDIO:
             return UploadMode.HEADLESS_STUDIO
-        return UploadMode.OFFICIAL_DIRECT_POST if token else UploadMode.COOKIE_API_HYBRID
+        # Auto: the official API when the profile is connected, otherwise the Studio page.
+        return UploadMode.OFFICIAL_DIRECT_POST if token else UploadMode.HEADLESS_STUDIO
 
     def supports_native_schedule(self, profile_id: int | str) -> bool:
         """True only if the method used for this profile can let TikTok hold a scheduled post.
@@ -407,9 +416,10 @@ class SamMonnyTikTokAdapter:
         app must keep those videos and publish them itself at the scheduled time.
         """
         try:
-            return self._resolve_mode(profile_id, self._vault_token(profile_id)) is UploadMode.COOKIE_API_HYBRID
+            mode = self._resolve_mode(profile_id, self._vault_token(profile_id))
         except UploadMethodError:
             return False
+        return COOKIE_HYBRID_AVAILABLE and mode is UploadMode.COOKIE_API_HYBRID
 
     def _reconcile_official(self, result: UploadResult, profile_id: int | str) -> UploadResult:
         """Polls TikTok until an official upload is really published (or failed)."""
@@ -480,9 +490,27 @@ class SamMonnyTikTokAdapter:
 
         # The method chosen in Cài Đặt Upload is honoured: no silent switch (the SDK would always force
         # the official API when a token exists and fall back to a browser upload when it fails).
+        from src.application.settings.upload_settings import UploadMethod
+
         allow_fallback = bool(getattr(self.settings, "allow_fallback", False))
-        effective_mode = self._resolve_mode(profile_id, token)
         privacy = str(privacy or "SELF_ONLY")
+        # The Studio page cannot set privacy or a schedule: such videos need the official API.
+        dom_reasons = []
+        if privacy != PUBLIC_PRIVACY:
+            dom_reasons.append(f"video đặt quyền riêng tư {privacy} (DOM luôn đăng công khai)")
+        if schedule_time:
+            dom_reasons.append("video có giờ hẹn (DOM đăng ngay)")
+
+        effective_mode = self._resolve_mode(profile_id, token)
+        if (
+            effective_mode is UploadMode.HEADLESS_STUDIO
+            and dom_reasons
+            and getattr(self.settings, "method", UploadMethod.AUTO) is UploadMethod.AUTO
+        ):
+            raise UploadMethodError(
+                f"Hồ sơ #{profile_id} chưa kết nối TikTok API: " + "; ".join(dom_reasons)
+                + " — chỉ đăng được qua API chính thức. Kết nối TikTok API cho hồ sơ này."
+            )
         if effective_mode is UploadMode.OFFICIAL_DIRECT_POST:
             try:
                 with self._bind_egress(proxy_url):
@@ -494,11 +522,12 @@ class SamMonnyTikTokAdapter:
                         token = self._sync_vault_token(profile_id, force_refresh=True)  # expired: refresh once
                         info = self.direct_client.query_creator_info(token) or {}
             except Exception as exc:
-                if not allow_fallback:
+                if not allow_fallback or dom_reasons:
+                    # No fallback: not allowed, or the only other working method (Studio) cannot do it.
                     raise UploadMethodError(f"API chính thức không dùng được cho hồ sơ #{profile_id}: {exc}") from exc
-                logger.warning("Official API unavailable for profile %s (%s): falling back to cookie hybrid",
+                logger.warning("Official API unavailable for profile %s (%s): falling back to TikTok Studio",
                                profile_id, exc)
-                effective_mode = UploadMode.COOKIE_API_HYBRID
+                effective_mode = UploadMode.HEADLESS_STUDIO
             else:
                 allowed = list(info.get("privacy_level_options") or [])
                 if allowed and privacy not in allowed:
@@ -509,21 +538,16 @@ class SamMonnyTikTokAdapter:
         if effective_mode is not UploadMode.OFFICIAL_DIRECT_POST:
             self.publisher._tokens.pop(str(profile_id), None)  # otherwise the SDK forces the API again
 
-        dom_reasons = []
-        if privacy != PUBLIC_PRIVACY:
-            dom_reasons.append(f"video đặt quyền riêng tư {privacy} (DOM luôn đăng công khai)")
-        if schedule_time:
-            dom_reasons.append("video có giờ hẹn (DOM đăng ngay)")
         if effective_mode is UploadMode.HEADLESS_STUDIO and dom_reasons:
             raise UploadMethodError(
                 "Trình duyệt Studio (DOM) không đặt được quyền riêng tư và giờ hẹn: " + "; ".join(dom_reasons)
                 + ". Chọn phương pháp khác trong Cài Đặt Upload."
             )
-        if effective_mode is UploadMode.COOKIE_API_HYBRID and not allow_fallback:
-            dom_reasons.append("không cho phép tự chuyển phương pháp (Cài Đặt Upload)")
-        dom_allowed = effective_mode is UploadMode.HEADLESS_STUDIO or (
-            effective_mode is UploadMode.COOKIE_API_HYBRID and not dom_reasons
-        )
+        # A DOM upload may only happen when the Studio method was chosen / routed here (never a silent
+        # SDK switch); the session guard blocks DOM.setFileInputFiles otherwise.
+        dom_allowed = effective_mode is UploadMode.HEADLESS_STUDIO
+        if not dom_allowed:
+            dom_reasons.append("phương pháp upload không phải Trình duyệt Studio")
 
         draft = self.publisher.create_draft(video_path=video_path, metadata=metadata)
         logger.info(

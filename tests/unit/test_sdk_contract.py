@@ -49,6 +49,6 @@ def test_upload_trims_process_tree_once_with_real_sdk_api(tmp_path: Path):
     video.write_bytes(b"x")
 
     with patch.object(MemoryManager, "trim_process_tree_memory") as trim:
-        adapter.upload_video(profile_id=1, video_path=video, title="t")
+        adapter.upload_video(profile_id=1, video_path=video, title="t", privacy="PUBLIC_TO_EVERYONE")
     assert trim.call_count == 1
     assert inspect.signature(MemoryManager.trim_process_tree_memory).parameters.keys() == {"root_pid"}

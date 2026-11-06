@@ -8,7 +8,7 @@ from typing import Any
 
 
 class UploadMethod(StrEnum):
-    AUTO = "auto"  # official API when the profile has an OAuth token, otherwise cookie hybrid
+    AUTO = "auto"  # official API when the profile has an OAuth token, otherwise the Studio page
     OFFICIAL = "official"  # TikTok Content Posting API (Direct Post, OAuth)
     HYBRID = "hybrid"  # cookie API in the profile's browser (TOS upload + signed publish request)
     STUDIO = "studio"  # TikTok Studio web page automation (DOM)
@@ -17,7 +17,7 @@ class UploadMethod(StrEnum):
 METHOD_LABELS: dict[UploadMethod, str] = {
     UploadMethod.AUTO: "Tự động (khuyến nghị)",
     UploadMethod.OFFICIAL: "API chính thức (OAuth Direct Post)",
-    UploadMethod.HYBRID: "Cookie API (Hybrid, qua trình duyệt hồ sơ)",
+    UploadMethod.HYBRID: "Cookie API (Hybrid) — chưa hoạt động",
     UploadMethod.STUDIO: "Trình duyệt TikTok Studio (DOM)",
 }
 

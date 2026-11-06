@@ -23,15 +23,16 @@ from src.presentation.dialogs.dialog_helpers import (
 
 METHOD_HELP: dict[UploadMethod, str] = {
     UploadMethod.AUTO: (
-        "Hồ sơ có OAuth token dùng API chính thức, các hồ sơ khác dùng Cookie API. "
-        "Lịch đăng: app tự đăng đúng giờ khi phương pháp không hẹn giờ được trên TikTok."
+        "Hồ sơ đã kết nối TikTok API (OAuth) dùng API chính thức. Hồ sơ chưa kết nối dùng trình duyệt TikTok "
+        "Studio, chỉ cho video công khai; video riêng tư cần kết nối API. Lịch đăng: app tự đăng đúng giờ."
     ),
     UploadMethod.OFFICIAL: (
         "Ổn định và chính thống nhất, cần OAuth token cho từng hồ sơ. Không hẹn giờ trên TikTok (app tự đăng "
         "đúng giờ). Quyền riêng tư phải nằm trong các mức tài khoản được phép."
     ),
     UploadMethod.HYBRID: (
-        "Dùng phiên đăng nhập (cookie) trong trình duyệt của hồ sơ. Hỗ trợ quyền riêng tư và hẹn giờ trên TikTok."
+        "CHƯA HOẠT ĐỘNG: SDK hiện tại chưa truyền dữ liệu video thật qua phương pháp này, nên mọi lượt upload sẽ bị "
+        "từ chối. Hãy dùng 'Tự động', 'API chính thức' hoặc 'Trình duyệt TikTok Studio'."
     ),
     UploadMethod.STUDIO: (
         "Thao tác trang TikTok Studio trong trình duyệt. CHỈ dùng cho video công khai, không hẹn giờ: "

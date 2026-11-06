@@ -98,16 +98,23 @@ def test_official_api_failure_is_reported_not_silently_switched(tmp_path):
     adapter.publisher.upload.assert_not_called()
 
 
-def test_official_api_failure_with_fallback_allowed_uses_hybrid(tmp_path):
+def test_official_api_failure_with_fallback_allowed_uses_studio_for_public_videos(tmp_path):
     adapter, video = _adapter(tmp_path, UploadMethod.OFFICIAL, allow_fallback=True,
                               creator_error=RuntimeError("token revoked"))
-    adapter.upload_video(profile_id=1, video_path=video, title="t")
-    assert _mode(adapter) is UploadMode.COOKIE_API_HYBRID
+    adapter.upload_video(profile_id=1, video_path=video, title="t", privacy="PUBLIC_TO_EVERYONE")
+    assert _mode(adapter) is UploadMode.HEADLESS_STUDIO  # Cookie Hybrid does not upload real data
     assert "1" not in adapter.publisher._tokens  # the SDK would otherwise force the API again
 
 
-@pytest.mark.parametrize(("method", "mode"), [(UploadMethod.HYBRID, UploadMode.COOKIE_API_HYBRID),
-                                              (UploadMethod.STUDIO, UploadMode.HEADLESS_STUDIO)])
+def test_official_api_failure_cannot_fall_back_for_a_private_video(tmp_path):
+    adapter, video = _adapter(tmp_path, UploadMethod.OFFICIAL, allow_fallback=True,
+                              creator_error=RuntimeError("token revoked"))
+    with pytest.raises(UploadMethodError, match="token revoked"):
+        adapter.upload_video(profile_id=1, video_path=video, title="t", privacy="SELF_ONLY")
+    adapter.publisher.upload.assert_not_called()
+
+
+@pytest.mark.parametrize(("method", "mode"), [(UploadMethod.STUDIO, UploadMode.HEADLESS_STUDIO)])
 def test_forced_browser_methods_ignore_an_existing_token(tmp_path, method, mode):
     adapter, video = _adapter(tmp_path, method)
     adapter.publisher._tokens["1"] = "stale"
@@ -115,13 +122,29 @@ def test_forced_browser_methods_ignore_an_existing_token(tmp_path, method, mode)
     assert _mode(adapter) is mode and "1" not in adapter.publisher._tokens
 
 
-def test_auto_uses_official_with_token_and_hybrid_without(tmp_path):
+def test_chosen_cookie_hybrid_is_refused_because_it_cannot_upload(tmp_path):
+    adapter, video = _adapter(tmp_path, UploadMethod.HYBRID, token=None)
+    with pytest.raises(UploadMethodError, match="Hybrid"):
+        adapter.upload_video(profile_id=1, video_path=video, title="t", privacy="PUBLIC_TO_EVERYONE")
+    adapter.publisher.upload.assert_not_called()
+
+
+def test_auto_uses_official_with_token_and_studio_without(tmp_path):
     adapter, video = _adapter(tmp_path)
     adapter.upload_video(profile_id=1, video_path=video, title="t")
     assert _mode(adapter) is UploadMode.OFFICIAL_DIRECT_POST
-    adapter2, video2 = _adapter(tmp_path / "b" if (tmp_path / "b").mkdir() is None else tmp_path, token=None)
-    adapter2.upload_video(profile_id=1, video_path=video2, title="t")
-    assert _mode(adapter2) is UploadMode.COOKIE_API_HYBRID
+    (tmp_path / "b").mkdir()
+    adapter2, video2 = _adapter(tmp_path / "b", token=None)
+    adapter2.upload_video(profile_id=1, video_path=video2, title="t", privacy="PUBLIC_TO_EVERYONE")
+    assert _mode(adapter2) is UploadMode.HEADLESS_STUDIO
+
+
+@pytest.mark.parametrize(("privacy", "schedule"), [("SELF_ONLY", None), ("PUBLIC_TO_EVERYONE", FUTURE)])
+def test_auto_without_token_needs_the_api_for_private_or_scheduled_videos(tmp_path, privacy, schedule):
+    adapter, video = _adapter(tmp_path, token=None)
+    with pytest.raises(UploadMethodError, match="TikTok API"):
+        adapter.upload_video(profile_id=1, video_path=video, title="t", privacy=privacy, schedule_time=schedule)
+    adapter.publisher.upload.assert_not_called()
 
 
 def test_official_privacy_must_be_allowed_for_the_account(tmp_path):
@@ -134,8 +157,8 @@ def test_official_privacy_must_be_allowed_for_the_account(tmp_path):
 # ------------------------------------------------------------------ native scheduling support
 @pytest.mark.parametrize(
     ("method", "token", "native"),
-    [(UploadMethod.OFFICIAL, "tok", False), (UploadMethod.STUDIO, "tok", False), (UploadMethod.HYBRID, None, True),
-     (UploadMethod.AUTO, "tok", False), (UploadMethod.AUTO, None, True)],
+    [(UploadMethod.OFFICIAL, "tok", False), (UploadMethod.STUDIO, "tok", False), (UploadMethod.HYBRID, None, False),
+     (UploadMethod.AUTO, "tok", False), (UploadMethod.AUTO, None, False)],  # no method can let TikTok hold it
 )
 def test_supports_native_schedule(tmp_path, method, token, native):
     adapter, _ = _adapter(tmp_path, method, token=token)
@@ -180,10 +203,7 @@ def test_dom_upload_of_a_non_public_video_is_refused(tmp_path):
     ("method", "privacy", "schedule", "allow_fallback", "dom_allowed"),
     [
         (UploadMethod.STUDIO, "PUBLIC_TO_EVERYONE", None, False, True),
-        (UploadMethod.HYBRID, "PUBLIC_TO_EVERYONE", None, False, False),  # no silent hybrid -> DOM switch
-        (UploadMethod.HYBRID, "PUBLIC_TO_EVERYONE", None, True, True),
-        (UploadMethod.HYBRID, "SELF_ONLY", None, True, False),  # DOM would publish it publicly
-        (UploadMethod.HYBRID, "PUBLIC_TO_EVERYONE", FUTURE, True, False),  # DOM would post it now
+        (UploadMethod.AUTO, "PUBLIC_TO_EVERYONE", None, False, True),  # no token: Studio
     ],
 )
 def test_dom_permission_per_upload(tmp_path, method, privacy, schedule, allow_fallback, dom_allowed):

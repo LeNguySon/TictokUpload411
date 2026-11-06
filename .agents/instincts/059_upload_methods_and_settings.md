@@ -41,3 +41,10 @@
 - Lỗi chập chờn có sẵn (không do SDK): cả bộ test thỉnh thoảng sập "Windows fatal exception: access violation" trong
   `test_video_appeal_and_creator_reapply.py`; nghi `AccountHealthDialog` (ThreadPoolExecutor + QTimer poll) trong test
   không có qtbot. Chạy riêng file luôn pass.
+
+## Định tuyến sau khi xác nhận Hybrid không upload thật (2026-11-07)
+- `COOKIE_HYBRID_AVAILABLE = False` (sammonny_adapter): chọn Hybrid ⇒ `UploadMethodError` rõ ràng; nhãn cài đặt ghi
+  "chưa hoạt động". Chỉ bật lại khi SDK truyền video thật.
+- Tự động: có token ⇒ API chính thức; không token ⇒ Studio DOM nếu video công khai & không hẹn giờ, ngược lại báo
+  "chưa kết nối TikTok API". `supports_native_schedule` luôn False ⇒ app tự giữ & đăng đúng giờ.
+- Tự chuyển khi API lỗi ⇒ Studio (chỉ khi video hợp lệ cho DOM), không còn chuyển sang Hybrid.

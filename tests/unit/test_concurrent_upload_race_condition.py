@@ -59,7 +59,7 @@ def test_publisher_adapter_accepts_stateless_preferred_mode_parameter() -> None:
 def test_concurrent_upload_preserves_per_profile_mode() -> None:
     """Simulates 2 concurrent threads uploading videos simultaneously:
     - Thread A: Profile 101 with OAuth token -> OFFICIAL_DIRECT_POST
-    - Thread B: Profile 102 with Cookie only -> COOKIE_API_HYBRID
+    - Thread B: Profile 102 without a token -> HEADLESS_STUDIO (public video; Cookie Hybrid cannot upload)
     Verifies that neither thread clobbers the other's upload mode or session factory.
     """
     from src.infrastructure.tiktok.sammonny_adapter import SamMonnyTikTokAdapter
@@ -108,20 +108,21 @@ def test_concurrent_upload_preserves_per_profile_mode() -> None:
             return res
 
     def run_upload_profile_102() -> UploadResult:
-        with patch("sammonny.platforms.tiktok.TikTokHybridApiUploader") as mock_hybrid_cls:
-            mock_hybrid_instance = MagicMock()
-            mock_hybrid_instance.upload_via_hybrid.return_value = UploadResult(
+        with patch("sammonny.platforms.tiktok.TikTokHeadlessStudioUploader") as mock_studio_cls:
+            mock_studio_instance = MagicMock()
+            mock_studio_instance.upload_via_studio.return_value = UploadResult(
                 success=True,
                 draft_id="draft_102",
-                publish_id="hybrid_pub_102",
+                publish_id="studio_102",
                 status=RemoteStatus.PUBLISH_COMPLETE,
             )
-            mock_hybrid_cls.return_value = mock_hybrid_instance
+            mock_studio_cls.return_value = mock_studio_instance
 
             res = adapter.upload_video(
                 profile_id=102,
                 video_path="scratch/video2.mp4",
                 title="Video Cookie 102",
+                privacy="PUBLIC_TO_EVERYONE",
             )
             executed_modes.append(f"102:{res.publish_id}")
             return res
@@ -152,9 +153,9 @@ def test_concurrent_upload_preserves_per_profile_mode() -> None:
     assert res_a.success is True
     assert res_a.publish_id == "oauth_pub_101"
 
-    # Assert Thread B (Profile 102) succeeded with Hybrid
+    # Assert Thread B (Profile 102) succeeded with the Studio uploader
     assert res_b.success is True
-    assert res_b.publish_id == "hybrid_pub_102"
+    assert res_b.publish_id == "studio_102"
 
     # Verify adapter.preferred_mode was NOT permanently overwritten
     assert adapter.preferred_mode is None
