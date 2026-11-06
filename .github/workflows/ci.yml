@@ -1,0 +1,48 @@
+# Verification loop (AGENTS.md §2, phases 1-4) on every push / PR: import, types, lint, tests.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      QT_QPA_PLATFORM: offscreen
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies (SamMonny SDK from vendor/)
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: "Phase 1: build & import"
+        run: python -c "import importlib, pkgutil, src; [importlib.import_module(m.name) for m in pkgutil.walk_packages(src.__path__, 'src.')]"
+
+      - name: "Phase 2: type check"
+        run: python -m mypy src
+
+      - name: "Phase 3: lint"
+        run: python -m ruff check .
+
+      - name: "Phase 4: tests"
+        run: python -m pytest -q -o addopts="" -p no:cacheprovider --cov=src --cov-report=term --cov-fail-under=80 tests
+
