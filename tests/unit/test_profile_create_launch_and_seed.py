@@ -189,7 +189,7 @@ def test_sdk_launch_seeds_cookies_before_start(tmp_path, daemon_dir):
             return "127.0.0.1:9222"
 
     with patch("sammonny.gologin.gologin.GoLogin", FakeGoLogin):
-        addr = launcher.launch_via_gologin_sdk(profile_id="uuid-sdk-1", cookie_raw=COOKIE)
+        addr = launcher.launch_via_gologin_sdk(profile_id="uuid-sdk-1", cookie_raw=COOKIE, direct_connection=True)
     assert addr == "127.0.0.1:9222"
     assert seen_at_start == {"sqlite": "imported111", "posted": 3}
 

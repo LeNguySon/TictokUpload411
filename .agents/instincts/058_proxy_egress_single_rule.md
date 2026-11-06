@@ -21,3 +21,17 @@
 ## Kiểm chứng
 - `scratch/perf/e2e_proxy_egress.py`: proxy cục bộ ghi nhận request curl_cffi + lệnh SDK Direct Post thật, đúng
   user/pass có ký tự đặc biệt; hồ sơ không proxy không gửi byte nào ⇒ PASS.
+
+## Daemon SamMonny: bản ghi proxy của daemon mới là thứ trình duyệt dùng (audit lần 2)
+- Daemon GHI LẠI `Default/Preferences` từ bản ghi hồ sơ của nó mỗi lần start (`gologin-launcher/profile_prep.rs`).
+  Chỉ sửa Preferences là vô dụng; bản ghi `mode: none` ⇒ trình duyệt chạy bằng IP máy. Dữ liệu thật: 6 hồ sơ có proxy
+  trong app nhưng daemon ghi "none". Thử nghiệm hồ sơ tạm: cách cũ ⇒ 0 request qua proxy; cách mới ⇒ daemon gửi
+  ip-api/ipify qua proxy.
+- `src/infrastructure/browser/daemon_proxy_sync.sync_daemon_proxy(uuid, proxy|None)`: tạo/dùng lại proxy trong kho
+  daemon (`GET/POST /api/v1/proxies`, cần `created_at`), `POST /api/v1/profiles/{id}/assign-proxy {"proxy_id"}`, đọc lại
+  và raise nếu lệch. `PUT /api/v1/profiles/{id}` (SDK engine.session dùng) trả 405 với daemon hiện tại.
+- Gọi trước MỌI lần start qua daemon: `launch_via_gologin_sdk` (worker + "Làm mới phiên") và phiên upload. Hồ sơ không
+  proxy/không opt-in (vd chỉ WireGuard) không được đi đường SDK ⇒ worker rơi về đường binary có cầu VPN.
+- conftest `never_touch_the_real_daemon`: test không bao giờ sửa bản ghi daemon thật (daemon chạy trên máy dev).
+- Khác: `--proxy-server` tách credentials ở "@" CUỐI; `ProfileRepository.update(proxy_id=…)` tắt direct mode;
+  chuyển dữ liệu không dùng lại id proxy của CSDL nguồn.

@@ -134,7 +134,8 @@ def import_project_dataset(
         target_proj_id = project_id_map.get(raw_proj_id, raw_proj_id) if raw_proj_id else None
 
         raw_px_id = pf.get("proxy_id")
-        target_px_id = proxy_id_map.get(raw_px_id, raw_px_id) if raw_px_id else None
+        # Only a proxy imported in THIS run: the source id may be a different proxy here.
+        target_px_id = proxy_id_map.get(raw_px_id) if raw_px_id else None
 
         # Attempt creation with mapped FKs, fallback to None if FK violates
         try:

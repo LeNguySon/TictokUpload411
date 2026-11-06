@@ -13,6 +13,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
+from src.infrastructure.browser.daemon_proxy_sync import sync_daemon_proxy
 from src.infrastructure.browser.engine_paths import daemon_profiles_dir, discover_orbita_executable
 from src.infrastructure.browser.process_supervisor import BrowserProcessSupervisor
 
@@ -356,7 +357,7 @@ class OrbitaLauncher:
             proxy_host = None
             if "@" in proxy_uri:
                 scheme, rest = proxy_uri.split("://", 1)
-                _, host_port = rest.split("@", 1)
+                _, host_port = rest.rsplit("@", 1)
                 clean_proxy = f"{scheme}://{host_port}"
                 proxy_host = host_port.split(":")[0]
             elif "://" in proxy_uri:
@@ -417,14 +418,14 @@ class OrbitaLauncher:
 
         proxy_uri = None
         if proxy_data:
-            scheme = proxy_data.get("protocol", "http")
-            host = proxy_data.get("host")
-            port = proxy_data.get("port")
-            usr = proxy_data.get("username")
-            pwd = proxy_data.get("password")
-            auth = f"{usr}:{pwd}@" if usr and pwd else ""
-            if host and port:
-                proxy_uri = f"{scheme}://{auth}{host}:{port}"
+            if proxy_data.get("status") == "leak_detected":
+                raise PermissionError(f"Proxy #{proxy_data.get('id')} bị gắn cờ LEAK DETECTED: không mở trình duyệt.")
+            from src.infrastructure.proxy.egress import build_proxy_url
+
+            # Chromium flag form: socks5 (Chromium already resolves DNS through SOCKS5), encoded creds.
+            proxy_uri = build_proxy_url(proxy_data)
+            if proxy_uri and proxy_uri.startswith(("socks5h://", "socks4a://")):
+                proxy_uri = proxy_uri.replace("socks5h://", "socks5://", 1).replace("socks4a://", "socks4://", 1)
 
         if not proxy_uri and not profile_data.get("direct_connection"):
             # Strict Proxy Gate for browsers: never open TikTok from the host IP, unless the user
@@ -570,9 +571,13 @@ class OrbitaLauncher:
         Ensures proxy is synchronized to Preferences prior to starting.
         Returns debugger address (e.g. '127.0.0.1:port').
         """
-        if proxy_data or direct_connection:
-            # Direct mode writes mode=none so a stale proxy from an earlier assignment is not reused.
-            self.sync_daemon_profile_proxy(profile_id, proxy_data)
+        if not proxy_data and not direct_connection:
+            # e.g. a WireGuard-only profile: the VPN bridge exists only in the binary launch path.
+            raise PermissionError(f"SDK launch of {profile_id} needs a proxy or the explicit direct mode")
+        # The daemon rewrites Preferences from ITS OWN record at start: set that record (verified,
+        # raises on mismatch so this browser is never started), then Preferences for consistency.
+        sync_daemon_proxy(str(profile_id), proxy_data if proxy_data else None)
+        self.sync_daemon_profile_proxy(profile_id, proxy_data)
 
         from sammonny.gologin.gologin import GoLogin
 

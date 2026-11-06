@@ -27,6 +27,7 @@ from sammonny import (
 )
 from sammonny.engine.core import AntidetectEngine
 
+from src.infrastructure.browser.daemon_proxy_sync import sync_daemon_proxy
 from src.infrastructure.credentials.windows_vault import WindowsCredentialVault
 from src.infrastructure.database.repositories.profile_repository import ProfileRepository
 from src.infrastructure.database.repositories.proxy_repository import ProxyRepository
@@ -207,11 +208,14 @@ def _default_session_factory(
     # Fail closed: no proxy (without the user's direct opt-in) or a leak-flagged proxy never starts
     # an upload browser from the machine's own IP.
     proxy_url = resolve_profile_egress(prof or {"id": profile_id}, proxy_data)
+    # The daemon starts this browser from ITS OWN profile record: set and verify it (raises on
+    # mismatch, so the upload browser never runs on a stale / missing proxy).
+    sync_daemon_proxy(target_profile_uuid, proxy_data if proxy_url else None)
     try:
         OrbitaLauncher().sync_daemon_profile_proxy(target_profile_uuid, proxy_data)
-        logger.info("Upload session %s routed via %s", target_profile_uuid, redact_proxy_url(proxy_url))
     except Exception as pe:
-        logger.warning("Failed syncing proxy to profile %s: %s", target_profile_uuid, pe)
+        logger.warning("Failed syncing proxy to profile %s preferences: %s", target_profile_uuid, pe)
+    logger.info("Upload session %s routed via %s", target_profile_uuid, redact_proxy_url(proxy_url))
 
     cookie_raw = pick_session_cookie(prof)
     if cookie_raw:

@@ -237,6 +237,8 @@ class ProfileRepository:
         if "cookie" in payload and "cookies_json" not in payload:
             payload["cookies_json"] = payload.pop("cookie")
         _apply_cookie_import(payload)
+        if "direct_connection" not in payload and (payload.get("proxy_id") or payload.get("vpn_config")):
+            payload["direct_connection"] = 0  # a proxy/VPN was assigned: direct mode ends
 
         with db_session(self.db_path) as conn:
             col_rows = conn.execute("PRAGMA table_info(profiles);").fetchall()

@@ -68,6 +68,18 @@ def test_license(monkeypatch, tmp_path):
 
 
 @pytest.fixture(autouse=True)
+def never_touch_the_real_daemon(monkeypatch):
+    """The SamMonny daemon runs on the developer machine: tests must never rewrite its profile records."""
+    from unittest.mock import MagicMock
+
+    for target in (
+        "src.infrastructure.browser.orbita_launcher.sync_daemon_proxy",
+        "src.infrastructure.tiktok.sammonny_adapter.sync_daemon_proxy",
+    ):
+        monkeypatch.setattr(target, MagicMock())
+
+
+@pytest.fixture(autouse=True)
 def no_public_ip_lookup(monkeypatch):
     """The leak policy looks up the machine's public IP over the network: never from tests."""
     monkeypatch.setattr("src.domain.policies.network_leak_policy.discover_public_ip", lambda timeout=5.0: None)
