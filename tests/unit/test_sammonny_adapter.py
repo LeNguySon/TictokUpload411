@@ -26,6 +26,7 @@ def test_sammonny_adapter_upload_direct_post():
     }
 
     adapter = SamMonnyTikTokAdapter(vault=mock_vault)
+    adapter._profile_egress = lambda _pid: "http://proxy.test:8080"  # profile 101 has a proxy
 
     # Create dummy video file
     with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as f:
@@ -73,6 +74,7 @@ def test_sammonny_adapter_creator_metrics_fetch():
     mock_vault.get_oauth_tokens.return_value = {"access_token": "valid_token"}
 
     adapter = SamMonnyTikTokAdapter(vault=mock_vault)
+    adapter._profile_egress = lambda _pid: "http://proxy.test:8080"  # profile 101 has a proxy
 
     fake_creator_data = {
         "creator_nickname": "TikTokStar",

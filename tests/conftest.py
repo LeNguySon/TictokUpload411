@@ -68,6 +68,12 @@ def test_license(monkeypatch, tmp_path):
 
 
 @pytest.fixture(autouse=True)
+def no_public_ip_lookup(monkeypatch):
+    """The leak policy looks up the machine's public IP over the network: never from tests."""
+    monkeypatch.setattr("src.domain.policies.network_leak_policy.discover_public_ip", lambda timeout=5.0: None)
+
+
+@pytest.fixture(autouse=True)
 def isolated_ui_settings(monkeypatch, tmp_path):
     """Tests must never read/write the developer's real UI settings (Windows registry) and must not
     run the real exit cache cleanup on whatever `profiles/` dirs exist: every test gets a temp ini

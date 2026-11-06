@@ -112,15 +112,9 @@ class GoLoginTikTokClient:
             conn.close()
 
     def _build_proxy_url(self, proxy_dict: dict[str, Any] | None) -> str | None:
-        if not proxy_dict or not proxy_dict.get("host") or not proxy_dict.get("port"):
-            return None
-        proto = proxy_dict.get("protocol", "http")
-        host = proxy_dict["host"]
-        port = proxy_dict["port"]
-        u = proxy_dict.get("username")
-        p = proxy_dict.get("password")
-        auth = f"{u}:{p}@" if u and p else ""
-        return f"{proto}://{auth}{host}:{port}"
+        from src.infrastructure.proxy.egress import build_proxy_url
+
+        return build_proxy_url(proxy_dict)  # encoded credentials, socks5h (remote DNS)
 
     def request_api(
         self,
@@ -145,22 +139,12 @@ class GoLoginTikTokClient:
             conn.close()
 
         cookie_hdr = self.get_profile_cookie_header(profile_id)
-        proxy_dict = self.get_profile_proxy(profile_id)
-        proxy_url = self._build_proxy_url(proxy_dict)
-        if not proxy_url:
-            if p.get("direct_connection"):
-                logger.info("Profile %s explicitly configured with direct_connection=1 (Host IP)", profile_id)
-                proxies = None
-            else:
-                logger.critical(
-                    "AgentShield Strict Proxy Gate: Blocked raw HTTP request for profile %s with no proxy configured!",
-                    profile_id,
-                )
-                raise PermissionError(
-                    f"AgentShield Strict Proxy Gate: Outbound TikTok request blocked because profile {profile_id} has no valid proxy configured."
-                )
-        else:
-            proxies = {"http": proxy_url, "https": proxy_url}
+        from src.infrastructure.proxy.egress import resolve_profile_egress
+
+        # Raises EgressBlocked (a PermissionError) for no proxy, a leak-flagged or a broken proxy;
+        # None only for the user's explicit direct mode.
+        proxy_url = resolve_profile_egress(p, self.get_profile_proxy(profile_id))
+        proxies = {"http": proxy_url, "https": proxy_url} if proxy_url else None
 
         req_headers = {
             "User-Agent": p.get("user_agent")

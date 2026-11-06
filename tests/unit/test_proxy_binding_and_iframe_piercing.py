@@ -35,7 +35,8 @@ def test_proxy_url_formatter_without_auth() -> None:
         "protocol": "socks5",
     }
     url = format_proxy_url(proxy_data)
-    assert url == "socks5://192.168.1.100:8888"
+    # socks5h: hostnames are resolved by the proxy (socks5 resolved them locally: DNS leak).
+    assert url == "socks5h://192.168.1.100:8888"
 
 
 def test_default_session_factory_syncs_proxy(tmp_path: Any) -> None:

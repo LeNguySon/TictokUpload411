@@ -8,8 +8,11 @@ Conforms to TDS-ARCH-001 §6.2 Publisher protocol:
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
+import threading
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -22,26 +25,60 @@ from sammonny import (
     UploadMode,
     UploadResult,
 )
+from sammonny.engine.core import AntidetectEngine
 
 from src.infrastructure.credentials.windows_vault import WindowsCredentialVault
 from src.infrastructure.database.repositories.profile_repository import ProfileRepository
 from src.infrastructure.database.repositories.proxy_repository import ProxyRepository
+from src.infrastructure.proxy.egress import build_proxy_url, redact_proxy_url, resolve_profile_egress
 
 logger = logging.getLogger(__name__)
 
 
 def format_proxy_url(proxy_data: dict[str, Any] | None) -> str | None:
-    """Formats proxy dictionary into RFC-compliant proxy URI string."""
-    if not proxy_data or not proxy_data.get("host") or not proxy_data.get("port"):
-        return None
-    proto = str(proxy_data.get("protocol") or "http").lower()
-    host = proxy_data["host"]
-    port = proxy_data["port"]
-    user = proxy_data.get("username")
-    pwd = proxy_data.get("password")
-    if user and pwd:
-        return f"{proto}://{user}:{pwd}@{host}:{port}"
-    return f"{proto}://{host}:{port}"
+    """Proxy URI for HTTP clients (see src.infrastructure.proxy.egress.build_proxy_url)."""
+    return build_proxy_url(proxy_data)
+
+
+class ProxyBoundDirectPostClient(TikTokDirectPostClient):
+    """TikTokDirectPostClient whose calls go through the proxy bound to the current upload.
+
+    The SDK publisher calls init_direct_post / upload_video_chunks WITHOUT proxy_url, so official
+    uploads left from the machine's own IP. Uploads run concurrently on worker threads: the binding
+    is thread-local.
+    """
+
+    _PROXIED_METHODS = ("query_creator_info", "init_direct_post", "upload_video_chunks", "get_post_status")
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._local = threading.local()
+
+    def current_proxy(self) -> str | None:
+        return getattr(self._local, "proxy_url", None)
+
+    @contextlib.contextmanager
+    def bound(self, proxy_url: str | None):  # type: ignore[no-untyped-def]
+        previous = self.current_proxy()
+        self._local.proxy_url = proxy_url
+        try:
+            yield self
+        finally:
+            self._local.proxy_url = previous
+
+    def __getattribute__(self, name: str) -> Any:
+        attr = super().__getattribute__(name)
+        if name in ProxyBoundDirectPostClient._PROXIED_METHODS and callable(attr):
+            bound_proxy = super().__getattribute__("current_proxy")()
+            if bound_proxy:
+
+                def call(*args: Any, **kwargs: Any) -> Any:
+                    if not kwargs.get("proxy_url"):
+                        kwargs["proxy_url"] = bound_proxy
+                    return attr(*args, **kwargs)
+
+                return call
+        return attr
 
 
 class LazyActiveSession:
@@ -82,7 +119,11 @@ class LazyActiveSession:
                     if cookie_items:
                         self._session.cdp.send("Network.enable", {})
                         cdp_cookies = []
+                        now = time.time()
                         for it in cookie_items:
+                            expires = it.get("expirationDate") or (now + 31536000)
+                            if float(expires) <= now:
+                                continue  # expired: never hand a dead cookie to the browser
                             cdp_cookies.append(
                                 {
                                     "name": it["name"],
@@ -91,7 +132,7 @@ class LazyActiveSession:
                                     "path": it.get("path", "/"),
                                     "secure": it.get("secure", True),
                                     "httpOnly": it.get("httpOnly", False),
-                                    "expires": it.get("expirationDate", 2000000000),
+                                    "expires": float(expires),
                                 }
                             )
                         self._session.cdp.send("Network.setCookies", {"cookies": cdp_cookies})
@@ -143,8 +184,6 @@ def _default_session_factory(
     Resolves integer database profile_id to authentic profile UUID if necessary.
     Returns LazyActiveSession wrapper so that CDP is initiated upon first demand.
     """
-    from sammonny.engine.core import AntidetectEngine
-
     from src.infrastructure.browser.orbita_launcher import OrbitaLauncher
     from src.infrastructure.database.repositories.profile_repository import ProfileRepository
     from src.infrastructure.database.repositories.proxy_repository import ProxyRepository
@@ -160,44 +199,37 @@ def _default_session_factory(
         except Exception as e:
             logger.warning("Could not resolve profile_id %s to UUID: %s", profile_id, e)
 
-    proxy_data = None
-    proxy_url = None
-    if prof and prof.get("proxy_id"):
-        try:
-            px_repo = ProxyRepository(db_path=db_path)
-            proxy_data = px_repo.get_by_id(int(prof["proxy_id"]))
-            if proxy_data:
-                OrbitaLauncher().sync_daemon_profile_proxy(target_profile_uuid, proxy_data)
-                proxy_url = format_proxy_url(proxy_data)
-                logger.info(
-                    "Synchronized proxy %s to profile %s preferences (URL: %s)",
-                    proxy_data.get("id"),
-                    target_profile_uuid,
-                    proxy_url,
-                )
-        except Exception as pe:
-            logger.warning("Failed syncing proxy to profile %s: %s", target_profile_uuid, pe)
+    from src.domain.policies.cookie_source import pick_session_cookie
 
-    # Pre-inject latest cookies into Chromium SQLite store if available
-    if prof and (prof.get("cookies_browser") or prof.get("cookies_json")):
+    proxy_data = None
+    if prof and prof.get("proxy_id"):
+        proxy_data = ProxyRepository(db_path=db_path).get_by_id(int(prof["proxy_id"]))
+    # Fail closed: no proxy (without the user's direct opt-in) or a leak-flagged proxy never starts
+    # an upload browser from the machine's own IP.
+    proxy_url = resolve_profile_egress(prof or {"id": profile_id}, proxy_data)
+    try:
+        OrbitaLauncher().sync_daemon_profile_proxy(target_profile_uuid, proxy_data)
+        logger.info("Upload session %s routed via %s", target_profile_uuid, redact_proxy_url(proxy_url))
+    except Exception as pe:
+        logger.warning("Failed syncing proxy to profile %s: %s", target_profile_uuid, pe)
+
+    cookie_raw = pick_session_cookie(prof)
+    if cookie_raw:
         try:
             from src.infrastructure.browser.cookie_injector import BrowserCookieInjector
-            cookie_raw = prof.get("cookies_browser") or prof.get("cookies_json") or ""
-            target_profile_dir = OrbitaLauncher.DAEMON_PROFILES_DIR / target_profile_uuid
-            BrowserCookieInjector.inject_to_chromium_sqlite(target_profile_dir, cookie_raw)
+
+            # Once per cookie value: re-writing on every upload overwrote the refreshed session.
+            BrowserCookieInjector.seed_profile_cookies(OrbitaLauncher.DAEMON_PROFILES_DIR / target_profile_uuid, cookie_raw)
         except Exception as ce:
-            logger.debug("Failed pre-injecting SQLite cookies: %s", ce)
+            logger.debug("Failed pre-seeding cookies: %s", ce)
 
     engine = AntidetectEngine(profiles_dir=OrbitaLauncher.DAEMON_PROFILES_DIR)
     raw_sess = engine.session(profile_id=target_profile_uuid)
     if lazy:
-        cookie_str = None
-        if prof:
-            cookie_str = prof.get("cookies_browser") or prof.get("cookies_json")
         return LazyActiveSession(
             raw_sess,
             headless=True,
-            cookie_raw=cookie_str,
+            cookie_raw=cookie_raw or None,
             proxy_url=proxy_url,
         )  # type: ignore[return-value]
     return raw_sess
@@ -221,7 +253,7 @@ class SamMonnyTikTokAdapter:
         proxy_repo: ProxyRepository | None = None,
     ) -> None:
         self.vault = vault or WindowsCredentialVault()
-        self.direct_client = direct_client or TikTokDirectPostClient()
+        self.direct_client = direct_client or ProxyBoundDirectPostClient()
         self.db_path = db_path
         self.profile_repo = profile_repo or ProfileRepository(db_path)
         self.proxy_repo = proxy_repo or ProxyRepository(db_path)
@@ -236,6 +268,17 @@ class SamMonnyTikTokAdapter:
             session_factory=self.session_factory,
             preferred_mode=self.preferred_mode,
         )
+
+    def _profile_egress(self, profile_id: int | str) -> str | None:
+        """Proxy URL for this profile's TikTok traffic; raises EgressBlocked when there is none."""
+        prof = self.profile_repo.get_by_id(int(profile_id)) if str(profile_id).isdigit() else None
+        proxy = self.proxy_repo.get_by_id(prof["proxy_id"]) if prof and prof.get("proxy_id") else None
+        return resolve_profile_egress(prof or {"id": profile_id}, proxy)
+
+    def _bind_egress(self, proxy_url: str | None):  # type: ignore[no-untyped-def]
+        if isinstance(self.direct_client, ProxyBoundDirectPostClient):
+            return self.direct_client.bound(proxy_url)
+        return contextlib.nullcontext()
 
     def _sync_vault_token(self, profile_id: int | str) -> str | None:
         """Retrieves OAuth access token from Windows Vault and registers it with the publisher."""
@@ -269,6 +312,8 @@ class SamMonnyTikTokAdapter:
         2. Cookie Hybrid TOS 5MB streaming if session factory available.
         3. Headless Studio DOM automation fallback.
         """
+        # Resolve the network path first: nothing is sent for a profile without a usable proxy.
+        proxy_url = self._profile_egress(profile_id)
         # Ensure access token is registered if available in Vault
         token = self._sync_vault_token(profile_id)
 
@@ -305,13 +350,14 @@ class SamMonnyTikTokAdapter:
         )
 
         try:
-            return self.publisher.upload(
-                draft=draft,
-                account_id=str(profile_id),
-                progress_callback=progress_callback,
-                cancel_token=cancel_token,
-                preferred_mode=effective_mode,
-            )
+            with self._bind_egress(proxy_url):  # official Direct Post calls go through the profile proxy
+                return self.publisher.upload(
+                    draft=draft,
+                    account_id=str(profile_id),
+                    progress_callback=progress_callback,
+                    cancel_token=cancel_token,
+                    preferred_mode=effective_mode,
+                )
         finally:
             try:
                 from sammonny.system.memory import MemoryManager
@@ -331,17 +377,7 @@ class SamMonnyTikTokAdapter:
         if not token:
             raise ValueError(f"No active access token in Windows Vault for profile {profile_id}")
 
-        proxy_url = None
-        if self.profile_repo and self.proxy_repo:
-            prof = self.profile_repo.get_by_id(int(profile_id))
-            if prof and prof.get("proxy_id"):
-                proxy_row = self.proxy_repo.get_by_id(prof["proxy_id"])
-                if proxy_row:
-                    if proxy_row.get("status") == "leak_detected":
-                        raise PermissionError(
-                            f"Proxy #{prof['proxy_id']} is flagged with LEAK DETECTED! Aborting query to protect account."
-                        )
-                    proxy_url = format_proxy_url(proxy_row)
+        proxy_url = self._profile_egress(profile_id)  # raises EgressBlocked: never direct
 
         return self.direct_client.query_creator_info(token, proxy_url=proxy_url)
 

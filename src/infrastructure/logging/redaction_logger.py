@@ -11,6 +11,8 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 REDACTION_PATTERNS = [
+    # Credentials inside URLs (proxy URIs): scheme://user:password@host
+    re.compile(r"(?<=://)[^\s/@:]+:[^\s/@]+(?=@)", re.IGNORECASE),
     # JWT tokens
     re.compile(r"eyJ[A-Za-z0-9_\-\.]{20,}", re.IGNORECASE),
     # Bearer tokens

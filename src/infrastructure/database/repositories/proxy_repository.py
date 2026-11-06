@@ -12,16 +12,27 @@ from typing import Any
 from src.infrastructure.database.connection import DEFAULT_DB_PATH, db_session
 
 
+def _valid_port(value: str) -> int | None:
+    try:
+        port = int(value)
+    except (TypeError, ValueError):
+        return None
+    return port if 1 <= port <= 65535 else None
+
+
 def parse_proxy_line(raw_line: str) -> tuple[str, int, str | None, str | None, str, str | None] | None:
     """Smart Format Parser: Auto-detects 5 common proxy formats:
-    1. host:port:username:password
-    2. username:password@host:port
-    3. protocol://username:password@host:port
+    1. host:port:username:password            (the password may contain ':')
+    2. username:password@host:port            (the password may contain '@' or ':')
+    3. protocol://username:password@host:port (http, https, socks4, socks5; socks5h -> socks5)
     4. host:port
     5. host:port:username:password:change_ip_url
-    Returns: (host, port, username, password, protocol, change_ip_url)
+    Returns: (host, port, username, password, protocol, change_ip_url), or None if invalid
+    (unknown protocol, port outside 1-65535).
     """
-    line = raw_line.strip()
+    from src.infrastructure.proxy.egress import normalize_protocol
+
+    line = (raw_line or "").strip()
     if not line or line.startswith("#"):
         return None
 
@@ -32,46 +43,36 @@ def parse_proxy_line(raw_line: str) -> tuple[str, int, str | None, str | None, s
         change_ip_url = match_url.group(1)
         line = line[: match_url.start()]
 
-    protocol = "http"
+    protocol: str | None = "http"
     if "://" in line:
-        parts = line.split("://", 1)
-        protocol = parts[0].lower()
-        line = parts[1]
-
-    # Format 2 & 3: user:pass@host:port
-    if "@" in line:
-        auth_part, host_part = line.split("@", 1)
-        user_pass = auth_part.split(":", 1)
-        username = user_pass[0]
-        password = user_pass[1] if len(user_pass) > 1 else None
-
-        host_port = host_part.split(":")
-        host = host_port[0]
-        try:
-            port = int(host_port[1])
-            return (host, port, username, password, protocol, change_ip_url)
-        except (IndexError, ValueError):
+        scheme, line = line.split("://", 1)
+        protocol = normalize_protocol(scheme)
+        if protocol is None:
             return None
+
+    # Format 2 & 3: user:pass@host:port — the LAST "@" separates credentials from the host.
+    if "@" in line:
+        auth_part, host_part = line.rsplit("@", 1)
+        username, _, password = auth_part.partition(":")
+        host, _, port_text = host_part.partition(":")
+        port = _valid_port(port_text)
+        if not host or port is None:
+            return None
+        return (host, port, username or None, password or None, protocol, change_ip_url)
 
     # Colon-separated formats: host:port[:user:pass]
     tokens = line.split(":")
     if len(tokens) == 2:
-        # host:port
-        host = tokens[0]
-        try:
-            port = int(tokens[1])
-            return (host, port, None, None, protocol, change_ip_url)
-        except ValueError:
+        port = _valid_port(tokens[1])
+        if not tokens[0] or port is None:
             return None
-    elif len(tokens) >= 4:
-        host = tokens[0]
-        try:
-            port = int(tokens[1])
-        except ValueError:
+        return (tokens[0], port, None, None, protocol, change_ip_url)
+    if len(tokens) >= 4:
+        port = _valid_port(tokens[1])
+        if not tokens[0] or port is None:
             return None
-        username = tokens[2]
-        password = tokens[3]
-        return (host, port, username, password, protocol, change_ip_url)
+        # A password may itself contain ':'.
+        return (tokens[0], port, tokens[2] or None, ":".join(tokens[3:]) or None, protocol, change_ip_url)
 
     return None
 
@@ -106,7 +107,12 @@ class ProxyRepository:
                 """,
                 (host, port, username, password, protocol, proxy_type, change_ip_url),
             )
-            return int(cur.lastrowid or 0)
+            # On conflict (existing proxy) lastrowid is not that row's id: look it up.
+            row = conn.execute(
+                "SELECT id FROM proxies WHERE host = ? AND port = ? AND username IS ? ORDER BY id LIMIT 1;",
+                (host, port, username),
+            ).fetchone()
+            return int(row["id"]) if row else int(cur.lastrowid or 0)
 
     def import_line(self, raw_line: str) -> int | None:
         """Imports one proxy line and returns THAT proxy's id (existing proxy reused), None if unparsable.

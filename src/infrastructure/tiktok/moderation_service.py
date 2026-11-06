@@ -88,16 +88,15 @@ class TikTokModerationService:
                 "Accept": "application/json, text/plain, */*",
                 "Accept-Language": "en-US,en;q=0.9",
             }
-            proxies = None
-            if proxy_dict and proxy_dict.get("host") and proxy_dict.get("port"):
-                proto = proxy_dict.get("protocol", "http")
-                host = proxy_dict["host"]
-                port = proxy_dict["port"]
-                u = proxy_dict.get("username")
-                p = proxy_dict.get("password")
-                auth = f"{u}:{p}@" if u and p else ""
-                p_url = f"{proto}://{auth}{host}:{port}"
-                proxies = {"http": p_url, "https": p_url}
+            from src.infrastructure.proxy.egress import EgressBlocked, resolve_profile_egress
+
+            try:
+                # No profile here, so no direct opt-in: a proxy is mandatory (it used to go direct).
+                p_url = resolve_profile_egress({"id": None}, proxy_dict)
+            except EgressBlocked as blocked:
+                logger.warning("TikTok moderation request refused: %s", blocked)
+                return {"status_code": -1, "error": str(blocked)}
+            proxies = {"http": p_url, "https": p_url} if p_url else None
 
             resp = requests.request(
                 method,

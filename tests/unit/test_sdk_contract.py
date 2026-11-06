@@ -43,6 +43,7 @@ def test_upload_trims_process_tree_once_with_real_sdk_api(tmp_path: Path):
     vault = MagicMock()
     vault.get_oauth_tokens.return_value = None
     adapter = SamMonnyTikTokAdapter(vault=vault, db_path=tmp_path / "x.db", session_factory=MagicMock())
+    adapter._profile_egress = lambda _pid: "http://proxy.test:8080"
     adapter.publisher = MagicMock()
     video = tmp_path / "v.mp4"
     video.write_bytes(b"x")

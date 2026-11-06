@@ -215,7 +215,7 @@ class PassiveTikTokSyncService:
             # Fetch public channel HTML through profile's proxy if assigned
             url = f"https://www.tiktok.com/@{clean_user}"
             try:
-                page_html = self._fetch_url_content(url, row.get("proxy_id"))
+                page_html = self._fetch_page_via_proxy(row.get("id") or profile_id, url)
             except Exception as fe:
                 logger.debug("Could not fetch public HTML for @%s: %s", clean_user, fe)
                 return None
@@ -256,33 +256,34 @@ class PassiveTikTokSyncService:
 
         return hydration
 
+    def _fetch_page_via_proxy(self, profile_id: int | None, url: str) -> str:
+        """Fetches a public page on behalf of a profile through its egress (proxy, or the user's
+        explicit direct mode). Never falls back to a direct connection."""
+        profile = self.profile_repo.get_by_id(profile_id) if profile_id else None
+        return self._fetch_with_egress(url, profile or {"id": profile_id}, (profile or {}).get("proxy_id"))
+
     def _fetch_url_content(self, url: str, proxy_id: int | None) -> str:
-        """Fetches URL content strictly routing through the assigned proxy (AgentShield Standard)."""
-        if not proxy_id or not self.proxy_repo:
-            logger.warning(
-                "AgentShield Strict Proxy Gate: Blocked unproxied DOM scraping for %s (no proxy configured)", url
-            )
-            return ""
+        """Fetches URL content strictly routing through the given proxy (AgentShield Standard)."""
+        return self._fetch_with_egress(url, {"id": None}, proxy_id)
 
-        px = self.proxy_repo.get_by_id(proxy_id)
-        if not px or not px.get("host") or not px.get("port"):
-            logger.warning(
-                "AgentShield Strict Proxy Gate: Blocked DOM scraping for %s (invalid proxy %s)", url, proxy_id
-            )
-            return ""
+    def _fetch_with_egress(self, url: str, profile: dict[str, Any], proxy_id: int | None) -> str:
+        from src.infrastructure.proxy.egress import EgressBlocked, resolve_profile_egress
 
-        if px.get("status") == "leak_detected":
-            logger.warning("Proxy %s is flagged with LEAK DETECTED! Aborting DOM scraping.", proxy_id)
+        proxy = self.proxy_repo.get_by_id(proxy_id) if (proxy_id and self.proxy_repo) else None
+        if proxy_id and not proxy:
+            logger.warning("AgentShield Strict Proxy Gate: Blocked DOM scraping for %s (invalid proxy %s)", url, proxy_id)
             return ""
-
-        proto = px.get("protocol", "http")
-        host = px["host"]
-        port = px["port"]
-        usr = px.get("username")
-        pwd = px.get("password")
-        auth = f"{usr}:{pwd}@" if usr and pwd else ""
-        proxy_url = f"{proto}://{auth}{host}:{port}"
-        handler = urllib.request.ProxyHandler({"http": proxy_url, "https": proxy_url})
+        try:
+            proxy_url = resolve_profile_egress(profile, proxy)
+        except EgressBlocked as blocked:
+            logger.warning("AgentShield Strict Proxy Gate: Blocked DOM scraping for %s (%s)", url, blocked)
+            return ""
+        if proxy_url and not proxy_url.startswith(("http://", "https://")):
+            # urllib cannot tunnel through SOCKS: refuse rather than connect directly.
+            logger.info("DOM scraping skipped for %s: SOCKS proxy not supported by this fetcher", url)
+            return ""
+        # Explicit (possibly empty) mapping: never pick up system proxy settings by accident.
+        handler = urllib.request.ProxyHandler({"http": proxy_url, "https": proxy_url} if proxy_url else {})
         opener = urllib.request.build_opener(handler)
 
         req = urllib.request.Request(

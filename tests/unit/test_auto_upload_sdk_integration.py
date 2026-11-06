@@ -101,6 +101,7 @@ def test_sammonny_adapter_tri_modal_mode_selection(tmp_path: Path) -> None:
         direct_client=mock_direct_client,
         preferred_mode=UploadMode.OFFICIAL_DIRECT_POST,
     )
+    adapter._profile_egress = lambda _pid: "http://proxy.test:8080"  # test profiles have a proxy
 
     dummy_video = tmp_path / "sample.mp4"
     dummy_video.write_bytes(b"dummy video data for upload")

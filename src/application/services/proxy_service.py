@@ -31,7 +31,8 @@ class ProxyService:
     def _to_proxy_item(self, row: dict[str, Any]) -> ProxyItem:
         return ProxyItem(
             id=str(row["id"]),
-            mode=row.get("scheme", "http"),
+            # The column is "protocol" (reading "scheme" checked every SOCKS proxy as HTTP).
+            mode=row.get("protocol") or row.get("scheme") or "http",
             host=row["host"],
             port=row["port"],
             username=row.get("username"),

@@ -91,6 +91,7 @@ def test_concurrent_upload_preserves_per_profile_mode() -> None:
         session_factory=mock_sf,
         preferred_mode=None,
     )
+    adapter._profile_egress = lambda _pid: "http://proxy.test:8080"  # test profiles have a proxy
 
     executed_modes: list[str] = []
 
