@@ -80,6 +80,15 @@ def never_touch_the_real_daemon(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def fast_upload_reconcile(monkeypatch):
+    """Official uploads poll TikTok for up to 5 minutes: no waiting in tests."""
+    from src.infrastructure.tiktok.sammonny_adapter import SamMonnyTikTokAdapter
+
+    monkeypatch.setattr(SamMonnyTikTokAdapter, "reconcile_poll_s", 0.0)
+    monkeypatch.setattr(SamMonnyTikTokAdapter, "reconcile_attempts", 3)
+
+
+@pytest.fixture(autouse=True)
 def no_public_ip_lookup(monkeypatch):
     """The leak policy looks up the machine's public IP over the network: never from tests."""
     monkeypatch.setattr("src.domain.policies.network_leak_policy.discover_public_ip", lambda timeout=5.0: None)

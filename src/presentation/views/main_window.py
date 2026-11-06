@@ -152,6 +152,9 @@ class TikTokManagerMainWindow(QMainWindow):
         # Infrastructure & Vault
         self.vault = WindowsCredentialVault()
         self.tiktok_adapter = SamMonnyTikTokAdapter(vault=self.vault)
+        from src.application.settings.upload_settings import load_upload_settings
+
+        self.tiktok_adapter.apply_settings(load_upload_settings(self._settings()))
         self.orbita_launcher = OrbitaLauncher()
 
         # Signal Bus & Concurrency Manager
@@ -797,6 +800,10 @@ class TikTokManagerMainWindow(QMainWindow):
         act_clean = Action(FluentIcon.BRUSH, "Dọn dẹp trình duyệt & Giải phóng RAM", self)
         act_clean.triggered.connect(self._on_clean_browser)
         self.settings_menu.addAction(act_clean)
+
+        self.act_upload_settings = Action(FluentIcon.SEND, "Cài Đặt Upload (Phương pháp đăng video)", self)
+        self.act_upload_settings.triggered.connect(self._on_upload_settings)
+        self.settings_menu.addAction(self.act_upload_settings)
 
         act_license = Action(FluentIcon.CERTIFICATE, "Bản quyền (Kích hoạt / Gia hạn)", self)
         act_license.triggered.connect(self._on_open_license)
@@ -2502,6 +2509,20 @@ class TikTokManagerMainWindow(QMainWindow):
             return
         self.close()
         QApplication.quit()
+
+    def _on_upload_settings(self) -> None:
+        from src.presentation.dialogs.upload_settings_dialog import UploadSettingsDialog
+
+        def _apply(settings: Any) -> None:
+            self.tiktok_adapter.apply_settings(settings)
+            InfoBar.success(
+                title="Cài Đặt Upload",
+                content="Đã lưu. Áp dụng cho các lượt upload tiếp theo.",
+                position=InfoBarPosition.TOP,
+                parent=self,
+            )
+
+        UploadSettingsDialog(store=self._settings(), on_saved=_apply, parent=self).exec()
 
     def _on_open_license(self) -> None:
         if self.license_service is None:

@@ -98,6 +98,20 @@ class VideoRepository:
             )
             return cur.rowcount > 0
 
+    def defer_to_app_schedule(self, video_id: int, profile_id: int, schedule_time: str) -> bool:
+        """Claimed video back to 'available' with its schedule and profile: the app's scheduler posts it."""
+        with db_session(self.db_path) as conn:
+            cur = conn.execute(
+                """
+                UPDATE video_registry
+                SET status = 'available', schedule_time = ?, assigned_profile_id = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ? AND status IN ('uploading', 'reserved');
+                """,
+                (schedule_time, profile_id, video_id),
+            )
+            return cur.rowcount > 0
+
     def release_reservation(self, video_id: int) -> bool:
         """Releases a reserved video back to 'available' pool."""
         with db_session(self.db_path) as conn:

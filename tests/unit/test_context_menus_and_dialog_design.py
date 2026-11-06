@@ -133,13 +133,13 @@ def test_account_health_dialog_has_zero_raw_qpushbutton(qapp):
 
 
 def test_all_dialogs_use_fluent_headers_and_margins():
-    """Verifies that all 20 application dialogs (incl. license activation) follow the unified design standard."""
+    """Verifies that all 21 application dialogs (incl. license activation, upload settings) follow the unified design standard."""
     import glob
     from pathlib import Path
 
     dialog_files = glob.glob("src/presentation/dialogs/*.py")
     dialog_modules = [f for f in dialog_files if not f.endswith("__init__.py") and not f.endswith("dialog_helpers.py")]
-    assert len(dialog_modules) == 20, f"Expected 20 dialog modules, found {len(dialog_modules)}"
+    assert len(dialog_modules) == 21, f"Expected 21 dialog modules, found {len(dialog_modules)}"
 
     for file_path in dialog_modules:
         content = Path(file_path).read_text(encoding="utf-8")

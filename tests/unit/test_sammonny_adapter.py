@@ -54,6 +54,10 @@ def test_sammonny_adapter_upload_direct_post():
         with (
             patch.object(adapter.publisher, "validate_capability", return_value=mock_cap),
             patch.object(adapter.publisher, "upload", return_value=mock_result),
+            # The adapter checks the account's API capability before uploading (privacy levels).
+            patch.object(adapter.direct_client, "query_creator_info",
+                         return_value={"privacy_level_options": ["PUBLIC_TO_EVERYONE", "SELF_ONLY"]}),
+            patch.object(adapter.publisher, "reconcile", return_value=RemoteStatus.PUBLISH_COMPLETE),
         ):
             result = adapter.upload_video(
                 profile_id=101,

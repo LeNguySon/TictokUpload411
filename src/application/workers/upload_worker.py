@@ -7,6 +7,8 @@ import time
 from collections.abc import Callable
 from datetime import datetime
 
+from sammonny import RemoteStatus
+
 from src.application.services.upload_service import UploadService
 from src.application.signals.app_signals import AppSignalBus
 from src.application.workers.base_worker import BaseWorker
@@ -122,6 +124,10 @@ class UploadWorker(BaseWorker):
                 self._emit_log("SUCCESS", f"Xuất bản TikTok thành công! ID: {pub_id}", "SUCCESS")
                 self._safe_emit(self.signal_bus.upload_stage_changed, self.video_id, "Hoàn tất")
                 self._safe_emit(self.signal_bus.upload_completed, self.video_id, result.publish_id or "")
+            elif getattr(result, "status", None) == RemoteStatus.PENDING and not result.error:
+                # Deferred to the app's scheduler (the method cannot schedule on TikTok): not a failure.
+                self._emit_log("SCHEDULE", "Video được giữ lại, app sẽ tự đăng đúng giờ hẹn.", "INFO")
+                self._safe_emit(self.signal_bus.upload_stage_changed, self.video_id, "Chờ tới giờ đăng")
             else:
                 err_msg = result.error or "Upload unsuccessful"
                 self._emit_log("ERROR", f"Upload thất bại: {err_msg}", "ERROR")

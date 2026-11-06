@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from sammonny import UploadResult
+from sammonny import RemoteStatus, UploadResult
 
 from src.domain.policies.retry_policy import RetryPolicy
 from src.domain.policies.upload_policy import (
@@ -482,6 +482,17 @@ class UploadService:
                 effective_schedule = tiktok_schedule_or_none(requested_schedule)
                 if requested_schedule and not effective_schedule:
                     _safe_log("SCHEDULE", f"Lịch {requested_schedule} đã tới hạn/ngoài khung TikTok: đăng ngay")
+                supports_native = getattr(self.tiktok_adapter, "supports_native_schedule", None)
+                if effective_schedule and callable(supports_native) and supports_native(profile_id) is False:
+                    # Official API and Studio DOM ignore schedule_time (they would post NOW): keep the
+                    # video for the app's own scheduler, which publishes it at the scheduled time.
+                    self.video_repo.defer_to_app_schedule(video_id, profile_id, effective_schedule)
+                    _safe_log(
+                        "SCHEDULE",
+                        f"Phương pháp upload của hồ sơ không hẹn giờ được trên TikTok: app sẽ tự đăng lúc "
+                        f"{effective_schedule}",
+                    )
+                    return UploadResult(success=False, draft_id="", status=RemoteStatus.PENDING)
 
                 eff_privacy = privacy or video_row.get("privacy") or "PUBLIC_TO_EVERYONE"
                 eff_comment = allow_comment if allow_comment is not None else video_row.get("allow_comment", True)

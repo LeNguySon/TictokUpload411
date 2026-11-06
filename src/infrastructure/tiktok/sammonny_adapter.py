@@ -9,6 +9,7 @@ Conforms to TDS-ARCH-001 §6.2 Publisher protocol:
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import logging
 import os
 import threading
@@ -34,6 +35,37 @@ from src.infrastructure.database.repositories.proxy_repository import ProxyRepos
 from src.infrastructure.proxy.egress import build_proxy_url, redact_proxy_url, resolve_profile_egress
 
 logger = logging.getLogger(__name__)
+
+PUBLIC_PRIVACY = "PUBLIC_TO_EVERYONE"
+
+
+class UploadMethodError(RuntimeError):
+    """The chosen upload method cannot (or must not) upload this video; nothing was sent."""
+
+
+class DomUploadBlocked(PermissionError):
+    """A DOM (TikTok Studio page) upload was attempted where it is not allowed for this upload."""
+
+
+class _GuardedCdp:
+    """CDP client proxy that refuses to attach a file to the Studio page (the DOM upload step).
+
+    The SDK's hybrid uploader falls back to a DOM upload by itself; the DOM path ignores privacy and
+    schedule and may repost after an ambiguous hybrid publish. Blocking DOM.setFileInputFiles stops it
+    before anything is posted while the hybrid path (signing / fetch) keeps working.
+    """
+
+    def __init__(self, cdp: Any, reason: str) -> None:
+        self._cdp = cdp
+        self._reason = reason
+
+    def send(self, method: str, params: Any = None, *args: Any, **kwargs: Any) -> Any:
+        if method == "DOM.setFileInputFiles":
+            raise DomUploadBlocked(f"Upload qua trình duyệt Studio (DOM) bị chặn: {self._reason}")
+        return self._cdp.send(method, params, *args, **kwargs)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._cdp, name)
 
 
 def format_proxy_url(proxy_data: dict[str, Any] | None) -> str | None:
@@ -95,9 +127,13 @@ class LazyActiveSession:
         headless: bool = True,
         cookie_raw: str | None = None,
         proxy_url: str | None = None,
+        dom_upload_allowed: bool = True,
+        dom_block_reason: str = "",
     ) -> None:
         self._session = session
         self._headless = headless
+        self._dom_upload_allowed = dom_upload_allowed
+        self._dom_block_reason = dom_block_reason
         self._cookie_raw = cookie_raw
         self.proxy_url = proxy_url
         self.proxies: dict[str, str] | None = None
@@ -148,6 +184,8 @@ class LazyActiveSession:
     @property
     def cdp(self) -> Any:
         self._ensure_active()
+        if not self._dom_upload_allowed:
+            return _GuardedCdp(self._session.cdp, self._dom_block_reason)
         return self._session.cdp
 
     @property
@@ -180,6 +218,9 @@ def _default_session_factory(
     profile_id: str | int,
     db_path: Path | str | None = None,
     lazy: bool = True,
+    headless: bool = True,
+    dom_upload_allowed: bool = True,
+    dom_block_reason: str = "",
 ) -> AntidetectSession:
     """Default AntidetectSession factory connecting via SamMonny Engine to Orbita profiles.
     Resolves integer database profile_id to authentic profile UUID if necessary.
@@ -232,14 +273,20 @@ def _default_session_factory(
     if lazy:
         return LazyActiveSession(
             raw_sess,
-            headless=True,
+            headless=headless,
             cookie_raw=cookie_raw or None,
             proxy_url=proxy_url,
+            dom_upload_allowed=dom_upload_allowed,
+            dom_block_reason=dom_block_reason,
         )  # type: ignore[return-value]
     return raw_sess
 
 
 class SamMonnyTikTokAdapter:
+    # Official uploads: poll TikTok's post status every 5 s, ~5 minutes at most.
+    reconcile_poll_s: float = 5.0
+    reconcile_attempts: int = 60
+
     """
     Enterprise-grade adapter wrapping SamMonny's TikTokPublisherAdapter.
     Automatically retrieves DPAPI-encrypted OAuth tokens from Windows Vault,
@@ -261,11 +308,22 @@ class SamMonnyTikTokAdapter:
         self.db_path = db_path
         self.profile_repo = profile_repo or ProfileRepository(db_path)
         self.proxy_repo = proxy_repo or ProxyRepository(db_path)
+        from src.application.settings.upload_settings import UploadMethod, UploadSettings
+
+        self._ctx = threading.local()
         if session_factory:
             self.session_factory = session_factory
         else:
-            self.session_factory = lambda pid: _default_session_factory(pid, db_path=self.db_path)
+            self.session_factory = lambda pid: _default_session_factory(
+                pid, db_path=self.db_path, **self._session_options()
+            )
         self.preferred_mode = preferred_mode
+        legacy = {
+            UploadMode.OFFICIAL_DIRECT_POST: UploadMethod.OFFICIAL,
+            UploadMode.COOKIE_API_HYBRID: UploadMethod.HYBRID,
+            UploadMode.HEADLESS_STUDIO: UploadMethod.STUDIO,
+        }
+        self.settings = UploadSettings(method=legacy.get(preferred_mode, UploadMethod.AUTO))  # type: ignore[arg-type]
 
         self.publisher = TikTokPublisherAdapter(
             direct_client=self.direct_client,
@@ -283,6 +341,82 @@ class SamMonnyTikTokAdapter:
         if isinstance(self.direct_client, ProxyBoundDirectPostClient):
             return self.direct_client.bound(proxy_url)
         return contextlib.nullcontext()
+
+    def apply_settings(self, settings: Any) -> None:
+        """Upload method chosen by the user (Cài Đặt Upload)."""
+        self.settings = settings
+
+    def _upload_context(self) -> dict[str, Any]:
+        return dict(getattr(self._ctx, "values", None) or {"dom_allowed": True, "dom_block_reason": "",
+                                                            "show_browser": False})
+
+    def _session_options(self) -> dict[str, Any]:
+        ctx = self._upload_context()
+        return {
+            "headless": not ctx.get("show_browser", False),
+            "dom_upload_allowed": bool(ctx.get("dom_allowed", True)),
+            "dom_block_reason": str(ctx.get("dom_block_reason", "")),
+        }
+
+    @contextlib.contextmanager
+    def _upload_scope(self, **values: Any):  # type: ignore[no-untyped-def]
+        previous = getattr(self._ctx, "values", None)
+        self._ctx.values = values
+        try:
+            yield
+        finally:
+            self._ctx.values = previous
+
+    def _vault_token(self, profile_id: int | str) -> str | None:
+        tokens = self.vault.get_oauth_tokens(profile_id)
+        return tokens["access_token"] if tokens and "access_token" in tokens else None
+
+    def _resolve_mode(self, profile_id: int | str, token: str | None) -> UploadMode:
+        from src.application.settings.upload_settings import UploadMethod
+
+        method = getattr(self.settings, "method", UploadMethod.AUTO)
+        if method is UploadMethod.OFFICIAL:
+            if not token:
+                raise UploadMethodError(
+                    f"Hồ sơ #{profile_id} chưa có OAuth token cho API chính thức. Kết nối TikTok API cho hồ sơ "
+                    "hoặc chọn phương pháp khác trong Cài Đặt Upload."
+                )
+            return UploadMode.OFFICIAL_DIRECT_POST
+        if method is UploadMethod.HYBRID:
+            return UploadMode.COOKIE_API_HYBRID
+        if method is UploadMethod.STUDIO:
+            return UploadMode.HEADLESS_STUDIO
+        return UploadMode.OFFICIAL_DIRECT_POST if token else UploadMode.COOKIE_API_HYBRID
+
+    def supports_native_schedule(self, profile_id: int | str) -> bool:
+        """True only if the method used for this profile can let TikTok hold a scheduled post.
+
+        Official Direct Post and the Studio DOM ignore schedule_time (they post immediately), so the
+        app must keep those videos and publish them itself at the scheduled time.
+        """
+        try:
+            return self._resolve_mode(profile_id, self._vault_token(profile_id)) is UploadMode.COOKIE_API_HYBRID
+        except UploadMethodError:
+            return False
+
+    def _reconcile_official(self, result: UploadResult, profile_id: int | str) -> UploadResult:
+        """Polls TikTok until an official upload is really published (or failed)."""
+        publish_id = str(result.publish_id or "")
+        status = result.status
+        for _ in range(max(1, int(self.reconcile_attempts))):
+            status = self.publisher.reconcile(publish_id, account_id=str(profile_id))
+            if status in (RemoteStatus.PUBLISH_COMPLETE, RemoteStatus.FAILED):
+                break
+            time.sleep(self.reconcile_poll_s)
+        if status == RemoteStatus.FAILED:
+            return UploadResult(
+                success=False,
+                draft_id=result.draft_id,
+                publish_id=publish_id,
+                status=RemoteStatus.FAILED,
+                error=f"TikTok báo xử lý video thất bại (publish_id {publish_id}).",
+            )
+        return dataclasses.replace(result, status=status)
 
     def _sync_vault_token(self, profile_id: int | str) -> str | None:
         """Retrieves OAuth access token from Windows Vault and registers it with the publisher."""
@@ -334,15 +468,46 @@ class SamMonnyTikTokAdapter:
             "cover_timestamp_ms": cover_timestamp_ms,
         }
 
-        # Resolve effective upload mode without mutating self.publisher state (eliminates race condition)
-        effective_mode = self.preferred_mode
-        if not effective_mode:
-            if token:
-                effective_mode = UploadMode.OFFICIAL_DIRECT_POST
-            elif self.session_factory:
+        # The method chosen in Cài Đặt Upload is honoured: no silent switch (the SDK would always force
+        # the official API when a token exists and fall back to a browser upload when it fails).
+        allow_fallback = bool(getattr(self.settings, "allow_fallback", False))
+        effective_mode = self._resolve_mode(profile_id, token)
+        privacy = str(privacy or "SELF_ONLY")
+        if effective_mode is UploadMode.OFFICIAL_DIRECT_POST:
+            try:
+                with self._bind_egress(proxy_url):
+                    info = self.direct_client.query_creator_info(token) or {}
+            except Exception as exc:
+                if not allow_fallback:
+                    raise UploadMethodError(f"API chính thức không dùng được cho hồ sơ #{profile_id}: {exc}") from exc
+                logger.warning("Official API unavailable for profile %s (%s): falling back to cookie hybrid",
+                               profile_id, exc)
                 effective_mode = UploadMode.COOKIE_API_HYBRID
             else:
-                effective_mode = UploadMode.HEADLESS_STUDIO
+                allowed = list(info.get("privacy_level_options") or [])
+                if allowed and privacy not in allowed:
+                    raise UploadMethodError(
+                        f"Tài khoản không được đăng với quyền riêng tư {privacy} qua API chính thức "
+                        f"(được phép: {', '.join(allowed)})."
+                    )
+        if effective_mode is not UploadMode.OFFICIAL_DIRECT_POST:
+            self.publisher._tokens.pop(str(profile_id), None)  # otherwise the SDK forces the API again
+
+        dom_reasons = []
+        if privacy != PUBLIC_PRIVACY:
+            dom_reasons.append(f"video đặt quyền riêng tư {privacy} (DOM luôn đăng công khai)")
+        if schedule_time:
+            dom_reasons.append("video có giờ hẹn (DOM đăng ngay)")
+        if effective_mode is UploadMode.HEADLESS_STUDIO and dom_reasons:
+            raise UploadMethodError(
+                "Trình duyệt Studio (DOM) không đặt được quyền riêng tư và giờ hẹn: " + "; ".join(dom_reasons)
+                + ". Chọn phương pháp khác trong Cài Đặt Upload."
+            )
+        if effective_mode is UploadMode.COOKIE_API_HYBRID and not allow_fallback:
+            dom_reasons.append("không cho phép tự chuyển phương pháp (Cài Đặt Upload)")
+        dom_allowed = effective_mode is UploadMode.HEADLESS_STUDIO or (
+            effective_mode is UploadMode.COOKIE_API_HYBRID and not dom_reasons
+        )
 
         draft = self.publisher.create_draft(video_path=video_path, metadata=metadata)
         logger.info(
@@ -354,14 +519,38 @@ class SamMonnyTikTokAdapter:
         )
 
         try:
-            with self._bind_egress(proxy_url):  # official Direct Post calls go through the profile proxy
-                return self.publisher.upload(
+            with (
+                self._bind_egress(proxy_url),  # official Direct Post calls go through the profile proxy
+                self._upload_scope(
+                    dom_allowed=dom_allowed,
+                    dom_block_reason="; ".join(dom_reasons),
+                    show_browser=bool(getattr(self.settings, "studio_show_browser", False)),
+                ),
+            ):
+                result = self.publisher.upload(
                     draft=draft,
                     account_id=str(profile_id),
                     progress_callback=progress_callback,
                     cancel_token=cancel_token,
                     preferred_mode=effective_mode,
                 )
+                if result.success and str(result.publish_id or "").startswith("studio_post_"):
+                    # The SDK's DOM path returns this synthetic id when nothing confirmed the post.
+                    return UploadResult(
+                        success=False,
+                        draft_id=result.draft_id,
+                        status=RemoteStatus.UNKNOWN,
+                        error="Không xác nhận được bài đăng: hãy kiểm tra trên TikTok Studio trước khi đăng lại.",
+                        is_ambiguous=True,
+                    )
+                if (
+                    effective_mode is UploadMode.OFFICIAL_DIRECT_POST
+                    and result.success
+                    and result.publish_id
+                    and getattr(self.settings, "reconcile_official", True)
+                ):
+                    result = self._reconcile_official(result, profile_id)
+                return result
         finally:
             try:
                 from sammonny.system.memory import MemoryManager
