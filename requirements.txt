@@ -6,7 +6,7 @@
 # SamMonny Antidetect SDK (private, not on PyPI) — vendored wheel in ./vendor
 # Run pip from the repo root so the relative path resolves.
 --find-links ./vendor
-sammonny==1.8.1
+sammonny==1.8.2
 
 # GUI Framework & Windows 11 Fluent Theme
 PyQt6>=6.8.0

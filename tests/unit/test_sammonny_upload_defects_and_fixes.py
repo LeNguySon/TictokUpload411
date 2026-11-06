@@ -91,8 +91,9 @@ def test_defect_8_direct_post_privacy_precheck_rejection(dummy_video: Path):
 
 def test_defect_2_and_9_dom_studio_configures_privacy_and_permissions(dummy_video: Path):
     """
-    Defects 2 & 9: upload_via_studio must configure privacy, permissions
-    (allow_comment, allow_duet, allow_stitch), and scheduling via CDP/DOM.
+    Defects 2 & 9: upload_via_studio must configure privacy and permissions
+    (allow_comment, allow_duet, allow_stitch) via CDP/DOM. Scheduling is refused up front (the page step
+    never set the requested date/time): see test_dom_studio_refuses_scheduled_post.
     """
     mock_session = MagicMock()
     mock_session.profile_id = "prof_dom_1"
@@ -112,6 +113,8 @@ def test_defect_2_and_9_dom_studio_configures_privacy_and_permissions(dummy_vide
         eval_calls.append(expr)
         if "captcha" in expr.lower():
             return False
+        if "toggleoption" in expr.lower():
+            return [True, True, True]  # comment / duet / stitch switches found and set
         if "button" in expr.lower() or "is_disabled" in expr.lower():
             return False  # not disabled
         if "confirmed" in expr.lower() or "href" in expr.lower():
@@ -129,7 +132,6 @@ def test_defect_2_and_9_dom_studio_configures_privacy_and_permissions(dummy_vide
         allow_comment=False,
         allow_duet=False,
         allow_stitch=False,
-        schedule_time="2026-11-15 15:30:00",
     )
 
     assert result.success is True
@@ -138,6 +140,20 @@ def test_defect_2_and_9_dom_studio_configures_privacy_and_permissions(dummy_vide
     # Verify CDP evaluate or DOM actions set privacy & permissions
     all_eval_text = " ".join(eval_calls)
     assert "privacy" in all_eval_text.lower() or mock_session.actions.click.called
+
+
+def test_dom_studio_refuses_scheduled_post(dummy_video: Path):
+    """The Studio page step cannot set the requested date/time: refused before touching the page."""
+    mock_session = MagicMock()
+    mock_session.profile_id = "prof_dom_sched"
+    uploader = TikTokHeadlessStudioUploader(session=mock_session)
+    result = uploader.upload_via_studio(
+        video_path=dummy_video, title="Dance Tutorial", privacy="PUBLIC_TO_EVERYONE",
+        schedule_time="2026-11-15 15:30:00",
+    )
+    assert result.success is False and result.is_ambiguous is False
+    assert "schedule" in (result.error or "").lower()
+    mock_session.navigate.assert_not_called()
 
 
 # =============================================================================

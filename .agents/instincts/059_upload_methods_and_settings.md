@@ -24,3 +24,20 @@
   `video_repo.defer_to_app_schedule` (về 'available', giữ giờ + hồ sơ) và trả `RemoteStatus.PENDING`; worker ghi
   "Chờ tới giờ đăng" (không phải lỗi). Bộ hẹn giờ của app đăng đúng giờ.
 - Số dialog trong test thiết kế: 21.
+
+## SDK đã vá tại nguồn (sdk/python/sammonny/platforms/tiktok.py, 2026-11-06 tối)
+- Agent khác đã sửa phần lớn lúc 18:45 (không fallback hybrid→DOM, không id giả, chờ nút Đăng 60 s, Direct Post từ
+  chối giờ hẹn, kiểm tra privacy). Bản vá bổ sung: chọn phương pháp tôn trọng preferred_mode kể cả khi có token;
+  API lỗi KHÔNG tự chuyển (tham số `allow_fallback`, mặc định tắt); upload() không đi tiếp khi capability
+  unauthorized; hybrid 4xx/mã API ≠ 0 = FAILED (thử lại được), timeout/5xx = mơ hồ; Studio: privacy/quyền tương tác
+  phải được xác nhận (không thì FAILED, không đăng), giờ hẹn bị từ chối trước khi mở trang, chờ xử lý/xác nhận cấu
+  hình được (PROCESSING_TIMEOUT_SEC 600, CONFIRM_TIMEOUT_SEC 30). Test: sdk `tests/test_tiktok_upload_safety.py`.
+- `sdk/python` KHÔNG nằm trong git của repo SDK (untracked); app cài SDK từ `vendor/*.whl` (site-packages). Bản gốc
+  trước vá: `scratch/sdk_backup/tiktok.py.orig`. Test TAVM với mã nguồn SDK: `PYTHONPATH=<repo>/sdk/python pytest`.
+- conftest `fast_studio_waits`: rút ngắn chờ Studio trong test (trước đó một test chiếm 60 s).
+- Đã đóng gói & cài SDK 1.8.2 (wheel `vendor/sammonny-1.8.2-py3-none-any.whl`, `pip install --user --no-deps
+  --force-reinstall`); chỉ khác 1.8.1 ở `__init__.py` + `platforms/tiktok.py`. Ghim `sammonny==1.8.2` trong
+  pyproject.toml / requirements.txt. `.venv` cài editable (trỏ mã nguồn) nên đã có code mới; exe trong `dist/` cần build lại.
+- Lỗi chập chờn có sẵn (không do SDK): cả bộ test thỉnh thoảng sập "Windows fatal exception: access violation" trong
+  `test_video_appeal_and_creator_reapply.py`; nghi `AccountHealthDialog` (ThreadPoolExecutor + QTimer poll) trong test
+  không có qtbot. Chạy riêng file luôn pass.

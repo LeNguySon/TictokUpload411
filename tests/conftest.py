@@ -80,6 +80,15 @@ def never_touch_the_real_daemon(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def fast_studio_waits(monkeypatch):
+    """The Studio DOM uploader waits minutes for video processing: seconds in tests."""
+    from sammonny.platforms.tiktok import TikTokHeadlessStudioUploader
+
+    for name, value in (("PROCESSING_TIMEOUT_SEC", 0.3), ("CONFIRM_TIMEOUT_SEC", 0.3), ("POLL_INTERVAL_SEC", 0.01)):
+        monkeypatch.setattr(TikTokHeadlessStudioUploader, name, value, raising=False)
+
+
+@pytest.fixture(autouse=True)
 def fast_upload_reconcile(monkeypatch):
     """Official uploads poll TikTok for up to 5 minutes: no waiting in tests."""
     from src.infrastructure.tiktok.sammonny_adapter import SamMonnyTikTokAdapter
