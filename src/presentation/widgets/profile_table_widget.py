@@ -225,6 +225,12 @@ class ProfileTableWidget(FastTableWidget):
         # Col 3: Logged
         logged_item = make_item("Yes" if logged_in else "No", Qt.AlignmentFlag.AlignCenter)
         logged_item.setForeground(QColor("#107C41") if logged_in else QColor("#8A8886"))
+        if p.get("api_reconnect_required"):
+            logged_item.setToolTip(
+                "TikTok API: cần kết nối lại (token hết hạn hoặc bị thu hồi). "
+                "Dán token mới trong Chỉnh Sửa Hồ Sơ hoặc kết nối lại TikTok API."
+            )
+            logged_item.setForeground(QColor("#CA5010"))
         self.setItem(row_idx, 3, logged_item)
 
         # Col 4: Proxy & Col 5: Type

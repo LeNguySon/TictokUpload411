@@ -68,7 +68,8 @@ def test_sammonny_adapter_upload_direct_post():
 
             assert result.success is True
             assert result.publish_id == "v_pub_tiktok_999"
-            mock_vault.get_oauth_tokens.assert_called_once_with(101)
+            # The token manager reads the profile's tokens (and the app API config to refresh them).
+            mock_vault.get_oauth_tokens.assert_any_call(101)
     finally:
         Path(video_path).unlink(missing_ok=True)
 

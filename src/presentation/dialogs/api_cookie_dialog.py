@@ -100,10 +100,9 @@ class ApiCookieDialog(QDialog):
         client_secret = self.txt_client_secret.text().strip()
 
         if client_key and client_secret:
-            self.vault.save_oauth_tokens(
-                profile_id="GLOBAL_API_CONFIG",
-                access_token=client_key,
-                client_secret=client_secret,
+            # Client key in its own field (it used to be stored as "access_token").
+            self.vault.save_oauth_payload(
+                "GLOBAL_API_CONFIG", {"client_key": client_key, "client_secret": client_secret}
             )
 
         InfoBar.success(

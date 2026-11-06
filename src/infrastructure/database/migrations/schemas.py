@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS profiles (
     direct_connection INTEGER DEFAULT 0, -- 1 = user deliberately runs this profile from the host IP
     session_expires_at REAL, -- unix time the TikTok session cookie expires (NULL = unknown)
     cookies_synced_at TEXT, -- last time cookies_browser was read from the running browser
+    api_reconnect_required INTEGER DEFAULT 0, -- 1 = TikTok API authorization lost, reconnect needed
     storage_dir TEXT NOT NULL,
     status TEXT DEFAULT 'stopped' CHECK(status IN ('stopped', 'running', 'error', 'LIVE', 'DIE', 'CHECKPOINT')),
 

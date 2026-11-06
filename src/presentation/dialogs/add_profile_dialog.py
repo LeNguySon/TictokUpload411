@@ -188,7 +188,12 @@ class AddProfileDialog(QDialog):
             self.profile_repo.update(profile_id, update_payload)
 
             if token:
-                self.vault.save_oauth_tokens(profile_id=profile_id, access_token=token)
+                # Keep the stored refresh token (overwriting the whole payload lost it); the expiry of a
+                # pasted token is unknown, so it is refreshed on first use when a refresh token exists.
+                payload = dict(self.vault.get_oauth_tokens(profile_id) or {})
+                payload.update(access_token=token, expires_at=None)
+                self.vault.save_oauth_payload(profile_id, payload)
+                self.profile_repo.update(profile_id, api_reconnect_required=0)
 
             self.accept()
             return

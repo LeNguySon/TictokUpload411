@@ -79,6 +79,30 @@ def never_touch_the_real_daemon(monkeypatch):
         monkeypatch.setattr(target, MagicMock())
 
 
+@pytest.fixture(scope="session")
+def _session_default_db(tmp_path_factory):
+    from src.infrastructure.database.migrations.runner import run_all_migrations
+
+    db = tmp_path_factory.mktemp("default_db") / "app.db"
+    run_all_migrations(db)
+    return db
+
+
+@pytest.fixture(autouse=True)
+def isolated_default_db(monkeypatch, _session_default_db):
+    """Repositories built without a db_path used data/app.db, i.e. the developer's real database."""
+    import importlib
+
+    for name in (
+        "src.infrastructure.database.connection",
+        "src.infrastructure.database.repositories.profile_repository",
+        "src.infrastructure.database.repositories.project_repository",
+        "src.infrastructure.database.repositories.proxy_repository",
+        "src.infrastructure.database.repositories.video_repository",
+    ):
+        monkeypatch.setattr(importlib.import_module(name), "DEFAULT_DB_PATH", _session_default_db)
+
+
 @pytest.fixture(autouse=True)
 def fast_studio_waits(monkeypatch):
     """The Studio DOM uploader waits minutes for video processing: seconds in tests."""

@@ -48,6 +48,8 @@ def run_all_migrations(db_path: Path | str | None = None) -> list[str]:
                 conn.execute("ALTER TABLE profiles ADD COLUMN session_expires_at REAL DEFAULT NULL;")
             if "cookies_synced_at" not in prof_cols:
                 conn.execute("ALTER TABLE profiles ADD COLUMN cookies_synced_at TEXT DEFAULT NULL;")
+            if "api_reconnect_required" not in prof_cols:
+                conn.execute("ALTER TABLE profiles ADD COLUMN api_reconnect_required INTEGER DEFAULT 0;")
             if "traffic_source_json" not in prof_cols:
                 conn.execute("ALTER TABLE profiles ADD COLUMN traffic_source_json TEXT DEFAULT NULL;")
             if "optimal_hour" not in prof_cols:

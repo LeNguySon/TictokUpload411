@@ -302,6 +302,7 @@ class SamMonnyTikTokAdapter:
         db_path: Path | str | None = None,
         profile_repo: ProfileRepository | None = None,
         proxy_repo: ProxyRepository | None = None,
+        token_manager: Any = None,
     ) -> None:
         self.vault = vault or WindowsCredentialVault()
         self.direct_client = direct_client or ProxyBoundDirectPostClient()
@@ -324,6 +325,17 @@ class SamMonnyTikTokAdapter:
             UploadMode.HEADLESS_STUDIO: UploadMethod.STUDIO,
         }
         self.settings = UploadSettings(method=legacy.get(preferred_mode, UploadMethod.AUTO))  # type: ignore[arg-type]
+        if token_manager is None:
+            from src.application.services.token_manager import TokenManager
+
+            # Refreshes OAuth tokens before they expire (rotated refresh token stored in the Vault first).
+            token_manager = TokenManager(
+                vault=self.vault,
+                profile_repo=self.profile_repo,
+                client=self.direct_client,
+                egress=lambda pid: self._profile_egress(pid),
+            )
+        self.token_manager = token_manager
 
         self.publisher = TikTokPublisherAdapter(
             direct_client=self.direct_client,
@@ -418,14 +430,12 @@ class SamMonnyTikTokAdapter:
             )
         return dataclasses.replace(result, status=status)
 
-    def _sync_vault_token(self, profile_id: int | str) -> str | None:
-        """Retrieves OAuth access token from Windows Vault and registers it with the publisher."""
-        tokens = self.vault.get_oauth_tokens(profile_id)
-        if tokens and "access_token" in tokens:
-            token = tokens["access_token"]
+    def _sync_vault_token(self, profile_id: int | str, force_refresh: bool = False) -> str | None:
+        """Valid OAuth access token (refreshed when needed) registered with the publisher."""
+        token = self.token_manager.get_valid_access_token(profile_id, force=force_refresh)
+        if token:
             self.publisher.register_access_token(str(profile_id), token)
-            return token
-        return None
+        return token
 
     def upload_video(
         self,
@@ -476,7 +486,13 @@ class SamMonnyTikTokAdapter:
         if effective_mode is UploadMode.OFFICIAL_DIRECT_POST:
             try:
                 with self._bind_egress(proxy_url):
-                    info = self.direct_client.query_creator_info(token) or {}
+                    try:
+                        info = self.direct_client.query_creator_info(token) or {}
+                    except Exception as first:
+                        if "401" not in str(first):
+                            raise
+                        token = self._sync_vault_token(profile_id, force_refresh=True)  # expired: refresh once
+                        info = self.direct_client.query_creator_info(token) or {}
             except Exception as exc:
                 if not allow_fallback:
                     raise UploadMethodError(f"API chính thức không dùng được cho hồ sơ #{profile_id}: {exc}") from exc

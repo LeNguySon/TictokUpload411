@@ -50,6 +50,16 @@ class WindowsCredentialVault:
             logger.error(f"Failed to persist tokens in Windows Vault for profile {profile_id}: {e}")
             return False
 
+    def save_oauth_payload(self, profile_id: int | str, payload: dict[str, Any]) -> bool:
+        """Stores the whole (encrypted) OAuth payload: tokens, expiries, open_id, scope, client key/secret."""
+        key = self._service_key(profile_id)
+        try:
+            keyring.set_password(key, "oauth_payload", json.dumps(payload))
+            return True
+        except Exception as e:
+            logger.error(f"Failed to persist OAuth payload in Windows Vault for profile {profile_id}: {e}")
+            return False
+
     def get_oauth_tokens(self, profile_id: int | str) -> dict[str, Any] | None:
         """Retrieves and deserializes OAuth tokens from Windows Credential Manager."""
         key = self._service_key(profile_id)
