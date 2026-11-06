@@ -12,6 +12,22 @@ from typing import Any
 from src.infrastructure.database.connection import DEFAULT_DB_PATH, db_session
 
 
+def _apply_cookie_import(payload: dict[str, Any]) -> None:
+    """A (re)imported cookie replaces the captured browser session and carries its own expiry."""
+    if "cookies_json" not in payload:
+        return
+    from src.infrastructure.browser.cookie_injector import BrowserCookieInjector
+
+    if "cookies_browser" not in payload:
+        payload["cookies_browser"] = None
+        payload.setdefault("cookies_synced_at", None)
+    if "session_expires_at" not in payload:
+        try:
+            payload["session_expires_at"] = BrowserCookieInjector.session_expiry(payload["cookies_json"] or "")
+        except Exception:
+            payload["session_expires_at"] = None
+
+
 class ProfileRepository:
     """Repository for managing the `profiles` table."""
 
@@ -42,6 +58,7 @@ class ProfileRepository:
             payload["cookies_json"] = payload.pop("cookie")
         elif "cookie" in payload:
             payload.pop("cookie")
+        _apply_cookie_import(payload)
 
         if "qg" in payload and "country" not in payload:
             payload["country"] = payload.pop("qg")
@@ -217,6 +234,9 @@ class ProfileRepository:
             payload["notes"] = payload.pop("note")
         elif "note" in payload:
             payload.pop("note")
+        if "cookie" in payload and "cookies_json" not in payload:
+            payload["cookies_json"] = payload.pop("cookie")
+        _apply_cookie_import(payload)
 
         with db_session(self.db_path) as conn:
             col_rows = conn.execute("PRAGMA table_info(profiles);").fetchall()

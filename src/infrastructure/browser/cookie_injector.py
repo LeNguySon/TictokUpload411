@@ -72,7 +72,8 @@ class BrowserCookieInjector:
                                         else (c_name.lower() in _HTTP_ONLY_COOKIES)
                                     ),
                                     "sameSite": str(it.get("sameSite", "Lax")),
-                                    "expirationDate": it.get("expirationDate") or (time.time() + 31536000),
+                                    # Real expiry of exported cookies (it was replaced by "+1 year").
+                                    "expirationDate": it.get("expirationDate") or it.get("expires") or None,
                                 }
                             )
                     if parsed_list:
@@ -190,6 +191,24 @@ class BrowserCookieInjector:
     SEED_MARKER = "tavm_cookie_seed.sha256"
 
     @classmethod
+    def session_expiry(cls, cookie_raw: str) -> float | None:
+        """Expiry (unix) of the session cookie in a JSON export; None for header strings / unknown."""
+        if not cookie_raw:
+            return None
+        try:
+            plain = cls._plain_cookie(cookie_raw).strip()
+        except Exception:
+            return None
+        if not plain.startswith("["):
+            return None
+        best: float | None = None
+        for c in cls.parse_cookie_string(plain):
+            exp = c.get("expirationDate")
+            if c.get("name") in ("sessionid", "sessionid_ss", "sid_tt") and exp:
+                best = max(best or 0.0, float(exp))
+        return best
+
+    @classmethod
     def _plain_cookie(cls, cookie_raw: str) -> str:
         if isinstance(cookie_raw, str) and cookie_raw.startswith("gloglin:dpapi:v1:"):
             from src.infrastructure.credentials.dpapi import unprotect_text
@@ -291,7 +310,8 @@ class BrowserCookieInjector:
         conn: sqlite3.Connection | None = None
         try:
             now_epoch = int(time.time())
-            expires_utc = (now_epoch + 31536000) * 1000000 + 11644473600000000  # Chrome microsecond timestamp
+            # Header strings carry no expiry: TikTok sets the real one on the first request.
+            default_expires_utc = (now_epoch + 31536000) * 1000000 + 11644473600000000
 
             conn = sqlite3.connect(str(target_db))
             cur = conn.cursor()
@@ -301,6 +321,14 @@ class BrowserCookieInjector:
             col_names = {r[1] for r in col_info}
 
             for c in cookie_items:
+                exp_unix = c.get("expirationDate")
+                if exp_unix is not None and 0 < float(exp_unix) <= now_epoch:
+                    continue  # already expired: never hand a dead cookie to the browser
+                expires_utc = (
+                    int(float(exp_unix) * 1000000) + 11644473600000000
+                    if exp_unix and float(exp_unix) > 0
+                    else default_expires_utc
+                )
                 k = c["name"]
                 v = c["value"]
                 d = c["domain"]

@@ -42,6 +42,7 @@ from qfluentwidgets import (
     setTheme,
 )
 
+from src.application.services.cookie_session_service import CookieSessionService
 from src.application.services.gologin_sync_service import GoLoginSyncService
 from src.application.services.license_service import LicenseService
 from src.application.services.profile_service import ProfileService
@@ -50,12 +51,14 @@ from src.application.services.upload_service import UploadService
 from src.application.signals.app_signals import AppSignalBus
 from src.application.workers.metrics_sync_worker import MetricsSyncWorker
 from src.application.workers.orbita_launch_worker import OrbitaLaunchWorker
+from src.application.workers.session_refresh_worker import SessionRefreshWorker
 from src.application.workers.task_worker import run_task
 from src.application.workers.thread_pool_manager import ThreadPoolManager
 from src.application.workers.upload_worker import UploadWorker
 from src.application.workers.video_import_worker import VideoImportWorker
 from src.domain.licensing import entitlements
 from src.domain.licensing.plans import PLAN_DISPLAY_NAMES, Feature, upgrade_hint
+from src.domain.policies.cookie_source import pick_session_cookie
 from src.infrastructure.browser.orbita_launcher import OrbitaLauncher
 from src.infrastructure.browser.sammonny_daemon_manager import SamMonnyDaemonSupervisor
 from src.infrastructure.credentials.windows_vault import WindowsCredentialVault
@@ -248,6 +251,13 @@ class TikTokManagerMainWindow(QMainWindow):
         self.profile_status_timer.setInterval(3000)
         self.profile_status_timer.timeout.connect(self._sync_active_profile_statuses)
         self.profile_status_timer.start()
+
+        # Session renewal: read the refreshed TikTok cookies of open (SDK) browsers every 10 minutes.
+        self.cookie_session_service = CookieSessionService(self.profile_repo, signal_bus=self.signal_bus)
+        self.session_capture_timer = QTimer(self)
+        self.session_capture_timer.setInterval(10 * 60_000)
+        self.session_capture_timer.timeout.connect(self._capture_open_sessions)
+        self.session_capture_timer.start()
 
         self._apply_license()
         if self.license_service is not None:
@@ -458,6 +468,7 @@ class TikTokManagerMainWindow(QMainWindow):
         self.profile_table.soft_delete_requested.connect(self._on_soft_delete_profiles)
         self.profile_table.remove_proxy_requested.connect(self._on_remove_proxy_selected)
         self.profile_table.direct_connection_requested.connect(self._on_direct_connection_selected)
+        self.profile_table.refresh_session_requested.connect(self._on_refresh_sessions)
         self.profile_table.rotate_proxy_requested.connect(self._on_rotate_proxy_selected)
         self.profile_table.check_proxy_requested.connect(self._on_check_proxy_selected)
         self.profile_table.batch_channel_update_requested.connect(self._on_batch_channel_update)
@@ -1042,12 +1053,19 @@ class TikTokManagerMainWindow(QMainWindow):
         if not profile_ids:
             return
         ids = list(profile_ids)
-        launcher, repo = self.orbita_launcher, self.profile_repo
+        launcher, repo, sessions = self.orbita_launcher, self.profile_repo, self.cookie_session_service
 
         def _close_all() -> dict[int, str]:
             statuses: dict[int, str] = {}
             for p_id in ids:
                 p = repo.get_by_id(p_id)
+                addr = (getattr(launcher, "_active_sdk_sessions", {}) or {}).get(p_id)
+                if addr:  # keep the session TikTok refreshed while the browser was open
+                    try:
+                        sessions.capture(p_id, addr)
+                    except Exception as e:
+                        logger.info("Session capture before close failed for %s: %s", p_id, e)
+                    p = repo.get_by_id(p_id) or p
                 try:
                     launcher.close_profile(p if p else p_id)
                 except Exception as e:
@@ -1059,6 +1077,55 @@ class TikTokManagerMainWindow(QMainWindow):
             return statuses
 
         self._run_bg(_close_all, on_result=self._on_orbita_closed)
+
+    def _capture_open_sessions(self) -> None:
+        """Reads the refreshed cookies of every browser opened through the SDK (off the GUI thread)."""
+        sessions = getattr(self.orbita_launcher, "_active_sdk_sessions", {}) or {}
+        for key, addr in list(sessions.items()):
+            if isinstance(key, int) and addr:
+                run_task(self.cookie_session_service.capture, key, addr)
+
+    def _on_refresh_sessions(self, profile_ids: list[int]) -> None:
+        if not profile_ids:
+            return
+        worker = SessionRefreshWorker(
+            list(profile_ids),
+            self.profile_repo,
+            self.proxy_repo,
+            self.orbita_launcher,
+            self.cookie_session_service,
+            proxy_service=self.proxy_service,
+            daemon_supervisor=self.daemon_supervisor,
+        )
+        worker.signals.done.connect(self._on_sessions_refreshed)
+        InfoBar.info(
+            title="Làm mới phiên",
+            content=f"Đang mở {len(profile_ids)} hồ sơ trên TikTok để làm mới phiên đăng nhập…",
+            position=InfoBarPosition.TOP,
+            parent=self,
+        )
+        self.thread_pool.dispatch(worker)
+
+    def _on_sessions_refreshed(self, results: list) -> None:
+        self.refresh_profiles()
+        renewed = [r for r in results if r.get("logged_in")]
+        problems = [r for r in results if not r.get("logged_in")]
+        if renewed:
+            InfoBar.success(
+                title="Đã làm mới phiên",
+                content=f"{len(renewed)} hồ sơ đã lưu phiên đăng nhập mới.",
+                position=InfoBarPosition.TOP,
+                parent=self,
+            )
+        if problems:
+            detail = "; ".join(f"{r.get('name')}: {r.get('message')}" for r in problems[:3])
+            InfoBar.warning(
+                title=f"{len(problems)} hồ sơ chưa làm mới được",
+                content=detail + ("…" if len(problems) > 3 else ""),
+                position=InfoBarPosition.TOP,
+                duration=8000,
+                parent=self,
+            )
 
     def _on_orbita_closed(self, statuses: dict[int, str]) -> None:
         for p_id, new_status in statuses.items():
@@ -1286,7 +1353,7 @@ class TikTokManagerMainWindow(QMainWindow):
         die_count = 0
         for p_id in ids:
             p = self.profile_repo.get_by_id(p_id)
-            cookie = p.get("cookie") or p.get("cookies_json") if p else None
+            cookie = pick_session_cookie(p) or None
             if cookie and ("sessionid=" in cookie or "msToken=" in cookie):
                 new_status = "LIVE"
                 live_count += 1
@@ -2490,6 +2557,8 @@ class TikTokManagerMainWindow(QMainWindow):
                 self.scheduler_timer.stop()
             if hasattr(self, "profile_status_timer") and self.profile_status_timer.isActive():
                 self.profile_status_timer.stop()
+            if hasattr(self, "session_capture_timer"):
+                self.session_capture_timer.stop()
             for name in ("license_timer", "license_clock_timer"):
                 if hasattr(self, name):
                     getattr(self, name).stop()

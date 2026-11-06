@@ -50,6 +50,8 @@ CREATE TABLE IF NOT EXISTS profiles (
     project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL,
     proxy_id INTEGER REFERENCES proxies(id) ON DELETE SET NULL,
     direct_connection INTEGER DEFAULT 0, -- 1 = user deliberately runs this profile from the host IP
+    session_expires_at REAL, -- unix time the TikTok session cookie expires (NULL = unknown)
+    cookies_synced_at TEXT, -- last time cookies_browser was read from the running browser
     storage_dir TEXT NOT NULL,
     status TEXT DEFAULT 'stopped' CHECK(status IN ('stopped', 'running', 'error', 'LIVE', 'DIE', 'CHECKPOINT')),
 

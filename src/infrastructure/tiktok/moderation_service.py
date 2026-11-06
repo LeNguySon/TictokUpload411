@@ -20,6 +20,7 @@ from typing import Any
 
 from src.domain.licensing import entitlements
 from src.domain.licensing.plans import Feature
+from src.domain.policies.cookie_source import pick_session_cookie
 from src.infrastructure.database.connection import get_db_connection
 from src.infrastructure.tiktok.gologin_tiktok_client import (
     GoLoginTikTokClient,
@@ -133,7 +134,7 @@ class TikTokModerationService:
                 return {"profile_id": profile_id, "ok": False, "error": "Profile not found"}
 
             p = dict(row)
-            cookies_json = p.get("cookies_json") or p.get("cookies_browser") or ""
+            cookies_json = pick_session_cookie(p)  # refreshed browser session first
             cookie_hdr = parse_cookie_header_str(cookies_json)
             ua = p.get("user_agent") or "Mozilla/5.0"
 
@@ -232,7 +233,7 @@ class TikTokModerationService:
                 return []
 
             p = dict(row)
-            cookies_json = p.get("cookies_json") or p.get("cookies_browser") or ""
+            cookies_json = pick_session_cookie(p)  # refreshed browser session first
             cookie_hdr = parse_cookie_header_str(cookies_json)
             ua = p.get("user_agent") or "Mozilla/5.0"
 
@@ -711,7 +712,7 @@ class TikTokModerationService:
                 return {"is_safe": False, "copyright_risk": "unknown", "message": "Profile not found"}
 
             p = dict(row)
-            cookies_json = p.get("cookies_json") or p.get("cookies_browser") or ""
+            cookies_json = pick_session_cookie(p)  # refreshed browser session first
             cookie_hdr = parse_cookie_header_str(cookies_json)
             ua = p.get("user_agent") or "Mozilla/5.0"
 

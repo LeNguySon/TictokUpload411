@@ -44,6 +44,29 @@ def _pick(p: dict[str, Any], *keys: str, default: Any = None) -> Any:
     return default
 
 
+SESSION_WARN_DAYS = 7
+
+
+def _session_cell(cookie_raw: str, expires_at: Any, synced_at: Any) -> tuple[str, float | None, str | None, str]:
+    """(text, days left for sorting, colour, tooltip) of the Cookie column."""
+    import time
+    from datetime import datetime
+
+    if not cookie_raw:
+        return "", None, None, "Chưa có cookie"
+    synced = f" (đọc từ trình duyệt lúc {synced_at})" if synced_at else ""
+    if not expires_at:
+        return "Có cookie", None, None, "Chưa rõ hạn phiên (mở hồ sơ hoặc 'Làm mới phiên' để cập nhật)." + synced
+    seconds = float(expires_at) - time.time()
+    until = datetime.fromtimestamp(float(expires_at)).strftime("%d-%m-%Y %H:%M")
+    if seconds <= 0:
+        return "Hết hạn", seconds / 86400, "#C42B1C", f"Phiên đã hết hạn lúc {until}. Hãy đăng nhập lại hoặc nhập cookie mới." + synced
+    days = int(seconds // 86400)
+    color = "#CA5010" if days < SESSION_WARN_DAYS else None
+    hint = " Nên 'Làm mới phiên' sớm." if color else ""
+    return f"Còn {days} ngày", seconds / 86400, color, f"Phiên hết hạn lúc {until}.{hint}" + synced
+
+
 class ProfileTableWidget(FastTableWidget):
     """
     Fluent UI Table for managing TikTok profiles with 28 columns matching SSMATool parity.
@@ -66,6 +89,7 @@ class ProfileTableWidget(FastTableWidget):
     soft_delete_requested = pyqtSignal(list)
     remove_proxy_requested = pyqtSignal(list)
     direct_connection_requested = pyqtSignal(list)
+    refresh_session_requested = pyqtSignal(list)
     rotate_proxy_requested = pyqtSignal(list)
     check_proxy_requested = pyqtSignal(list)
     batch_channel_update_requested = pyqtSignal(list)
@@ -275,9 +299,15 @@ class ProfileTableWidget(FastTableWidget):
         status_item.setToolTip(f"Trạng thái hoạt động: {status}")
         self.setItem(row_idx, 12, status_item)
 
-        # Col 13: Cookie (Masked)
-        masked_cookie = (cookie_raw[:14] + "...") if len(cookie_raw) > 14 else cookie_raw
-        self.setItem(row_idx, 13, make_item(masked_cookie))
+        # Col 13: Cookie = session expiry (cookie values are never shown: the first characters of the
+        # cookie used to be displayed). Days left kept in UserRole.
+        text, days_left, color, tip = _session_cell(cookie_raw, p.get("session_expires_at"), p.get("cookies_synced_at"))
+        cookie_item = make_item(text, Qt.AlignmentFlag.AlignCenter)
+        cookie_item.setData(Qt.ItemDataRole.UserRole, days_left)
+        if color:
+            cookie_item.setForeground(QColor(color))
+        cookie_item.setToolTip(tip)
+        self.setItem(row_idx, 13, cookie_item)
 
         # Col 14: $Earned
         self.setItem(
@@ -520,6 +550,14 @@ class ProfileTableWidget(FastTableWidget):
         act_direct = Action(FluentIcon.GLOBE, "Chạy không proxy (dùng IP máy)", self)
         act_direct.triggered.connect(lambda: self.direct_connection_requested.emit(selected_ids))
         proxy_menu.addAction(act_direct)
+
+        refresh_title = (
+            f"Làm Mới Phiên Đăng Nhập / Gia Hạn Cookie ({count} hồ sơ)" if count > 1
+            else "Làm Mới Phiên Đăng Nhập / Gia Hạn Cookie"
+        )
+        act_refresh = Action(FluentIcon.SYNC, refresh_title, self)
+        act_refresh.triggered.connect(lambda: self.refresh_session_requested.emit(selected_ids))
+        proxy_menu.addAction(act_refresh)
 
         menu.addMenu(proxy_menu)
 
