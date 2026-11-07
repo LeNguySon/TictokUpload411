@@ -43,7 +43,12 @@ from qfluentwidgets import (
 )
 
 from src.application.services.cookie_session_service import CookieSessionService
-from src.application.services.gologin_sync_service import GoLoginSyncService, backfill_fingerprints
+from src.application.services.gologin_sync_service import (
+    FingerprintUpdateSummary,
+    GoLoginSyncService,
+    backfill_fingerprints,
+    regenerate_fingerprints,
+)
 from src.application.services.license_service import LicenseService
 from src.application.services.profile_service import ProfileService
 from src.application.services.proxy_service import ProxyService
@@ -504,6 +509,7 @@ class TikTokManagerMainWindow(QMainWindow):
         self.profile_table.batch_channel_update_requested.connect(self._on_batch_channel_update)
         self.profile_table.channel_radar_requested.connect(self._on_open_channel_radar)
         self.profile_table.account_health_requested.connect(self._on_open_account_health)
+        self.profile_table.regenerate_fingerprint_requested.connect(self._on_regenerate_fingerprints)
 
         # Context Menu & Selection Events on Video Table
         self.video_table.upload_now_requested.connect(self._on_upload_single_video)
@@ -1713,6 +1719,51 @@ class TikTokManagerMainWindow(QMainWindow):
             on_result=open_radar,
             on_error=radar_failed,
         )
+
+    def _confirm_regenerate_fingerprints(self, count: int) -> bool:
+        box = MessageBox(
+            "Cập Nhật Vân Tay Trình Duyệt?",
+            f"Cấp vân tay MỚI (cố định) cho {count} hồ sơ. Tài khoản TikTok đang đăng nhập có thể bị yêu cầu xác "
+            "minh lại vì thiết bị \"thay đổi\". Hồ sơ đang mở trình duyệt sẽ được bỏ qua.",
+            self,
+        )
+        return bool(box.exec())
+
+    def _on_regenerate_fingerprints(self, profile_ids: list[int]) -> None:
+        """Right-click > Cập Nhật Vân Tay Trình Duyệt: new fixed fingerprint for the selected profiles."""
+        ids = [int(i) for i in profile_ids if i]
+        if not ids or not self._confirm_regenerate_fingerprints(len(ids)):
+            return
+
+        def run() -> FingerprintUpdateSummary:
+            try:
+                from sammonny.core.client import SamMonnyDaemonClient
+
+                client: Any = SamMonnyDaemonClient(base_url="http://127.0.0.1:7654", sdk_url="http://127.0.0.1:36912")
+            except Exception:
+                client = None
+            return regenerate_fingerprints(self.profile_repo, ids, client)
+
+        def done(summary: FingerprintUpdateSummary) -> None:
+            changed = len(summary.daemon) + len(summary.local)
+            parts = [f"Đã cấp vân tay mới cho {changed} hồ sơ"]
+            if summary.skipped_running:
+                parts.append(f"bỏ qua {len(summary.skipped_running)} hồ sơ đang mở trình duyệt")
+            if summary.failed:
+                parts.append(f"{len(summary.failed)} lỗi: {summary.failed[0][1]}")
+            (InfoBar.warning if summary.failed or summary.skipped_running else InfoBar.success)(
+                title="Cập Nhật Vân Tay",
+                content="; ".join(parts) + ".",
+                position=InfoBarPosition.TOP,
+                duration=6000,
+                parent=self,
+            )
+            self.refresh_profiles()
+
+        def failed(err: str) -> None:
+            InfoBar.error(title="Lỗi Cập Nhật Vân Tay", content=err, position=InfoBarPosition.TOP, parent=self)
+
+        self._run_bg(run, on_result=done, on_error=failed)
 
     def _on_open_account_health(self, profile_id: int | None = None) -> None:
         if not self._feature_allowed(Feature.CHANNEL_HEALTH):

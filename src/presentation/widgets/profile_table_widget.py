@@ -95,6 +95,7 @@ class ProfileTableWidget(FastTableWidget):
     batch_channel_update_requested = pyqtSignal(list)
     channel_radar_requested = pyqtSignal(int)
     account_health_requested = pyqtSignal(int)
+    regenerate_fingerprint_requested = pyqtSignal(list)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -590,6 +591,11 @@ class ProfileTableWidget(FastTableWidget):
         # Emit the profile id: the window locates the real folder from the full record.
         act_folder.triggered.connect(lambda: self.open_profile_folder_requested.emit(int(first_id or 0)))
         profile_mgmt_menu.addAction(act_folder)
+
+        fp_title = f"Cập Nhật Vân Tay Trình Duyệt ({count} hồ sơ)..." if count > 1 else "Cập Nhật Vân Tay Trình Duyệt..."
+        act_fingerprint = Action(FluentIcon.FINGERPRINT, fp_title, self)
+        act_fingerprint.triggered.connect(lambda: self.regenerate_fingerprint_requested.emit(selected_ids))
+        profile_mgmt_menu.addAction(act_fingerprint)
 
         menu.addMenu(profile_mgmt_menu)
 

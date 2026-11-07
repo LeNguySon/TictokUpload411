@@ -16,7 +16,7 @@ _SPEC.loader.exec_module(build_exe)
 
 def test_pinned_versions_are_read_from_pyproject() -> None:
     pins = build_exe.pinned_versions()
-    assert pins["sammonny"] == "1.8.4"
+    assert pins["sammonny"] == "1.8.5"
 
 
 def test_current_venv_passes_the_guard() -> None:

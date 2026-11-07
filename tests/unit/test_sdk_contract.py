@@ -1,4 +1,4 @@
-"""Contract checks between our code and the installed SamMonny SDK (1.8.4).
+"""Contract checks between our code and the installed SamMonny SDK (1.8.5).
 
 `sammonny.MemoryManager.trim_working_set()` does not exist in the SDK; the calls were swallowed by
 try/except, so the documented post-task RAM trim never ran.
@@ -76,3 +76,11 @@ def test_cookie_hybrid_stays_disabled_until_verified_live():
     hybrid_source = inspect.getsource(TikTokHybridApiUploader.upload_via_hybrid)
     assert "prepare_upload_session" not in hybrid_source, "SDK Hybrid falls back to the simulated TOS session again"
     assert sammonny_adapter.COOKIE_HYBRID_AVAILABLE is False
+
+
+def test_daemon_client_can_update_fingerprints():
+    """Right-click > Cập Nhật Vân Tay needs SamMonnyDaemonClient.update_fingerprint (SDK >= 1.8.5)."""
+    from sammonny.core.client import SamMonnyDaemonClient
+
+    params = inspect.signature(SamMonnyDaemonClient.update_fingerprint).parameters
+    assert {"profile_id", "fingerprint", "regenerate", "os_name"} <= set(params)
