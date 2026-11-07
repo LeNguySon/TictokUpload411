@@ -2907,14 +2907,11 @@ class TikTokManagerMainWindow(QMainWindow):
         """
         try:
             from src.infrastructure.browser.cache_cleaner import BrowserCacheCleaner, collect_profile_dirs
-            from src.infrastructure.browser.process_supervisor import BrowserProcessSupervisor
 
             self.hide()  # cleaning may take a moment; do not leave a frozen window on screen
             QApplication.processEvents()
-            supervisor = BrowserProcessSupervisor()
-            dirs = [
-                d for d in collect_profile_dirs(self.profile_repo.list_all()) if not supervisor.is_process_running(d)
-            ]
+            # Real browser folders (daemon profiles included), running browsers skipped; cookies never touched.
+            dirs = collect_profile_dirs(self.profile_repo.list_all())
             if dirs:
                 summary = BrowserCacheCleaner().clean_cache(dirs) or {}
                 logger.info("Exit cache cleanup: %d profiles, freed %s", len(dirs), summary.get("formatted_freed", "?"))

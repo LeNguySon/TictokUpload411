@@ -8,10 +8,16 @@ Inherited from Gloglin2609 and SamMonny SDK standards.
 from __future__ import annotations
 
 import logging
+import os
 import shutil
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
+
+try:
+    import psutil
+except ImportError:  # pragma: no cover - psutil ships with the app
+    psutil = None  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +51,23 @@ PROTECTED_ITEMS: set[str] = {
     "custom_flags.json",
     ".process.lock",
 }
+
+# Folders holding login/session state: nothing inside them is ever deleted (not even "*.tmp": LevelDB/SQLite write
+# temporary files there while the profile is in use).
+PROTECTED_DIRS: set[str] = {
+    "network",
+    "local storage",
+    "session storage",
+    "indexeddb",
+    "databases",
+    "storage",
+    "shared_proto_db",
+    "extension state",
+    "extensions",
+    "sync data",
+}
+
+_BROWSER_PROCESS_NAMES = ("chrome", "orbita", "chromium")
 
 
 def format_bytes(bytes_count: int | float) -> str:
@@ -121,6 +144,9 @@ class BrowserCacheCleaner:
             # 2. Scan temporary dangling files (*.tmp, *.crdownload, *.part)
             for ext in ("*.tmp", "*.crdownload", "*.part"):
                 for tmp_file in p_dir.rglob(ext):
+                    rel_parts = {part.lower() for part in tmp_file.relative_to(p_dir).parts[:-1]}
+                    if rel_parts & PROTECTED_DIRS:
+                        continue  # session storage (Local Storage, IndexedDB, cookies...): never touched
                     if tmp_file.is_file():
                         size = _safe_file_size(tmp_file)
                         result["tmp_files_count"] += 1
@@ -198,17 +224,58 @@ class BrowserCacheCleaner:
         return summary
 
 
-def collect_profile_dirs(profiles: list[dict[str, Any]]) -> list[Path]:
-    """Existing on-disk browser profile directories of the given profile records."""
+def normalized_dir(path: str | Path) -> str:
+    """Comparable form of a folder path (absolute, case-insensitive on Windows)."""
+    return os.path.normcase(os.path.abspath(str(path)))
+
+
+def browser_dirs_in_use() -> set[str]:
+    """``--user-data-dir`` of every running Chrome/Orbita browser (renderers/helpers excluded).
+
+    Browsers started through the SamMonny daemon write no ``.process.lock``: their command line is the only reliable
+    sign that a profile folder is in use.
+    """
+    if psutil is None:
+        return set()
+    in_use: set[str] = set()
+    for proc in psutil.process_iter(["name", "cmdline"]):
+        try:
+            name = str(proc.info.get("name") or "").lower()
+            cmdline = proc.info.get("cmdline") or []
+        except Exception:
+            continue
+        if not any(b in name for b in _BROWSER_PROCESS_NAMES):
+            continue
+        for arg in cmdline:
+            if arg.startswith("--user-data-dir="):
+                in_use.add(normalized_dir(arg.split("=", 1)[1].strip('"')))
+    return in_use
+
+
+def collect_profile_dirs(profiles: list[dict[str, Any]], skip_in_use: bool = True) -> list[Path]:
+    """Existing browser folders of the given profiles (the daemon's ``profiles/<uuid>`` included), each once.
+
+    ``storage_dir`` is often a relative ``profiles/<name>`` that does not exist: the data lives in the daemon's
+    profiles folder (only 1 of 17 real folders used to be found). With ``skip_in_use`` folders of running browsers
+    (``.process.lock`` or a live ``--user-data-dir``) are left alone.
+    """
+    from src.infrastructure.browser.orbita_launcher import OrbitaLauncher
+    from src.infrastructure.browser.process_supervisor import BrowserProcessSupervisor
+
+    in_use = browser_dirs_in_use() if skip_in_use else set()
+    supervisor = BrowserProcessSupervisor() if skip_in_use else None
+    seen: set[str] = set()
     dirs: list[Path] = []
     for p in profiles:
-        s_dir = p.get("storage_dir")
-        if s_dir and Path(s_dir).is_dir():
-            dirs.append(Path(s_dir))
+        found = OrbitaLauncher.locate_profile_dir(p)
+        if found is None or not found.is_dir():
             continue
-        uuid_val = p.get("uuid") or p.get("name")
-        if uuid_val:
-            candidate = Path("profiles") / str(uuid_val)
-            if candidate.is_dir():
-                dirs.append(candidate)
+        key = normalized_dir(found)
+        if key in seen:
+            continue
+        seen.add(key)
+        if skip_in_use and (key in in_use or (supervisor is not None and supervisor.is_process_running(found))):
+            logger.info("Cache cleanup skips %s: its browser is running", found)
+            continue
+        dirs.append(found)
     return dirs
