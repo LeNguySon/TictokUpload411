@@ -80,6 +80,23 @@ def fetch_health_data(db_path: Path | str, profile_id: int) -> dict[str, Any] | 
         }
 
 
+# getPenaltyDetails sends penalties[0].date = the day TikTok penalized the video; it sends no appeal deadline.
+VIOLATION_COLUMNS = ["Video ID", "Tiêu đề video", "Loại gậy vi phạm", "Ngày bị xử phạt", "Trạng thái"]
+
+_VIOLATION_STATUS_TEXT = {
+    "can_appeal": "Có thể kháng cáo",  # getPenaltyDetails appeal_status 0
+    "under_review": "Đang xét kháng cáo",  # appeal_status 1
+    "penalized": "Đã xử phạt",  # any other appeal_status
+    "appealed": "Đã nộp kháng cáo",  # set by the app after submitting an appeal
+    "pending": "Chờ giải trình",
+}
+
+
+def violation_status_text(status: object) -> str:
+    key = str(status or "pending")
+    return _VIOLATION_STATUS_TEXT.get(key, key)
+
+
 def format_appeal_deadline(value: object) -> str:
     """Appeal deadline as dd/mm/YYYY. TikTok sends epoch seconds (sometimes milliseconds) as a string; appeal
     actions store "YYYY-MM-DD[ HH:MM:SS]". Anything else is shown as-is, empty as an em dash."""
@@ -260,12 +277,14 @@ class AccountHealthDialog(QDialog):
         v_layout.setSpacing(8)
 
         self.table_violate = style_plain_table(QTableWidget(0, 5))
-        self.table_violate.setHorizontalHeaderLabels(
-            ["Video ID", "Tiêu đề video", "Loại gậy vi phạm", "Hạn nộp đơn kháng cáo", "Trạng thái"]
-        )
+        self.table_violate.setHorizontalHeaderLabels(VIOLATION_COLUMNS)
+        header_date = self.table_violate.horizontalHeaderItem(3)
+        if header_date is not None:
+            header_date.setToolTip("Ngày TikTok xử phạt video. TikTok không gửi hạn chót kháng cáo.")
         h_header(self.table_violate).setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         h_header(self.table_violate).setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         h_header(self.table_violate).setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        h_header(self.table_violate).setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
         self.table_violate.setAlternatingRowColors(True)
         v_header(self.table_violate).setVisible(False)
         self.table_violate.itemSelectionChanged.connect(self._on_violate_selection_changed)
@@ -473,14 +492,7 @@ class AccountHealthDialog(QDialog):
             deadline = format_appeal_deadline(v_dict.get("appeal_date"))
             self.table_violate.setItem(row_idx, 3, QTableWidgetItem(deadline))
 
-            st_text = str(v_dict.get("status") or "pending")
-            if st_text == "appealed":
-                disp_status = "Đã nộp kháng cáo"
-            elif st_text == "pending":
-                disp_status = "Chờ giải trình"
-            else:
-                disp_status = st_text
-            self.table_violate.setItem(row_idx, 4, QTableWidgetItem(disp_status))
+            self.table_violate.setItem(row_idx, 4, QTableWidgetItem(violation_status_text(v_dict.get("status"))))
 
         # 5. Account appeals
         self.table_appeals.setRowCount(len(appeals))

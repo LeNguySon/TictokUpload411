@@ -338,8 +338,9 @@ class PassiveTikTokSyncService:
         # 2. TikTok Studio Counter (Public videos vs Total uploaded videos, likes)
         try:
             url_counter = "https://www.tiktok.com/tiktokstudio/api/web/counter/getHashCount"
-            resp_counter = self.client.request_api(profile_id, url_counter, method="POST", json_data={}, timeout=10)
-            if isinstance(resp_counter, dict) and "item_count" in resp_counter:
+            # GET: a POST {} gets no answer at all and hung for the whole timeout on every sync (live, 2026-11).
+            resp_counter = self.client.request_api(profile_id, url_counter, method="GET", timeout=10)
+            if isinstance(resp_counter, dict) and ("item_count" in resp_counter or "CountData" in resp_counter):
                 if self.sniffer.process_api_response(profile_id, url_counter, resp_counter):
                     any_success = True
         except Exception as e:
@@ -477,13 +478,15 @@ class PassiveTikTokSyncService:
             # Top 5 most viewed videos not refreshed in the last DEEP_VIDEO_REFRESH_HOURS: each costs 2 TikTok
             # requests, so asking again on every sync was 10 of the 13 deep-sync calls for slowly changing data.
             with db_session(self.db_path) as conn:
+                # The top 5 first, THEN skip the fresh ones (filtering first walked down to the next 5 stale videos).
                 v_rows = conn.execute(
                     """
-                    SELECT v.video_id FROM videoTables v
-                    LEFT JOIN video_deep_analytics d ON d.aweme_id = v.video_id
-                    WHERE v.profile_id = ?
-                      AND (d.updated_at IS NULL OR d.updated_at < datetime('now', ?))
-                    ORDER BY v.views DESC, v.id DESC LIMIT 5;
+                    SELECT top.video_id FROM (
+                        SELECT video_id FROM videoTables WHERE profile_id = ? AND video_id IS NOT NULL
+                        ORDER BY views DESC, id DESC LIMIT 5
+                    ) AS top
+                    LEFT JOIN video_deep_analytics d ON d.aweme_id = top.video_id
+                    WHERE d.updated_at IS NULL OR d.updated_at < datetime('now', ?);
                     """,
                     (profile_id, f"-{self.DEEP_VIDEO_REFRESH_HOURS} hours"),
                 ).fetchall()

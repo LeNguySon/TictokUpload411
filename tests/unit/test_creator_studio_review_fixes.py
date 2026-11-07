@@ -216,3 +216,130 @@ def test_video_deep_analytics_is_not_refetched_within_6_hours(db):
     row = conn.execute("SELECT finish_rate FROM videoTables WHERE video_id='70';").fetchone()
     conn.close()
     assert row["finish_rate"] == 9
+
+
+# --- Found by the live run on @swall.pain (2026-11-07) ---------------------------------------------------------
+
+
+def test_finish_rate_falls_back_to_the_end_of_the_retention_curve():
+    """TikTok answers null for video_finish_rate_realtime; the curve's last point is the share still watching."""
+    from src.infrastructure.tiktok.deep_analytics_parser import parse_retention_data
+
+    curve = {"value": {"list": [{"timestamp": "0", "value": 1}, {"timestamp": "1000", "value": 0.88},
+                                {"timestamp": "104000", "value": 0.17}], "peak_value": 2000, "status": 0}}
+    res = parse_retention_data(curve, None)
+    assert res["finish_rate"] == 17.0
+    assert res["points"][-1] == {"second": 104, "retention": 17.0}
+    assert parse_retention_data(curve, {"value": 0.25})["finish_rate"] == 25.0  # TikTok's own value wins
+    assert parse_retention_data(None, None)["finish_rate"] == 0.0
+
+
+def _sync_with(db, responder):
+    from src.infrastructure.tiktok.passive_sync_service import PassiveTikTokSyncService
+
+    repo = ProfileRepository(db)
+    pid = repo.create(name="ch", project_id=1, cookies_json='[{"name": "sessionid", "value": "x"}]')
+    svc = PassiveTikTokSyncService(profile_repo=repo, db_path=db)
+    with patch.object(svc.client, "get_profile_cookie_header", return_value="sessionid=x"), patch.object(
+        svc.client, "request_api", side_effect=responder
+    ) as req, patch.object(svc.client, "fetch_audience_intelligence", return_value={}), patch.object(
+        svc.client, "fetch_publish_settings", return_value={}
+    ), patch("src.infrastructure.tiktok.passive_sync_service.download_and_cache_avatar"):
+        svc.sync_profile_deep_creator_api(pid)
+    return repo.get_by_id(pid), req
+
+
+def test_hash_count_is_read_with_get_and_unwrapped(db):
+    """POST {} hung for the whole 10 s timeout on every sync; GET answers {"CountData": {"<uid>": {...}}}."""
+    seen = []
+
+    def responder(_pid, url, method="GET", **_kw):
+        if "getHashCount" in url:
+            seen.append(method)
+            if method != "GET":
+                return {"status_code": -1, "error": "curl: (28) Operation timed out"}
+            return {"CountData": {"7506": {"item_count": "79", "total_item_count": "246"}},
+                    "BaseResp": {"StatusCode": 0}, "_status_code": 200}
+        return {}
+
+    row, _ = _sync_with(db, responder)
+    assert seen and set(seen) == {"GET"}  # sync step 2 and the account-standing check
+    assert row["total_videos"] == 79
+
+
+def test_the_top_videos_are_refreshed_not_the_next_stale_ones(db):
+    """With more than 5 videos the 6 h window only moved the 10 requests down to the next 5 stale videos."""
+    from src.infrastructure.tiktok.passive_sync_service import PassiveTikTokSyncService
+
+    repo = ProfileRepository(db)
+    pid = repo.create(name="ch", project_id=1, cookies_json='[{"name": "sessionid", "value": "x"}]')
+    conn = get_db_connection(db)
+    for i in range(8):
+        conn.execute("INSERT INTO videoTables (profile_id, video_id, views) VALUES (?, ?, ?);", (pid, f"9{i}", 1000 - i))
+    conn.commit()
+    conn.close()
+    svc = PassiveTikTokSyncService(profile_repo=repo, db_path=db)
+    with patch.object(svc.client, "get_profile_cookie_header", return_value="sessionid=x"), patch.object(
+        svc.client, "request_api", return_value={}
+    ), patch.object(svc.client, "fetch_audience_intelligence", return_value={}), patch.object(
+        svc.client, "fetch_publish_settings", return_value={}
+    ), patch.object(
+        svc.client, "fetch_video_deep_analytics", return_value={"search_terms": [], "retention": {}}
+    ) as fetch, patch("src.infrastructure.tiktok.passive_sync_service.download_and_cache_avatar"):
+        svc.sync_profile_deep_creator_api(pid)
+        assert sorted(c.args[1] for c in fetch.call_args_list) == ["90", "91", "92", "93", "94"]
+        fetch.reset_mock()
+        svc.sync_profile_deep_creator_api(pid)
+        assert fetch.call_count == 0
+
+
+@pytest.mark.parametrize(
+    "status, text",
+    [
+        ("can_appeal", "Có thể kháng cáo"),
+        ("under_review", "Đang xét kháng cáo"),
+        ("penalized", "Đã xử phạt"),
+        ("appealed", "Đã nộp kháng cáo"),
+        ("pending", "Chờ giải trình"),
+        ("", "Chờ giải trình"),
+        ("new_tiktok_state", "new_tiktok_state"),
+    ],
+)
+def test_violation_status_is_shown_in_vietnamese(status, text):
+    """TikTok's real states (can_appeal / under_review / penalized) were shown raw in English."""
+    from src.presentation.dialogs.account_health_dialog import violation_status_text
+
+    assert violation_status_text(status) == text
+
+
+def test_violation_date_column_is_the_penalty_date_not_a_deadline(qtbot):
+    """getPenaltyDetails sends penalties[0].date = the day TikTok penalized the video (no deadline at all):
+    "Hạn nộp đơn kháng cáo" made a still-appealable video look expired."""
+    from src.presentation.dialogs import account_health_dialog as ahd
+
+    labels = ahd.VIOLATION_COLUMNS
+    assert "Hạn nộp đơn kháng cáo" not in labels
+    assert labels[3] == "Ngày bị xử phạt"
+
+
+def test_schedule_start_is_shown_day_first_24h(qtbot):
+    """The system (US) locale showed 08/11 06:00 as "11/8/2026 6:00 AM": read as 11 August by Vietnamese users."""
+    from datetime import datetime
+
+    from PyQt6.QtCore import QDateTime
+    from src.presentation.dialogs.schedule_dialog import ScheduleVideoDialog
+
+    dlg = ScheduleVideoDialog(video_count=1)
+    qtbot.addWidget(dlg)
+    dlg.dt_start.setDateTime(QDateTime(datetime(2026, 11, 8, 18, 5)))
+    assert dlg.dt_start.text() == "08/11/2026 18:05"
+
+
+def test_violation_status_column_is_not_truncated(qtbot):
+    from PyQt6.QtWidgets import QHeaderView
+    from src.presentation.dialogs.account_health_dialog import AccountHealthDialog
+
+    dlg = AccountHealthDialog(profile_id=999)
+    qtbot.addWidget(dlg)
+    header = dlg.table_violate.horizontalHeader()
+    assert header.sectionResizeMode(4) == QHeaderView.ResizeMode.ResizeToContents

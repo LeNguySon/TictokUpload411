@@ -31,3 +31,13 @@
 - Đừng gán `widget.mousePressEvent = fn`: mypy báo `method-assign` và CI đỏ. Dùng `ClickableLabel` (signal `clicked`) trong `src/presentation/widgets/clickable_label.py`.
 - Số liệu thay đổi chậm (phân tích sâu theo video, 2 request/video) phải có cửa sổ làm mới: `DEEP_VIDEO_REFRESH_HOURS = 6`.
   - Video chưa có dữ liệu cũng được ghi lại lần thử, để không bị hỏi lại ở mỗi lần sync.
+
+## Kiểm chứng trên tài khoản thật @swall.pain (2026-11-07)
+- Chỉ test giả lập (mock) thì không bắt được các lỗi dưới đây. Mỗi lần sửa phần thu thập dữ liệu, hãy chạy probe thật trên profile 78 để đếm request và đo thời gian.
+- `getHashCount`: gọi `POST {}` thì không có phản hồi (treo 10 giây × 2 lần mỗi lần sync). Phải dùng `GET`; dữ liệu nằm dưới `CountData.<uid>` → dùng `hash_count_data()`.
+- `video_finish_rate_realtime` luôn trả `null`. Tỷ lệ xem hết = điểm cuối của đường cong `video_retention_rate_realtime`.
+- `getPenaltyDetails.penalties[0].date` là NGÀY XỬ PHẠT. TikTok không gửi hạn chót kháng cáo, nên đừng gọi cột này là "hạn".
+- Trạng thái thật của TikTok là `can_appeal` / `under_review` / `penalized`. Phải dịch hết qua `violation_status_text()`.
+- Ô chọn ngày giờ phải đặt `setDisplayFormat("dd/MM/yyyy HH:mm")`. Locale Mỹ hiển thị 08/11 thành "11/8", người dùng đọc nhầm sang tháng 8.
+- Cửa sổ làm mới dữ liệu: chọn top N TRƯỚC rồi mới lọc bản còn mới. Lọc trước rồi `LIMIT` thì vòng lặp sẽ trượt xuống N video cũ tiếp theo ở mỗi lần sync.
+- Kết quả: mỗi lần sync giảm từ 18 → 8 request và từ 21 → 5,5 giây.

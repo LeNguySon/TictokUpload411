@@ -26,6 +26,7 @@ from src.infrastructure.tiktok.gologin_tiktok_client import (
     GoLoginTikTokClient,
     parse_cookies_to_header,
 )
+from src.infrastructure.tiktok.network_sniffer import hash_count_data
 
 logger = logging.getLogger(__name__)
 
@@ -129,7 +130,7 @@ class TikTokModerationService:
         """
         Fetches official TikTok Studio 2026 account standing, active strikes, and video count ratio.
         Endpoints:
-        - POST https://www.tiktok.com/tiktokstudio/api/web/counter/getHashCount
+        - GET https://www.tiktok.com/tiktokstudio/api/web/counter/getHashCount
         - POST https://www.tiktok.com/tiktok/creator/manage/item_list/v1/
         """
         entitlements.require(Feature.CHANNEL_HEALTH)  # Gói 3
@@ -160,8 +161,9 @@ class TikTokModerationService:
                     }
                 # Query 2026 TikTok Studio Counter via _request_tiktok_api wrapper
                 url_counter = "https://www.tiktok.com/tiktokstudio/api/web/counter/getHashCount"
-                data = self._request_tiktok_api(
-                    url_counter, cookie_hdr, ua, profile_id=profile_id, method="POST", json_data={}
+                # GET (a POST {} gets no answer: 10 s timeout); counters are under CountData.<uid>.
+                data = hash_count_data(
+                    self._request_tiktok_api(url_counter, cookie_hdr, ua, profile_id=profile_id, method="GET")
                 )
 
             # Check if direct/legacy standing mock was supplied

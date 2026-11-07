@@ -136,6 +136,11 @@ def parse_retention_data(
                 except (ValueError, TypeError):
                     continue
 
+    if finish_rate_pct == 0.0 and points:
+        # TikTok answers null for video_finish_rate_realtime (live, 2026-11): the end of the retention curve is
+        # the share of viewers still watching at the last second, i.e. the completion rate.
+        finish_rate_pct = points[-1]["retention"]
+
     return {
         "finish_rate": finish_rate_pct,
         "points": points,

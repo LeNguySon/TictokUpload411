@@ -157,6 +157,7 @@ class ScheduleVideoDialog(QDialog):
 
         # Start Date Time
         self.dt_start = DateTimeEdit(self)
+        self.dt_start.setDisplayFormat("dd/MM/yyyy HH:mm")  # not the system (US) locale: 11/8 read as 11 August
         self.dt_start.setDateTime(QDateTime.currentDateTime().addSecs(1200))  # +20 minutes
         form.addRow("Thời gian bắt đầu:", self.dt_start)
 

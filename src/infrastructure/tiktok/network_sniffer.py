@@ -24,6 +24,17 @@ logger = logging.getLogger(__name__)
 _AUTO_PROFILE_NAME = re.compile(r"^Profile_[0-9A-Za-z-]{8}$")  # f"Profile_{uuid[:8]}"
 
 
+def hash_count_data(res: dict[str, Any]) -> dict[str, Any]:
+    """The counters of a getHashCount answer: ``{"CountData": {"<uid>": {"item_count": "79", ...}}}`` -> inner dict
+    (an already flat dict is returned as is)."""
+    count_data = res.get("CountData") if isinstance(res, dict) else None
+    if isinstance(count_data, dict):
+        for value in count_data.values():
+            if isinstance(value, dict):
+                return value
+    return res if isinstance(res, dict) else {}
+
+
 class TikTokNetworkSniffer:
     """
     Passively parses intercepted TikTok API JSON payloads and updates SQLite profiles,
@@ -253,6 +264,7 @@ class TikTokNetworkSniffer:
 
         # 2b. Counter / HashCount (/tiktokstudio/api/web/counter/getHashCount)
         if "/counter/gethashcount" in url_lower:
+            data = hash_count_data(data)
             if "item_count" in data:
                 updates["total_videos"] = int(data["item_count"])
             if "like_count" in data:
