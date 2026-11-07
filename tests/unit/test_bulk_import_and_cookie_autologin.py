@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from PyQt6.QtWidgets import QApplication
+from src.application.workers.task_worker import drain_ui_tasks
 from src.infrastructure.database.repositories.profile_repository import ProfileRepository
 from src.infrastructure.database.repositories.project_repository import ProjectRepository
 from src.infrastructure.database.repositories.proxy_repository import ProxyRepository
@@ -174,6 +175,7 @@ def test_bulk_add_profile_dialog_import_all_execution(qapp, tmp_path):
         ),
     ):
         dlg._on_import_all()
+        assert drain_ui_tasks(timeout_s=15)  # the import runs off the GUI thread
 
     # Verify profile created in DB
     profiles = profile_repo.list_all()

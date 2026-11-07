@@ -39,6 +39,7 @@ def _import_with_seed(qapp, repos, seed_side_effect):
         patch.object(mod, "InfoBar") as info,
     ):
         dlg._on_import_all()
+        assert drain_ui_tasks(timeout_s=15)  # the import runs off the GUI thread
     return info
 
 

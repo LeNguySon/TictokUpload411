@@ -18,6 +18,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+from src.application.workers.task_worker import drain_ui_tasks
 from src.infrastructure.browser.cookie_injector import BrowserCookieInjector
 from src.infrastructure.browser.orbita_launcher import OrbitaLauncher
 from src.infrastructure.database.migrations.runner import run_all_migrations
@@ -98,6 +99,7 @@ def test_bulk_add_gives_each_row_its_own_proxy(qtbot, repos, daemon_dir, offline
         "src.presentation.dialogs.bulk_add_profile_dialog.InfoBar"
     ):
         dlg._on_import_all()
+        assert drain_ui_tasks(timeout_s=15)  # the import runs off the GUI thread
 
     by_name = {p["name"]: p for p in profile_repo.list_all()}
     host = {px["id"]: px["host"] for px in proxy_repo.list_all()}
@@ -135,6 +137,7 @@ def test_bulk_add_offline_creates_one_folder_per_profile(qtbot, repos, daemon_di
         "src.presentation.dialogs.bulk_add_profile_dialog.InfoBar"
     ):
         dlg._on_import_all()
+        assert drain_ui_tasks(timeout_s=15)  # the import runs off the GUI thread
 
     profiles = profile_repo.list_all()
     folders = sorted(p for p in daemon_dir.iterdir() if p.is_dir())

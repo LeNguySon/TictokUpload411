@@ -4,10 +4,14 @@ and automatic browser cookie injection for zero-click TikTok login.
 """
 
 import logging
+import threading
 import time
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from typing import Any
 
-from PyQt6.QtCore import Qt
+from PyQt6 import sip
+from PyQt6.QtCore import QObject, Qt, pyqtSignal
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
     QDialog,
@@ -31,6 +35,7 @@ from qfluentwidgets import (
 )
 
 from src.application.parsers.profile_import_parser import PRESETS, ProfileImportParser
+from src.application.workers.task_worker import run_task
 from src.infrastructure.browser.cookie_injector import BrowserCookieInjector
 from src.infrastructure.credentials.windows_vault import WindowsCredentialVault
 from src.infrastructure.database.repositories.profile_repository import ProfileRepository
@@ -61,6 +66,122 @@ def parse_bulk_profile_line(line: str, default_name_prefix: str = "TikTok") -> d
 logger = logging.getLogger(__name__)
 
 
+@dataclass
+class ImportSummary:
+    created: int = 0
+    injected: int = 0
+    bad_proxy_rows: list[str] = field(default_factory=list)
+    cookie_failed_rows: list[str] = field(default_factory=list)
+    cancelled: bool = False
+
+
+def import_profiles(
+    rows: list[dict[str, Any]],
+    *,
+    profile_repo: ProfileRepository,
+    project_repo: ProjectRepository,
+    proxy_repo: ProxyRepository,
+    project_id: int | None,
+    auto_inject: bool,
+    progress: Callable[[int, int], None] | None = None,
+    cancelled: Callable[[], bool] | None = None,
+) -> ImportSummary:
+    """Creates one profile per parsed row (daemon profile, proxy, cookies). Blocking network + DB work:
+    run it off the GUI thread. ``progress(done, total)`` after each row; ``cancelled()`` is checked before
+    each row (the row in flight always completes)."""
+    from src.application.services.gologin_sync_service import GoLoginSyncService
+
+    summary = ImportSummary()
+    sync_svc = GoLoginSyncService(profile_repo=profile_repo, project_repo=project_repo, proxy_repo=proxy_repo)
+
+    for index, r in enumerate(rows, start=1):
+        if cancelled is not None and cancelled():
+            summary.cancelled = True
+            break
+        user_name = r.get("user") or f"TikTok_{int(time.time() * 1000) % 100000}"
+        proxy_raw = r.get("proxy")
+        cookie = r.get("cookie")
+        password = r.get("pass")
+        email = r.get("email")
+        pass_mail = r.get("pass_mail")
+        refresh_token = r.get("refresh_token")
+        client_id = r.get("client_id")
+        cookie_email = r.get("cookie_email")
+        note = r.get("note")
+
+        # The id of THIS row's proxy (it used to take the last proxy of the table: wrong proxy for
+        # existing/duplicate proxies and a random one for an unparsable line).
+        proxy_id = proxy_repo.import_line(proxy_raw) if proxy_raw else None
+        if proxy_raw and proxy_id is None:
+            summary.bad_proxy_rows.append(user_name)
+
+        extra_fields = {
+            "password": password,
+            "email": email,
+            "email_backup_password": pass_mail,
+            "refresh_token": refresh_token,
+            "client_id": client_id,
+            "cookie_email": cookie_email,
+            "notes": note,
+        }
+
+        try:
+            prof_id = sync_svc.create_real_gologin_profile(
+                name=user_name,
+                project_id=project_id,
+                proxy_id=proxy_id,
+                cookie=cookie,
+                extra_fields=extra_fields,
+            )
+        except Exception:
+            import uuid
+
+            from src.infrastructure.browser.orbita_launcher import OrbitaLauncher
+
+            p_uuid = str(uuid.uuid4())
+            prof_dir = OrbitaLauncher.resolve_profile_dir({"uuid": p_uuid, "name": user_name})
+            prof_dir.mkdir(parents=True, exist_ok=True)
+
+            profile_data = {
+                "uuid": p_uuid,
+                "name": user_name,
+                "project_id": project_id,
+                "proxy_id": proxy_id,
+                "storage_dir": str(prof_dir),
+                "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/152.0.0.0",
+                "status": "LIVE" if (cookie and "sessionid=" in cookie) else "stopped",
+                "cookie": cookie,
+                **extra_fields,
+            }
+            prof_id = profile_repo.create(profile_data)
+
+        # The account password is kept in extra_fields (profiles.password). A Vault copy used to be
+        # attempted here through a method the Vault never had (AttributeError, silently swallowed).
+
+        # Auto inject cookies into local Chromium SQLite
+        if auto_inject and cookie:
+            p_row = profile_repo.get_by_id(prof_id)
+            if p_row:
+                try:
+                    from src.infrastructure.browser.orbita_launcher import OrbitaLauncher
+
+                    target_p_dir = OrbitaLauncher.resolve_profile_dir(p_row)
+                    BrowserCookieInjector.seed_profile_cookies(target_p_dir, cookie)
+                    summary.injected += 1
+                except Exception as exc:
+                    logger.warning("Cookie seeding failed for imported profile %s: %s", user_name, exc)
+                    summary.cookie_failed_rows.append(user_name)
+
+        summary.created += 1
+        if progress is not None:
+            progress(index, len(rows))
+    return summary
+
+
+class _ImportSignals(QObject):
+    progress = pyqtSignal(int, int)  # done, total (emitted from the import thread)
+
+
 class BulkAddProfileDialog(QDialog):
     """
     Enterprise Dialog for batch importing TikTok MMO accounts with custom field ordering
@@ -79,6 +200,10 @@ class BulkAddProfileDialog(QDialog):
         self.project_repo = project_repo
         self.proxy_repo = proxy_repo
         self.vault = WindowsCredentialVault()
+        self._import_running = False
+        self._import_cancel = threading.Event()
+        self._import_signals = _ImportSignals()
+        self._import_signals.progress.connect(self._on_import_progress)
 
         self.setWindowTitle("Thêm Hàng Loạt Hồ Sơ TikTok (Hỗ Trợ 8 Trường MMO & Auto-Login)")
         self.resize(880, 620)
@@ -346,99 +471,61 @@ class BulkAddProfileDialog(QDialog):
                 parent=self,
             )
             return
+        if self._import_running:
+            return
 
-        target_project_id = self.combo_project.currentData()
-        auto_inject = self.chk_auto_inject_cookie.isChecked()
-        created_count = 0
-        injected_count = 0
-        bad_proxy_rows: list[str] = []
-        cookie_failed_rows: list[str] = []
+        self._import_running = True
+        self._import_cancel.clear()
+        self.btn_import.setEnabled(False)
+        self.btn_preview.setEnabled(False)
+        self.btn_import.setText(f"Đang nhập 0/{len(rows)}...")
 
-        from src.application.services.gologin_sync_service import GoLoginSyncService
-
-        sync_svc = GoLoginSyncService(
+        run_task(
+            import_profiles,
+            rows,
             profile_repo=self.profile_repo,
             project_repo=self.project_repo,
             proxy_repo=self.proxy_repo,
+            project_id=self.combo_project.currentData(),
+            auto_inject=self.chk_auto_inject_cookie.isChecked(),
+            progress=self._import_signals.progress.emit,  # queued to the GUI thread
+            cancelled=self._import_cancel.is_set,
+            on_result=self._on_import_finished,
+            on_error=self._on_import_failed,
         )
 
-        for r in rows:
-            user_name = r.get("user") or f"TikTok_{int(time.time() * 1000) % 100000}"
-            proxy_raw = r.get("proxy")
-            cookie = r.get("cookie")
-            password = r.get("pass")
-            email = r.get("email")
-            pass_mail = r.get("pass_mail")
-            refresh_token = r.get("refresh_token")
-            client_id = r.get("client_id")
-            cookie_email = r.get("cookie_email")
-            note = r.get("note")
+    def _on_import_progress(self, done: int, total: int) -> None:
+        if not sip.isdeleted(self):
+            self.btn_import.setText(f"Đang nhập {done}/{total}...")
 
-            # The id of THIS row's proxy (it used to take the last proxy of the table: wrong proxy for
-            # existing/duplicate proxies and a random one for an unparsable line).
-            proxy_id = self.proxy_repo.import_line(proxy_raw) if proxy_raw else None
-            if proxy_raw and proxy_id is None:
-                bad_proxy_rows.append(user_name)
+    def _import_finished_ui(self) -> bool:
+        """Resets the running state; False if the dialog is gone or was closed (nothing to show)."""
+        self._import_running = False
+        if sip.isdeleted(self) or self._import_cancel.is_set():
+            return False
+        self.btn_import.setEnabled(True)
+        self.btn_preview.setEnabled(True)
+        self.btn_import.setText("Nhập Tất Cả Vào Hệ Thống")
+        return True
 
-            extra_fields = {
-                "password": password,
-                "email": email,
-                "email_backup_password": pass_mail,
-                "refresh_token": refresh_token,
-                "client_id": client_id,
-                "cookie_email": cookie_email,
-                "notes": note,
-            }
+    def _on_import_failed(self, err: str) -> None:
+        logger.error("Bulk profile import failed: %s", err)
+        if self._import_finished_ui():
+            InfoBar.error(title="Lỗi Nhập Hồ Sơ", content=err, position=InfoBarPosition.TOP, parent=self)
 
-            try:
-                prof_id = sync_svc.create_real_gologin_profile(
-                    name=user_name,
-                    project_id=target_project_id,
-                    proxy_id=proxy_id,
-                    cookie=cookie,
-                    extra_fields=extra_fields,
-                )
-            except Exception:
-                import uuid
+    def reject(self) -> None:
+        if self._import_running:
+            self._import_cancel.set()  # stop before the next row; the row in flight completes
+        super().reject()
 
-                from src.infrastructure.browser.orbita_launcher import OrbitaLauncher
-
-                p_uuid = str(uuid.uuid4())
-                prof_dir = OrbitaLauncher.resolve_profile_dir({"uuid": p_uuid, "name": user_name})
-                prof_dir.mkdir(parents=True, exist_ok=True)
-
-                profile_data = {
-                    "uuid": p_uuid,
-                    "name": user_name,
-                    "project_id": target_project_id,
-                    "proxy_id": proxy_id,
-                    "storage_dir": str(prof_dir),
-                    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/152.0.0.0",
-                    "status": "LIVE" if (cookie and "sessionid=" in cookie) else "stopped",
-                    "cookie": cookie,
-                    **extra_fields,
-                }
-                prof_id = self.profile_repo.create(profile_data)
-
-            # The account password is kept in extra_fields (profiles.password). A Vault copy used to be
-            # attempted here through a method the Vault never had (AttributeError, silently swallowed).
-
-            # Auto inject cookies into local Chromium SQLite
-            if auto_inject and cookie:
-                p_row = self.profile_repo.get_by_id(prof_id)
-                if p_row:
-                    try:
-                        from src.infrastructure.browser.orbita_launcher import OrbitaLauncher
-
-                        target_p_dir = OrbitaLauncher.resolve_profile_dir(p_row)
-                        BrowserCookieInjector.seed_profile_cookies(target_p_dir, cookie)
-                        injected_count += 1
-                    except Exception as exc:
-                        logger.warning("Cookie seeding failed for imported profile %s: %s", user_name, exc)
-                        cookie_failed_rows.append(user_name)
-
-            created_count += 1
-
+    def _on_import_finished(self, summary: ImportSummary) -> None:
+        if not self._import_finished_ui():
+            logger.info("Bulk import stopped after %d profile(s): dialog closed", summary.created)
+            return
+        created_count = summary.created
+        injected_count = summary.injected
+        cookie_failed_rows = summary.cookie_failed_rows
+        bad_proxy_rows = summary.bad_proxy_rows
         inject_msg = f" Đã nạp cookie tự động đăng nhập cho {injected_count} tài khoản." if injected_count > 0 else ""
         if cookie_failed_rows:
             InfoBar.warning(
