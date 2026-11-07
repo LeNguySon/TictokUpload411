@@ -24,3 +24,10 @@
   - Hậu quả: SQLite chạy trên GUI thread giữa các test khác (test flaky) và CI crash access violation.
 - Dùng `self._defer(ms, slot)`: tạo `QTimer(self)` single-shot, `closeEvent` gọi `_stop_deferred_jobs()`. Prewarm giãn cách theo hàng đợi (`_prewarm_next`), không bắn 9 singleShot cùng lúc.
 - Cách bắt lỗi kiểu này: plugin pytest ghi lại "job nổ trong test nào / cửa sổ được tạo ở test nào". Hai giá trị phải luôn trùng nhau.
+
+## "Không biết" khác với "Tắt" (review 1228668 + telemetry)
+- Khi `fetch_publish_settings` thất bại (lỗi mạng, HTTP 403, hoặc TikTok trả `status_code` khác 0 trong HTTP 200), code cũ vẫn lưu cả 3 cờ là `False`, tức là báo sai "kiểm tra bản quyền đang TẮT".
+  - Khi thất bại phải trả `{}`, và nơi gọi không lưu gì.
+- Đừng gán `widget.mousePressEvent = fn`: mypy báo `method-assign` và CI đỏ. Dùng `ClickableLabel` (signal `clicked`) trong `src/presentation/widgets/clickable_label.py`.
+- Số liệu thay đổi chậm (phân tích sâu theo video, 2 request/video) phải có cửa sổ làm mới: `DEEP_VIDEO_REFRESH_HOURS = 6`.
+  - Video chưa có dữ liệu cũng được ghi lại lần thử, để không bị hỏi lại ở mỗi lần sync.

@@ -155,3 +155,64 @@ def test_radar_escapes_competitor_titles_from_tiktok(db, qtbot):
     creators = next(t for t in texts if "Kênh đối thủ" in t)
     assert "&lt;b&gt;bold&lt;/b&gt; &amp; co" in videos and "5,000 views" in videos
     assert "@a&lt;i&gt;b" in creators and "1,200 flw" in creators
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        {"status_code": -1, "error": "proxy down"},  # request failed
+        {"_status_code": 403, "text": "Forbidden"},  # blocked
+        {"_status_code": 200, "status_code": 8, "status_msg": "login required"},  # TikTok API error
+        {"_status_code": 200},  # no settings in the answer
+    ],
+)
+def test_publish_settings_failure_is_not_reported_as_checks_off(tmp_path, response):
+    """A failed call used to be stored as "auto copyright check: OFF" (all False)."""
+    from src.infrastructure.tiktok.gologin_tiktok_client import GoLoginTikTokClient
+
+    client = GoLoginTikTokClient(db_path=tmp_path / "app.db")
+    with patch.object(client, "request_api", return_value=response):
+        assert client.fetch_publish_settings(profile_id=1) == {}
+
+
+def test_video_deep_analytics_is_not_refetched_within_6_hours(db):
+    """Each video cost 2 TikTok requests on EVERY sync (10 of the 13 deep-sync calls)."""
+    from src.infrastructure.tiktok.passive_sync_service import PassiveTikTokSyncService
+
+    repo = ProfileRepository(db)
+    pid = repo.create(name="ch", project_id=1, cookies_json='[{"name": "sessionid", "value": "x"}]')
+    conn = get_db_connection(db)
+    for i in range(3):
+        conn.execute("INSERT INTO videoTables (profile_id, video_id, views) VALUES (?, ?, ?);", (pid, f"7{i}", 100 - i))
+    conn.commit()
+    conn.close()
+    svc = PassiveTikTokSyncService(profile_repo=repo, db_path=db)
+    with_data = {"search_terms": [{"keyword": "k", "percentage": 50}], "retention": {"points": [1], "finish_rate": 9}}
+
+    def deep(_pid, vid):
+        return with_data if vid == "70" else {"search_terms": [], "retention": {}}  # 71/72: TikTok has nothing
+
+    with patch.object(svc.client, "get_profile_cookie_header", return_value="sessionid=x"), patch.object(
+        svc.client, "request_api", return_value={}
+    ), patch.object(svc.client, "fetch_audience_intelligence", return_value={}), patch.object(
+        svc.client, "fetch_publish_settings", return_value={}
+    ), patch.object(svc.client, "fetch_video_deep_analytics", side_effect=deep) as fetch, patch(
+        "src.infrastructure.tiktok.passive_sync_service.download_and_cache_avatar"
+    ):
+        svc.sync_profile_deep_creator_api(pid)
+        assert sorted(c.args[1] for c in fetch.call_args_list) == ["70", "71", "72"]
+        fetch.reset_mock()
+        svc.sync_profile_deep_creator_api(pid)
+        assert fetch.call_count == 0  # all fresh, with or without data
+
+        conn = get_db_connection(db)
+        conn.execute("UPDATE video_deep_analytics SET updated_at = datetime('now', '-7 hours') WHERE aweme_id='71';")
+        conn.commit()
+        conn.close()
+        svc.sync_profile_deep_creator_api(pid)
+        assert [c.args[1] for c in fetch.call_args_list] == ["71"]
+
+    conn = get_db_connection(db)
+    row = conn.execute("SELECT finish_rate FROM videoTables WHERE video_id='70';").fetchone()
+    conn.close()
+    assert row["finish_rate"] == 9

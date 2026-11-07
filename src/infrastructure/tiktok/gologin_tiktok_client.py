@@ -299,6 +299,17 @@ class GoLoginTikTokClient:
         """Queries /tiktok/v1/creator/publish_setting/ to verify automated copyright and content check toggles."""
         url = "https://www.tiktok.com/tiktok/v1/creator/publish_setting/?aid=1988&app_name=tiktok_web"
         res = self.request_api(profile_id, url, method="GET", timeout=10)
+        keys = ("enable_auto_music_copyright_check", "enable_auto_post_check", "disable_tto_plus_showcase")
+        failed = (
+            "error" in res
+            or res.get("_status_code", 200) != 200
+            or res.get("status_code") not in (None, 0)  # TikTok API error inside an HTTP 200
+            or not any(k in res for k in keys)
+        )
+        if failed:
+            # Unknown, not "checks OFF": the caller stores nothing instead of a false "copyright check disabled".
+            logger.debug("Publish settings unavailable for profile %s: %s", profile_id, res.get("status_msg") or res.get("error"))
+            return {}
         return {
             "enable_auto_music_copyright_check": bool(res.get("enable_auto_music_copyright_check")),
             "enable_auto_post_check": bool(res.get("enable_auto_post_check")),

@@ -50,6 +50,9 @@ class PassiveTikTokSyncService:
     and live CDP network payloads for managed TikTok MMO profiles.
     """
 
+    # Per-video deep analytics (2 TikTok requests each) are asked again only after this many hours.
+    DEEP_VIDEO_REFRESH_HOURS = 6
+
     def __init__(
         self,
         profile_repo: ProfileRepository,
@@ -471,17 +474,35 @@ class PassiveTikTokSyncService:
 
             from src.infrastructure.database.connection import db_session
 
-            # Fetch top 5 most viewed videos for this profile
+            # Top 5 most viewed videos not refreshed in the last DEEP_VIDEO_REFRESH_HOURS: each costs 2 TikTok
+            # requests, so asking again on every sync was 10 of the 13 deep-sync calls for slowly changing data.
             with db_session(self.db_path) as conn:
                 v_rows = conn.execute(
-                    "SELECT video_id FROM videoTables WHERE profile_id=? ORDER BY views DESC, id DESC LIMIT 5;",
-                    (profile_id,)
+                    """
+                    SELECT v.video_id FROM videoTables v
+                    LEFT JOIN video_deep_analytics d ON d.aweme_id = v.video_id
+                    WHERE v.profile_id = ?
+                      AND (d.updated_at IS NULL OR d.updated_at < datetime('now', ?))
+                    ORDER BY v.views DESC, v.id DESC LIMIT 5;
+                    """,
+                    (profile_id, f"-{self.DEEP_VIDEO_REFRESH_HOURS} hours"),
                 ).fetchall()
                 v_ids = [r["video_id"] for r in v_rows if r["video_id"]]
 
             for vid in v_ids:
                 try:
                     v_analytics = self.client.fetch_video_deep_analytics(profile_id, vid)
+                    if not (v_analytics.get("search_terms") or (v_analytics.get("retention") or {}).get("points")):
+                        # TikTok has nothing for this video yet: remember the attempt (refresh window) only.
+                        with db_session(self.db_path) as conn:
+                            conn.execute(
+                                """
+                                INSERT INTO video_deep_analytics (aweme_id, profile_id, updated_at)
+                                VALUES (?, ?, CURRENT_TIMESTAMP)
+                                ON CONFLICT(aweme_id) DO UPDATE SET updated_at = CURRENT_TIMESTAMP;
+                                """,
+                                (vid, profile_id),
+                            )
                     if v_analytics and (v_analytics.get("search_terms") or v_analytics.get("retention", {}).get("points")):
                         st_json = _json.dumps(v_analytics.get("search_terms") or [], ensure_ascii=False)
                         ts_json = _json.dumps(v_analytics.get("traffic_sources") or {}, ensure_ascii=False)

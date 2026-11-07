@@ -94,6 +94,7 @@ from src.presentation.dialogs.table_settings_dialog import TableSettingsDialog
 from src.presentation.dialogs.trash_dialog import TrashDialog
 from src.presentation.dialogs.user_guide_dialog import UserGuideDialog
 from src.presentation.dialogs.video_metadata_dialog import VideoMetadataDialog
+from src.presentation.widgets.clickable_label import ClickableLabel
 from src.presentation.widgets.fluent_compat import apply_fluent_compat_patches
 from src.presentation.widgets.profile_table_widget import ProfileTableWidget
 from src.presentation.widgets.video_queue_table_widget import VideoQueueTableWidget
@@ -402,12 +403,11 @@ class TikTokManagerMainWindow(QMainWindow):
         self.btn_toggle_video.clicked.connect(self._toggle_video_panel_collapse)
         bottom_toolbar.addWidget(self.btn_toggle_video)
 
-        self.lbl_video_header = QLabel("Bảng video (Đã chọn 0 / 0)", self)
+        self.lbl_video_header = ClickableLabel("Bảng video (Đã chọn 0 / 0)", self)
         self.lbl_video_header.setStyleSheet("font-weight: 600; font-size: 13px; color: #201F1E;")
         self.lbl_video_header.setFixedHeight(34)
-        self.lbl_video_header.setCursor(Qt.CursorShape.PointingHandCursor)
         self.lbl_video_header.setToolTip("Nhấn để thu gọn hoặc mở rộng bảng video (Ctrl+B)")
-        self.lbl_video_header.mousePressEvent = self._on_video_header_clicked
+        self.lbl_video_header.clicked.connect(self._toggle_video_panel_collapse)
         bottom_toolbar.addWidget(self.lbl_video_header)
 
         self.btn_batch_upload = PushButton(FluentIcon.FOLDER, "Nạp Thư Mục Phân Bổ", self)
@@ -789,10 +789,6 @@ class TikTokManagerMainWindow(QMainWindow):
             self.lbl_video_header.setText(f"{base_text} — [Thu gọn - Nhấp để mở]")
         else:
             self.lbl_video_header.setText(base_text)
-
-    def _on_video_header_clicked(self, event: Any) -> None:
-        if event is None or getattr(event, "button", lambda: Qt.MouseButton.LeftButton)() == Qt.MouseButton.LeftButton:
-            self._toggle_video_panel_collapse()
 
     def _toggle_video_panel_collapse(self) -> None:
         if getattr(self, "_is_video_collapsed", False):
