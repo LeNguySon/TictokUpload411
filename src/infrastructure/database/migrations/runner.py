@@ -113,6 +113,13 @@ def run_all_migrations(db_path: Path | str | None = None) -> list[str]:
         # Ensure index exists
         conn.execute("CREATE INDEX IF NOT EXISTS idx_video_registry_schedule ON video_registry(status, schedule_time);")
 
+        # A profile with both a proxy and a WireGuard VPN ran its browser and API through the proxy (the table
+        # showed the VPN): keep what was really used. Assigning one now clears the other (ProfileRepository).
+        conn.execute(
+            "UPDATE profiles SET vpn_config = NULL "
+            "WHERE proxy_id IS NOT NULL AND vpn_config IS NOT NULL AND vpn_config != '';"
+        )
+
     protect_plaintext_secrets(path)
     return get_database_tables(path)
 

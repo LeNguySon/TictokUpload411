@@ -30,6 +30,15 @@ def _apply_cookie_import(payload: dict[str, Any]) -> None:
             payload["session_expires_at"] = None
 
 
+def _exclusive_egress(payload: dict[str, Any]) -> None:
+    """A profile routes through a proxy OR a WireGuard VPN: assigning one clears the other (with both set, the
+    browser and the API used the proxy while the profile table showed "WireGuard VPN")."""
+    if payload.get("proxy_id") and "vpn_config" not in payload:
+        payload["vpn_config"] = None
+    elif payload.get("vpn_config") and "proxy_id" not in payload:
+        payload["proxy_id"] = None
+
+
 class ProfileRepository:
     """Repository for managing the `profiles` table."""
 
@@ -86,6 +95,19 @@ class ProfileRepository:
             cur = conn.execute(sql, tuple(clean_payload.values()))
             assert cur.lastrowid is not None  # always set after a successful INSERT
             return int(cur.lastrowid)
+
+    def proxy_usage_counts(self, profile_ids: list[int] | None = None) -> dict[int, int]:
+        """How many (non-trashed) profiles use each proxy, optionally among ``profile_ids`` only."""
+        sql = "SELECT proxy_id, COUNT(*) FROM profiles WHERE proxy_id IS NOT NULL AND COALESCE(is_trashed, 0) = 0"
+        params: list[Any] = []
+        if profile_ids is not None:
+            if not profile_ids:
+                return {}
+            sql += f" AND id IN ({', '.join('?' for _ in profile_ids)})"
+            params = list(profile_ids)
+        with db_session(self.db_path, write=False) as conn:
+            rows = conn.execute(sql + " GROUP BY proxy_id;", params).fetchall()
+            return {int(r[0]): int(r[1]) for r in rows}
 
     def get_by_id(self, profile_id: int) -> dict[str, Any] | None:
         with db_session(self.db_path, write=False) as conn:
@@ -145,7 +167,8 @@ class ProfileRepository:
 
         placeholders = ", ".join("?" for _ in profile_ids)
         # Assigning a real proxy ends deliberate direct mode, so losing that proxy later is blocked again.
-        direct_sql = ", direct_connection = 0" if proxy_id is not None else ""
+        # ... and replaces a WireGuard VPN (the browser would use the proxy while the table showed the VPN).
+        direct_sql = ", direct_connection = 0, vpn_config = NULL" if proxy_id is not None else ""
         sql = (
             f"UPDATE profiles SET proxy_id = ?{direct_sql}, updated_at = CURRENT_TIMESTAMP "
             f"WHERE id IN ({placeholders});"
@@ -182,6 +205,7 @@ class ProfileRepository:
         payload = dict(fields)
         if "direct_connection" not in payload and (payload.get("proxy_id") or payload.get("vpn_config")):
             payload["direct_connection"] = 0  # a proxy/VPN was assigned: direct mode ends
+        _exclusive_egress(payload)
         if "qg" in payload and "country" not in payload:
             payload["country"] = payload.pop("qg")
         elif "qg" in payload:
@@ -245,6 +269,7 @@ class ProfileRepository:
         _apply_cookie_import(payload)
         if "direct_connection" not in payload and (payload.get("proxy_id") or payload.get("vpn_config")):
             payload["direct_connection"] = 0  # a proxy/VPN was assigned: direct mode ends
+        _exclusive_egress(payload)
 
         with db_session(self.db_path) as conn:
             col_rows = conn.execute("PRAGMA table_info(profiles);").fetchall()

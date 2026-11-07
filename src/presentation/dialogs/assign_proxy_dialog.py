@@ -41,6 +41,33 @@ from src.presentation.dialogs.dialog_helpers import (
 )
 
 
+def shared_proxy_warning(
+    usage: dict[int, int],
+    assigned: dict[int, int],
+    proxy_repo: ProxyRepository,
+    already_on: dict[int, int] | None = None,
+) -> str:
+    """Warning text when a proxy ends up shared by several profiles (one IP for several TikTok accounts lets
+    TikTok link them), "" otherwise. ``usage``: profiles per proxy now; ``assigned``: selected profiles getting
+    each proxy; ``already_on``: selected profiles that already had that proxy (not counted twice)."""
+    already_on = already_on or {}
+    shared: list[str] = []
+    for proxy_id, count in assigned.items():
+        total = usage.get(proxy_id, 0) - already_on.get(proxy_id, 0) + count
+        if total > 1:
+            px = proxy_repo.get_by_id(proxy_id) or {}
+            shared.append(f"{px.get('host', '?')}:{px.get('port', '?')} → {total} hồ sơ")
+    if not shared:
+        return ""
+    more = f" (+{len(shared) - 3} proxy khác)" if len(shared) > 3 else ""
+    return (
+        "Nhiều tài khoản dùng chung 1 IP, TikTok có thể liên kết các tài khoản này với nhau: "
+        + "; ".join(shared[:3])
+        + more
+        + ". Nên dùng mỗi hồ sơ một proxy riêng."
+    )
+
+
 class AssignProxyDialog(QDialog):
     """
     Dialog allowing users to assign existing proxies or bulk paste new proxies
@@ -193,11 +220,22 @@ class AssignProxyDialog(QDialog):
                     parent=self,
                 )
 
+    def _warn_after_close(self, message: str) -> None:
+        """Shown on the main window: the dialog closes right after applying."""
+        InfoBar.warning(
+            title="Proxy dùng chung",
+            content=message,
+            position=InfoBarPosition.TOP,
+            duration=10000,
+            parent=self.parent() or self,
+        )
+
     def _populate_proxies(self) -> None:
         self.combo_proxy.clear()
         self.combo_proxy.addItem("Không dùng proxy (Gỡ bỏ proxy)", userData=None)
 
         proxies = self.proxy_repo.list_all()
+        usage = self.profile_repo.proxy_usage_counts()
         for px in proxies:
             status = px.get("status", "unknown").upper()
             host = px.get("host", "")
@@ -208,6 +246,9 @@ class AssignProxyDialog(QDialog):
 
             ping_str = f"{latency}ms" if latency > 0 else ""
             display_text = f"[{status}] {host}:{port} ({p_type} - {country}) {ping_str}".strip()
+            in_use = usage.get(int(px["id"]), 0)
+            if in_use:
+                display_text += f" — {in_use} hồ sơ đang dùng"
             self.combo_proxy.addItem(display_text, userData=px["id"])
 
         # Last, so it is never picked by accident.
@@ -224,7 +265,17 @@ class AssignProxyDialog(QDialog):
             if chosen_proxy_id == self.DIRECT_CONNECTION:
                 updated_count = self.profile_repo.set_direct_connection(self.profile_ids)
             else:
+                warning = ""
+                if chosen_proxy_id is not None:
+                    warning = shared_proxy_warning(
+                        self.profile_repo.proxy_usage_counts(),
+                        {int(chosen_proxy_id): len(self.profile_ids)},
+                        self.proxy_repo,
+                        already_on=self.profile_repo.proxy_usage_counts(self.profile_ids),
+                    )
                 updated_count = self.profile_repo.bulk_assign_proxy(self.profile_ids, chosen_proxy_id)
+                if updated_count > 0 and warning:
+                    self._warn_after_close(warning)
             if updated_count > 0:
                 self.accept()
             else:
@@ -273,10 +324,17 @@ class AssignProxyDialog(QDialog):
                 )
                 return
 
-            # Allocate sequentially / round-robin
+            # Allocate sequentially / round-robin (fewer proxies than profiles = some profiles share an IP)
+            usage = self.profile_repo.proxy_usage_counts()
+            already_on = self.profile_repo.proxy_usage_counts(self.profile_ids)
+            assigned: dict[int, int] = {}
             for idx, p_id in enumerate(self.profile_ids):
                 assigned_px = new_proxy_ids[idx % len(new_proxy_ids)]
                 self.profile_repo.update(p_id, proxy_id=assigned_px)
+                assigned[assigned_px] = assigned.get(assigned_px, 0) + 1
+            warning = shared_proxy_warning(usage, assigned, self.proxy_repo, already_on=already_on)
+            if warning:
+                self._warn_after_close(warning)
 
             self.accept()
         elif current_tab_idx == 2:

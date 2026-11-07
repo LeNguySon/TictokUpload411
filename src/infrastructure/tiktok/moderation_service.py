@@ -126,6 +126,7 @@ class TikTokModerationService:
         self,
         profile_id: int,
         mock_data: dict[str, Any] | None = None,
+        violations: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """
         Fetches official TikTok Studio 2026 account standing, active strikes, and video count ratio.
@@ -176,7 +177,9 @@ class TikTokModerationService:
             else:
                 item_count = int(data.get("item_count") or p.get("total_videos") or 0)
                 total_item_count = int(data.get("total_item_count") or item_count)
-                violations = self.fetch_video_violations(profile_id)
+                # Callers that just scanned pass ``violations``: the scan is one penalty request PER VIDEO.
+                if violations is None:
+                    violations = self.fetch_video_violations(profile_id)
                 strikes = len(violations)
                 restrictions = []
 
@@ -733,8 +736,8 @@ class TikTokModerationService:
 
     def scan_full_channel_health(self, profile_id: int) -> dict[str, Any]:
         """Runs full health check (Account Standing + Video Violations) in single pipeline."""
-        standing_res = self.fetch_account_standing(profile_id)
-        violations = self.fetch_video_violations(profile_id)
+        violations = self.fetch_video_violations(profile_id)  # once: standing reuses it
+        standing_res = self.fetch_account_standing(profile_id, violations=violations)
         return {
             "profile_id": profile_id,
             "standing": standing_res,

@@ -424,8 +424,9 @@ class PassiveTikTokSyncService:
             from src.infrastructure.tiktok.moderation_service import TikTokModerationService
 
             mod_svc = TikTokModerationService(db_path=self.db_path, client=self.client)
-            mod_svc.fetch_account_standing(profile_id)
-            mod_svc.fetch_video_violations(profile_id)
+            # One penalty scan (a request per video) shared by the standing: it used to run twice per sync.
+            violations = mod_svc.fetch_video_violations(profile_id)
+            mod_svc.fetch_account_standing(profile_id, violations=violations)
 
             # Fallback legacy violation check for backward compatibility
             url_viol = "https://www.tiktok.com/api/creator/violation/"
