@@ -148,6 +148,10 @@ def reserve_due_videos(
 
 class TikTokManagerMainWindow(QMainWindow):
     _active_status_sync_worker: "ProfileRuntimeSyncWorker | None" = None
+    # Start-up jobs (window-owned timers, see _defer): fingerprint backfill, then menu-dialog prewarm.
+    BACKFILL_DELAY_MS = 5000
+    PREWARM_DELAY_MS = 12000
+    PREWARM_STAGGER_MS = 700
     """
     Main Desktop Window implementing the dual-table vertical splitter layout
     with full Windows 11 Fluent UI aesthetics and multithreaded backend integration.
@@ -295,9 +299,11 @@ class TikTokManagerMainWindow(QMainWindow):
         self.session_capture_timer.timeout.connect(self._capture_open_sessions)
         self.session_capture_timer.start()
         # Profiles created before fingerprints were stored get their own fixed one (once, in the background).
-        QTimer.singleShot(5000, self._backfill_fingerprints)
+        self._deferred_timers: list[QTimer] = []
+        self._prewarm_queue: list[tuple[str, Any]] = []
+        self._defer(self.BACKFILL_DELAY_MS, self._backfill_fingerprints)
         # Build the menu dialogs while the app is idle, one at a time, so their first opening is instant too.
-        QTimer.singleShot(12000, lambda: self._prewarm_dialogs(stagger_ms=700))
+        self._defer(self.PREWARM_DELAY_MS, self._prewarm_dialogs_staggered)
 
         self._apply_license()
         if self.license_service is not None:
@@ -899,14 +905,38 @@ class TikTokManagerMainWindow(QMainWindow):
             ),
         }
 
-    def _prewarm_dialogs(self, stagger_ms: int = 0) -> None:
-        """Builds the menu dialogs ahead of their first opening; with ``stagger_ms`` one per tick so the idle
-        GUI never freezes for more than one dialog at a time."""
-        for index, (key, factory) in enumerate(self._dialog_factories().items()):
-            if stagger_ms <= 0:
-                self._dialogs.prewarm(key, factory)
-            else:
-                QTimer.singleShot(index * stagger_ms, lambda k=key, f=factory: self._dialogs.prewarm(k, f))
+    def _defer(self, delay_ms: int, slot: Any) -> QTimer:
+        """A one-shot job OWNED by the window: it dies with the window and closeEvent stops it. A bare
+        QTimer.singleShot lambda outlived closed windows and ran for dead ones (see test_main_window_deferred_timers)."""
+        timer = QTimer(self)
+        timer.setSingleShot(True)
+        timer.timeout.connect(slot)
+        timer.start(delay_ms)
+        self._deferred_timers.append(timer)
+        return timer
+
+    def _stop_deferred_jobs(self) -> None:
+        self._prewarm_queue.clear()
+        for timer in getattr(self, "_deferred_timers", []):
+            timer.stop()
+
+    def _prewarm_dialogs(self) -> None:
+        """Builds every menu dialog now, ahead of its first opening."""
+        for key, factory in self._dialog_factories().items():
+            self._dialogs.prewarm(key, factory)
+
+    def _prewarm_dialogs_staggered(self) -> None:
+        """Builds the menu dialogs one per PREWARM_STAGGER_MS so the idle GUI never freezes for more than one."""
+        self._prewarm_queue = list(self._dialog_factories().items())
+        self._prewarm_next()
+
+    def _prewarm_next(self) -> None:
+        if not self._prewarm_queue:
+            return
+        key, factory = self._prewarm_queue.pop(0)
+        self._dialogs.prewarm(key, factory)
+        if self._prewarm_queue:
+            self._defer(self.PREWARM_STAGGER_MS, self._prewarm_next)
 
     def _on_open_project_manager(self) -> None:
         try:
@@ -2759,6 +2789,7 @@ class TikTokManagerMainWindow(QMainWindow):
 
     def closeEvent(self, event: QCloseEvent | None) -> None:
         """Cleanup Chromium RAM working set and shutdown daemon before closing application."""
+        self._stop_deferred_jobs()
         try:
             if hasattr(self, "_active_status_sync_worker") and self._active_status_sync_worker:
                 self._active_status_sync_worker.cancel()

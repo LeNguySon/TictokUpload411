@@ -17,3 +17,10 @@
 - Số từ API có thể là chuỗi: dùng `_count()`, đừng format `:,` trực tiếp.
 - Dependency bắt buộc (`keyring`) không được bọc `try/except ImportError → None`.
   - Vault sẽ im lặng không lưu token, và mypy đỏ CI.
+
+## Timer khởi động phải thuộc về cửa sổ (CI crash access violation)
+- `QTimer.singleShot(ms, lambda: self...)` trong `__init__` của MainWindow không chết theo cửa sổ.
+  - Trong suite, các timer này nổ 119 lần bên trong các test SAU: 78 lần prewarm 9 dialog cho cửa sổ đã đóng, trên CSDL tạm đã bị xoá.
+  - Hậu quả: SQLite chạy trên GUI thread giữa các test khác (test flaky) và CI crash access violation.
+- Dùng `self._defer(ms, slot)`: tạo `QTimer(self)` single-shot, `closeEvent` gọi `_stop_deferred_jobs()`. Prewarm giãn cách theo hàng đợi (`_prewarm_next`), không bắn 9 singleShot cùng lúc.
+- Cách bắt lỗi kiểu này: plugin pytest ghi lại "job nổ trong test nào / cửa sổ được tạo ở test nào". Hai giá trị phải luôn trùng nhau.
