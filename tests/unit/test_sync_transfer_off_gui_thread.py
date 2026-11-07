@@ -39,6 +39,7 @@ def test_export_then_import_run_off_gui_thread(qtbot, tmp_path: Path) -> None:
     dlg = mod.SyncTransferDialog(src_proj, src_prof, src_px)
     qtbot.addWidget(dlg)
     dlg.txt_export_path.setText(str(zip_path))
+    dlg._ask_passphrase = lambda confirm: "pass phrase 1"  # no modal prompt in tests
     with patch.object(mod, "export_project_dataset", side_effect=spy_export), patch.object(mod, "InfoBar") as info:
         dlg._on_start_export()
         assert not dlg.btn_start_export.isEnabled()
@@ -49,6 +50,7 @@ def test_export_then_import_run_off_gui_thread(qtbot, tmp_path: Path) -> None:
     dlg2 = mod.SyncTransferDialog(dst_proj, dst_prof, dst_px)
     qtbot.addWidget(dlg2)
     dlg2.txt_import_path.setText(str(zip_path))
+    dlg2._ask_passphrase = lambda confirm: "pass phrase 1"
     with patch.object(mod, "import_project_dataset", side_effect=spy_import), patch.object(mod, "InfoBar") as info2:
         dlg2._on_start_import()
         assert not dlg2.btn_start_import.isEnabled()
@@ -56,3 +58,17 @@ def test_export_then_import_run_off_gui_thread(qtbot, tmp_path: Path) -> None:
     assert [p["name"] for p in dst_prof.list_all()] == ["acc_export"] and info2.success.called
 
     assert len(threads) == 2 and threading.main_thread().name not in threads
+
+
+def test_export_without_passphrase_does_nothing(qtbot, tmp_path: Path) -> None:
+    from src.presentation.dialogs import sync_transfer_dialog as mod
+
+    proj, prof, px = _repos(tmp_path / "x.db")
+    dlg = mod.SyncTransferDialog(proj, prof, px)
+    qtbot.addWidget(dlg)
+    dlg.txt_export_path.setText(str(tmp_path / "never.zip"))
+    dlg._ask_passphrase = lambda confirm: None  # user cancelled the prompt
+    with patch.object(mod, "run_task") as run:
+        dlg._on_start_export()
+    run.assert_not_called()
+    assert dlg.btn_start_export.isEnabled()

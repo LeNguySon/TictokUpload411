@@ -106,6 +106,7 @@ def test_sync_transfer_dataset_export_and_import(tmp_path):
         profile_repo=profile_repo,
         proxy_repo=proxy_repo,
         project_repo=project_repo,
+        passphrase="test pass phrase",
     )
     assert exported_count == 1
     assert zip_file.exists()
@@ -122,6 +123,7 @@ def test_sync_transfer_dataset_export_and_import(tmp_path):
         profile_repo=profile_repo_new,
         proxy_repo=proxy_repo_new,
         project_repo=project_repo_new,
+        passphrase="test pass phrase",
     )
     assert imported_profiles == 1
     assert imported_proxies == 1

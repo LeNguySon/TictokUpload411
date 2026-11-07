@@ -15,7 +15,9 @@ from PyQt6.QtWidgets import (
     QDialog,
     QFileDialog,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
+    QLineEdit,
     QRadioButton,
     QTabWidget,
     QVBoxLayout,
@@ -33,6 +35,7 @@ from qfluentwidgets import (
 )
 
 from src.application.workers.task_worker import run_task
+from src.infrastructure.credentials.backup_crypto import decrypt_bundle, encrypt_bundle
 from src.infrastructure.database.repositories.profile_repository import ProfileRepository
 from src.infrastructure.database.repositories.project_repository import ProjectRepository
 from src.infrastructure.database.repositories.proxy_repository import ProxyRepository
@@ -46,6 +49,17 @@ from src.presentation.dialogs.dialog_helpers import (
 logger = logging.getLogger(__name__)
 
 
+LEGACY_MANIFEST = "dataset_manifest.json"
+ENCRYPTED_MANIFEST = "dataset_manifest.json.enc"
+MIN_PASSPHRASE_LEN = 8
+
+
+def bundle_is_encrypted(zip_path: str | Path) -> bool:
+    """True for passphrase-encrypted bundles, False for legacy plaintext ones."""
+    with zipfile.ZipFile(Path(zip_path), "r") as zf:
+        return ENCRYPTED_MANIFEST in zf.namelist()
+
+
 def export_project_dataset(
     zip_path: str | Path,
     project_id: int | None,
@@ -53,8 +67,14 @@ def export_project_dataset(
     proxy_repo: ProxyRepository,
     project_repo: ProjectRepository,
     include_proxies: bool = True,
+    passphrase: str | None = None,
 ) -> int:
-    """Exports active profiles and associated proxies to a portable zip bundle."""
+    """Exports active profiles and associated proxies to a portable zip bundle.
+
+    The manifest carries cookies and passwords, so it is always encrypted with ``passphrase``
+    (``dataset_manifest.json.enc``, see backup_crypto); there is no plaintext export any more."""
+    if not passphrase:
+        raise ValueError("Cần đặt mật khẩu cho file sao lưu (file chứa cookie và mật khẩu)")
     profiles = profile_repo.list_active(project_id=project_id)
     proxies = proxy_repo.list_all() if include_proxies else []
     projects = project_repo.list_all()
@@ -70,7 +90,8 @@ def export_project_dataset(
     out_zip = Path(zip_path)
     out_zip.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(out_zip, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr("dataset_manifest.json", json.dumps(manifest, indent=2, ensure_ascii=False))
+        payload = json.dumps(manifest, ensure_ascii=False).encode("utf-8")
+        zf.writestr(ENCRYPTED_MANIFEST, encrypt_bundle(payload, passphrase))
 
     return len(profiles)
 
@@ -81,16 +102,24 @@ def import_project_dataset(
     proxy_repo: ProxyRepository,
     project_repo: ProjectRepository | None = None,
     overwrite: bool = False,
+    passphrase: str | None = None,
 ) -> tuple[int, int]:
-    """Imports profiles and proxies from a zip bundle into the database."""
+    """Imports profiles and proxies from a zip bundle into the database.
+
+    Encrypted bundles need ``passphrase`` (BackupPasswordError when wrong); legacy plaintext bundles
+    (``dataset_manifest.json``) are still accepted."""
     in_zip = Path(zip_path)
     if not in_zip.exists():
         raise FileNotFoundError(f"File không tồn tại: {zip_path}")
 
     with zipfile.ZipFile(in_zip, "r") as zf:
-        if "dataset_manifest.json" not in zf.namelist():
-            raise ValueError("File sao lưu không hợp lệ (thiếu dataset_manifest.json)")
-        content = zf.read("dataset_manifest.json").decode("utf-8")
+        names = zf.namelist()
+        if ENCRYPTED_MANIFEST in names:
+            content = decrypt_bundle(zf.read(ENCRYPTED_MANIFEST), passphrase or "").decode("utf-8")
+        elif LEGACY_MANIFEST in names:
+            content = zf.read(LEGACY_MANIFEST).decode("utf-8")
+        else:
+            raise ValueError("File sao lưu không hợp lệ (thiếu dataset_manifest)")
         manifest = json.loads(content)
 
     profiles_imported = 0
@@ -315,10 +344,14 @@ class SyncTransferDialog(QDialog):
             )
             return
 
+        passphrase = self._ask_passphrase(confirm=True)
+        if not passphrase:
+            return
         self._run_job(
             self.btn_start_export,
             export_project_dataset,
             {
+                "passphrase": passphrase,
                 "zip_path": out_path,
                 "project_id": self.combo_project_export.currentData(),
                 "profile_repo": self.profile_repo,
@@ -342,10 +375,29 @@ class SyncTransferDialog(QDialog):
             )
             return
 
+        try:
+            encrypted = bundle_is_encrypted(in_path)
+        except (OSError, zipfile.BadZipFile) as e:
+            InfoBar.error(title="File Không Hợp Lệ", content=str(e), position=InfoBarPosition.TOP, parent=self)
+            return
+        passphrase = None
+        if encrypted:
+            passphrase = self._ask_passphrase(confirm=False)
+            if not passphrase:
+                return
+        else:
+            InfoBar.warning(
+                title="File Sao Lưu Không Mã Hoá",
+                content="File này là bản cũ, chứa cookie/mật khẩu dạng chữ thường. Hãy xoá file sau khi nhập.",
+                position=InfoBarPosition.TOP,
+                duration=8000,
+                parent=self,
+            )
         self._run_job(
             self.btn_start_import,
             import_project_dataset,
             {
+                "passphrase": passphrase,
                 "zip_path": in_path,
                 "profile_repo": self.profile_repo,
                 "proxy_repo": self.proxy_repo,
@@ -356,6 +408,40 @@ class SyncTransferDialog(QDialog):
             ok_text=lambda counts: f"Đã khôi phục {counts[0]} hồ sơ và {counts[1]} proxy vào CSDL.",
             fail_title="Nhận Dữ Liệu Thất Bại",
         )
+
+    def _ask_passphrase(self, confirm: bool) -> str | None:
+        """Asks for the bundle passphrase (twice when exporting). None when cancelled or invalid."""
+        first, ok = QInputDialog.getText(
+            self,
+            "Mật Khẩu File Sao Lưu",
+            f"Mật khẩu (tối thiểu {MIN_PASSPHRASE_LEN} ký tự). File chứa cookie và mật khẩu của hồ sơ:"
+            if confirm
+            else "Nhập mật khẩu của file sao lưu:",
+            QLineEdit.EchoMode.Password,
+        )
+        if not ok or not first:
+            return None
+        if confirm:
+            if len(first) < MIN_PASSPHRASE_LEN:
+                InfoBar.warning(
+                    title="Mật Khẩu Quá Ngắn",
+                    content=f"Cần ít nhất {MIN_PASSPHRASE_LEN} ký tự.",
+                    position=InfoBarPosition.TOP,
+                    parent=self,
+                )
+                return None
+            again, ok = QInputDialog.getText(
+                self, "Xác Nhận Mật Khẩu", "Nhập lại mật khẩu:", QLineEdit.EchoMode.Password
+            )
+            if not ok or again != first:
+                InfoBar.warning(
+                    title="Mật Khẩu Không Khớp",
+                    content="Hai lần nhập mật khẩu không giống nhau.",
+                    position=InfoBarPosition.TOP,
+                    parent=self,
+                )
+                return None
+        return str(first)
 
     def _run_job(
         self,

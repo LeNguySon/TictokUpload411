@@ -9,7 +9,6 @@ import sqlite3
 from pathlib import Path
 
 import pytest
-
 from src.infrastructure.credentials.field_crypto import is_protected
 from src.infrastructure.database.connection import db_session, get_db_connection
 from src.infrastructure.database.migrations.runner import run_all_migrations

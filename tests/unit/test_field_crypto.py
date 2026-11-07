@@ -6,7 +6,6 @@ Cookies reach 16 KB, beyond Credential Manager's ~2.5 KB blob limit, so values a
 from __future__ import annotations
 
 import pytest
-
 from src.infrastructure.credentials import field_crypto as fc
 
 
