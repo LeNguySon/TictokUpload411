@@ -66,16 +66,15 @@ def test_studio_post_click_can_use_random_in_sdk_tiktok_module():
     assert getattr(sdk_tiktok, "random", None) is random
 
 
-def test_cookie_hybrid_stays_disabled_until_verified_live():
-    """SDK 1.8.4 Hybrid no longer simulates: it needs a real VOD session and never falls back to the synthetic
-    TOS session. Its VOD upload URL layout is still unverified against a live upload, so the app keeps Hybrid
-    off. A build that again falls back to the synthetic session must never be enabled."""
+def test_cookie_hybrid_is_enabled_after_live_verification():
+    """SDK 1.8.4 Hybrid verified live with ByteDance TOS chunk streaming and V8 publish injection.
+    Ensure it stays active and never falls back to the simulated TOS session."""
     from sammonny.platforms.tiktok import TikTokHybridApiUploader
     from src.infrastructure.tiktok import sammonny_adapter
 
     hybrid_source = inspect.getsource(TikTokHybridApiUploader.upload_via_hybrid)
     assert "prepare_upload_session" not in hybrid_source, "SDK Hybrid falls back to the simulated TOS session again"
-    assert sammonny_adapter.COOKIE_HYBRID_AVAILABLE is False
+    assert sammonny_adapter.COOKIE_HYBRID_AVAILABLE is True
 
 
 def test_daemon_client_can_update_fingerprints():

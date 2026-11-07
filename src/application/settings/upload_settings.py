@@ -17,7 +17,7 @@ class UploadMethod(StrEnum):
 METHOD_LABELS: dict[UploadMethod, str] = {
     UploadMethod.AUTO: "Tự động (khuyến nghị)",
     UploadMethod.OFFICIAL: "API chính thức (OAuth Direct Post)",
-    UploadMethod.HYBRID: "Cookie API (Hybrid) — chưa hoạt động",
+    UploadMethod.HYBRID: "Cookie API (Hybrid) — VOD TOS + V8 Fetch",
     UploadMethod.STUDIO: "Trình duyệt TikTok Studio (DOM)",
 }
 
