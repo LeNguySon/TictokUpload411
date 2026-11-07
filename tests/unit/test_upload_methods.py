@@ -26,6 +26,7 @@ from src.application.settings.upload_settings import (
     load_upload_settings,
     save_upload_settings,
 )
+from src.application.workers.task_worker import drain_ui_tasks
 from src.infrastructure.tiktok.sammonny_adapter import (
     DomUploadBlocked,
     LazyActiveSession,
@@ -263,6 +264,7 @@ def test_settings_dialog_saves_and_applies(qtbot, tmp_path):
     dlg.sw_fallback.setChecked(True)
     dlg.sw_show_browser.setChecked(True)
     dlg._on_save()
+    assert drain_ui_tasks(timeout_s=15)  # new profiles are created off the GUI thread
     saved = load_upload_settings(store)
     assert saved.method is UploadMethod.STUDIO and saved.allow_fallback and saved.studio_show_browser
     assert applied == [saved]

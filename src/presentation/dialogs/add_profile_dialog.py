@@ -5,6 +5,7 @@ Add Profile Dialog for creating individual or bulk TikTok MMO profiles.
 import logging
 from typing import Any
 
+from PyQt6 import sip
 from PyQt6.QtWidgets import (
     QDialog,
     QFormLayout,
@@ -15,12 +16,15 @@ from PyQt6.QtWidgets import (
 from qfluentwidgets import (
     ComboBox,
     FluentIcon,
+    InfoBar,
+    InfoBarPosition,
     LineEdit,
     PlainTextEdit,
     PrimaryPushButton,
     PushButton,
 )
 
+from src.application.workers.task_worker import run_task
 from src.infrastructure.credentials.windows_vault import WindowsCredentialVault
 from src.infrastructure.database.repositories.profile_repository import (
     ProfileRepository,
@@ -38,6 +42,76 @@ from src.presentation.dialogs.dialog_helpers import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def create_profile(
+    *,
+    name: str,
+    project_id: int | None,
+    proxy_id: int | None,
+    cookie: str,
+    token: str,
+    profile_repo: ProfileRepository,
+    project_repo: ProjectRepository,
+    proxy_repo: ProxyRepository,
+    vault: WindowsCredentialVault,
+) -> int:
+    """Creates one profile: SamMonny daemon profile (local fallback when the daemon is unreachable),
+    cookies, Vault token. Blocking network + disk + DB work: run it off the GUI thread."""
+    try:
+        from src.application.services.gologin_sync_service import GoLoginSyncService
+
+        sync_svc = GoLoginSyncService(
+            profile_repo=profile_repo,
+            project_repo=project_repo,
+            proxy_repo=proxy_repo,
+        )
+        profile_id = sync_svc.create_real_gologin_profile(
+            name=name,
+            project_id=project_id,
+            proxy_id=proxy_id,
+            cookie=cookie if cookie else None,
+        )
+    except Exception:
+        # Resilient fallback if daemon is unreachable
+        import uuid
+
+        from src.infrastructure.browser.cookie_injector import BrowserCookieInjector
+        from src.infrastructure.browser.orbita_launcher import OrbitaLauncher
+
+        # One uuid / one folder per profile (the uuid used to be generated twice: orphan empty folder).
+        p_uuid = str(uuid.uuid4())
+        prof_dir = OrbitaLauncher.resolve_profile_dir({"uuid": p_uuid, "name": name})
+        prof_dir.mkdir(parents=True, exist_ok=True)
+
+        profile_data = {
+            "uuid": p_uuid,
+            "name": name,
+            "project_id": project_id,
+            "proxy_id": proxy_id,
+            "storage_dir": str(prof_dir),
+            "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/152.0.0.0",
+            "status": "LIVE" if cookie or token else "stopped",
+            "cookie": cookie if cookie else None,
+        }
+        profile_id = profile_repo.create(profile_data)
+
+        # Auto inject cookies and initialize profile environment
+        if cookie:
+            try:
+                BrowserCookieInjector.seed_profile_cookies(prof_dir, cookie)
+            except Exception as ignored:
+                logger.debug("_on_save: ignored error: %s", ignored)
+        try:
+            launcher = OrbitaLauncher()
+            launcher.prepare_profile_environment(prof_dir, profile_data)
+        except Exception as ignored:
+            logger.debug("_on_save: ignored error: %s", ignored)
+
+    # AgentShield: Save access token to Windows Vault DPAPI
+    if token and profile_id:
+        vault.save_oauth_tokens(profile_id=profile_id, access_token=token)
+    return int(profile_id)
 
 
 class AddProfileDialog(QDialog):
@@ -202,59 +276,33 @@ class AddProfileDialog(QDialog):
             self.accept()
             return
 
-        # 1. Create real GoLogin profile with Bayesian Antidetect Fingerprint
-        try:
-            from src.application.services.gologin_sync_service import GoLoginSyncService
+        # New profile: daemon call + cookie seeding + DB writes off the GUI thread.
+        self.btn_save.setEnabled(False)
+        self.btn_save.setText("Đang tạo hồ sơ...")
 
-            sync_svc = GoLoginSyncService(
-                profile_repo=self.profile_repo,
-                project_repo=self.project_repo,
-                proxy_repo=self.proxy_repo,
-            )
-            profile_id = sync_svc.create_real_gologin_profile(
-                name=name,
-                project_id=project_id,
-                proxy_id=proxy_id,
-                cookie=cookie if cookie else None,
-            )
-        except Exception:
-            # Resilient fallback if daemon is unreachable
-            import uuid
+        def created(_profile_id: int) -> None:
+            if not sip.isdeleted(self):
+                self.accept()
 
-            from src.infrastructure.browser.cookie_injector import BrowserCookieInjector
-            from src.infrastructure.browser.orbita_launcher import OrbitaLauncher
+        def failed(err: str) -> None:
+            logger.error("Profile creation failed: %s", err)
+            if sip.isdeleted(self):
+                return
+            self.btn_save.setEnabled(True)
+            self.btn_save.setText("Lưu Hồ Sơ")
+            InfoBar.error(title="Lỗi Tạo Hồ Sơ", content=err, position=InfoBarPosition.TOP, parent=self)
 
-            # One uuid / one folder per profile (the uuid used to be generated twice: orphan empty folder).
-            p_uuid = str(uuid.uuid4())
-            prof_dir = OrbitaLauncher.resolve_profile_dir({"uuid": p_uuid, "name": name})
-            prof_dir.mkdir(parents=True, exist_ok=True)
-
-            profile_data = {
-                "uuid": p_uuid,
-                "name": name,
-                "project_id": project_id,
-                "proxy_id": proxy_id,
-                "storage_dir": str(prof_dir),
-                "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/152.0.0.0",
-                "status": "LIVE" if cookie or token else "stopped",
-                "cookie": cookie if cookie else None,
-            }
-            profile_id = self.profile_repo.create(profile_data)
-
-            # Auto inject cookies and initialize profile environment
-            if cookie:
-                try:
-                    BrowserCookieInjector.seed_profile_cookies(prof_dir, cookie)
-                except Exception as ignored:
-                    logger.debug("_on_save: ignored error: %s", ignored)
-            try:
-                launcher = OrbitaLauncher()
-                launcher.prepare_profile_environment(prof_dir, profile_data)
-            except Exception as ignored:
-                logger.debug("_on_save: ignored error: %s", ignored)
-
-        # AgentShield: Save access token to Windows Vault DPAPI
-        if token and profile_id:
-            self.vault.save_oauth_tokens(profile_id=profile_id, access_token=token)
-
-        self.accept()
+        run_task(
+            create_profile,
+            name=name,
+            project_id=project_id,
+            proxy_id=proxy_id,
+            cookie=cookie,
+            token=token,
+            profile_repo=self.profile_repo,
+            project_repo=self.project_repo,
+            proxy_repo=self.proxy_repo,
+            vault=self.vault,
+            on_result=created,
+            on_error=failed,
+        )

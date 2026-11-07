@@ -119,6 +119,7 @@ def test_add_one_profile_offline_creates_exactly_one_folder_with_cookies(qtbot, 
     dlg.name_input.setText("Acc One")
     dlg.cookie_input.setPlainText(COOKIE)
     dlg._on_save()
+    assert drain_ui_tasks(timeout_s=15)  # new profiles are created off the GUI thread
 
     [profile] = profile_repo.list_all()
     folders = [p for p in daemon_dir.iterdir() if p.is_dir()]

@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 from PyQt6.QtWidgets import QApplication
+from src.application.workers.task_worker import drain_ui_tasks
 from src.infrastructure.browser.orbita_launcher import OrbitaLauncher
 from src.infrastructure.database.migrations.runner import run_all_migrations
 from src.infrastructure.database.repositories.profile_repository import ProfileRepository
@@ -82,6 +83,7 @@ def test_video_metadata_dialog(qapp):
     dlg = VideoMetadataDialog(video)
     dlg.txt_title.setText("Updated Title")
     dlg._on_save()
+    assert drain_ui_tasks(timeout_s=15)  # new profiles are created off the GUI thread
     assert dlg.video_data["title"] == "Updated Title"
     dlg.close()
 

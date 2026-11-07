@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 from PyQt6.QtWidgets import QApplication
+from src.application.workers.task_worker import drain_ui_tasks
 from src.infrastructure.database.migrations.runner import run_all_migrations
 from src.infrastructure.database.repositories.profile_repository import ProfileRepository
 
@@ -104,6 +105,7 @@ def test_edit_dialog_shows_and_saves_stored_cookie(qapp, qtbot, tmp_path: Path):
 
     dlg.cookie_input.setPlainText("sessionid=NEW")
     dlg._on_save()
+    assert drain_ui_tasks(timeout_s=15)  # new profiles are created off the GUI thread
     assert repo.get_by_id(pid)["cookies_json"] == "sessionid=NEW", "an edited cookie must be persisted"
 
 
@@ -118,6 +120,7 @@ def test_edit_dialog_without_cookie_change_keeps_cookies_and_status(qapp, qtbot,
     qtbot.addWidget(dlg)
     dlg.name_input.setText("Keep renamed")
     dlg._on_save()
+    assert drain_ui_tasks(timeout_s=15)  # new profiles are created off the GUI thread
 
     row = repo.get_by_id(pid)
     assert row["name"] == "Keep renamed"

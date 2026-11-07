@@ -24,6 +24,7 @@ from src.application.services.token_manager import (
     ReconnectRequired,
     TokenManager,
 )
+from src.application.workers.task_worker import drain_ui_tasks
 from src.infrastructure.database.migrations.runner import run_all_migrations
 from src.infrastructure.database.repositories.profile_repository import ProfileRepository
 
@@ -233,6 +234,7 @@ def test_api_config_dialog_stores_the_client_key_in_its_own_field(qtbot):
     dlg.txt_client_key.setText("ck-123")
     dlg.txt_client_secret.setText("cs-456")
     dlg._on_save()
+    assert drain_ui_tasks(timeout_s=15)  # new profiles are created off the GUI thread
     vault.save_oauth_payload.assert_called_once_with(GLOBAL_API_KEY, {"client_key": "ck-123", "client_secret": "cs-456"})
 
 
@@ -259,6 +261,7 @@ def test_editing_a_profile_token_keeps_its_refresh_token_and_clears_the_flag(qtb
     qtbot.addWidget(dlg)
     dlg.token_input.setText("act.pasted")
     dlg._on_save()
+    assert drain_ui_tasks(timeout_s=15)  # new profiles are created off the GUI thread
     stored = vault.data[str(pid)]
     assert stored["access_token"] == "act.pasted" and stored["refresh_token"] == "rft.keep"
     assert stored.get("expires_at") is None  # unknown: refreshed on first use
