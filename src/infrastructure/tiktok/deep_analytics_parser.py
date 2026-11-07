@@ -325,3 +325,4 @@ def parse_ai_comments(raw_ai: dict[str, Any] | None) -> dict[str, Any]:
         "categories": categories,
         "topics_description": str(topic_info.get("description") or ""),
     }
+

@@ -273,6 +273,10 @@ class TikTokManagerMainWindow(QMainWindow):
         self._profile_patch_timer.setInterval(PROFILE_PATCH_COALESCE_MS)
         self._profile_patch_timer.timeout.connect(self._flush_profile_patches)
 
+        # Video panel collapse & docking state
+        self._is_video_collapsed: bool = False
+        self._saved_video_splitter_height: int = 340
+
         self._init_ui()
         # Apply persistent column visibility
         for col_idx in range(self.profile_table.columnCount()):
@@ -380,18 +384,30 @@ class TikTokManagerMainWindow(QMainWindow):
 
         # --- Bottom Section: Videos & Queue ---
         bottom_container = QWidget(self.splitter)
+        self.bottom_container = bottom_container
         bottom_layout = QVBoxLayout(bottom_container)
         bottom_layout.setContentsMargins(0, 4, 0, 0)
         bottom_layout.setSpacing(6)
 
         # Video Header Toolbar: Scientific sizing, uniform 34px height, crisp vector FluentIcons
         bottom_toolbar = QHBoxLayout()
+        self.bottom_toolbar = bottom_toolbar
         bottom_toolbar.setContentsMargins(6, 4, 6, 4)
         bottom_toolbar.setSpacing(8)
+
+        self.btn_toggle_video = TransparentToolButton(FluentIcon.DOWN, self)
+        self.btn_toggle_video.setFixedSize(34, 34)
+        self.btn_toggle_video.setIconSize(QSize(16, 16))
+        self.btn_toggle_video.setToolTip("Thu gọn bảng video (Ctrl+B)")
+        self.btn_toggle_video.clicked.connect(self._toggle_video_panel_collapse)
+        bottom_toolbar.addWidget(self.btn_toggle_video)
 
         self.lbl_video_header = QLabel("Bảng video (Đã chọn 0 / 0)", self)
         self.lbl_video_header.setStyleSheet("font-weight: 600; font-size: 13px; color: #201F1E;")
         self.lbl_video_header.setFixedHeight(34)
+        self.lbl_video_header.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.lbl_video_header.setToolTip("Nhấn để thu gọn hoặc mở rộng bảng video (Ctrl+B)")
+        self.lbl_video_header.mousePressEvent = self._on_video_header_clicked
         bottom_toolbar.addWidget(self.lbl_video_header)
 
         self.btn_batch_upload = PushButton(FluentIcon.FOLDER, "Nạp Thư Mục Phân Bổ", self)
@@ -461,6 +477,8 @@ class TikTokManagerMainWindow(QMainWindow):
         # Set initial splitter proportions (55% top, 45% bottom)
         self.splitter.addWidget(top_container)
         self.splitter.addWidget(bottom_container)
+        self.splitter.setCollapsible(0, False)
+        self.splitter.setCollapsible(1, False)
         self.splitter.setSizes([460, 340])
         main_layout.addWidget(self.splitter, 1)
 
@@ -489,6 +507,8 @@ class TikTokManagerMainWindow(QMainWindow):
         self.shortcut_f5.activated.connect(self.refresh_all_data)
         self.shortcut_ctrl_r = QShortcut(QKeySequence("Ctrl+R"), self)
         self.shortcut_ctrl_r.activated.connect(self.refresh_all_data)
+        self.shortcut_ctrl_b = QShortcut(QKeySequence("Ctrl+B"), self)
+        self.shortcut_ctrl_b.activated.connect(self._toggle_video_panel_collapse)
 
     def _connect_signals(self) -> None:
         self.signal_bus.upload_progress.connect(self._on_upload_progress)
@@ -757,7 +777,64 @@ class TikTokManagerMainWindow(QMainWindow):
     def _on_video_selection_changed(self) -> None:
         selected_rows = {index.row() for index in self.video_table.selectedIndexes()}
         total_rows = self.video_table.rowCount()
-        self.lbl_video_header.setText(f"Bảng video Đã chọn {len(selected_rows)} / {total_rows}")
+        self._update_video_header_text(len(selected_rows), total_rows)
+
+    def _update_video_header_text(self, selected: int | None = None, total: int | None = None) -> None:
+        if selected is None:
+            selected = len({index.row() for index in self.video_table.selectedIndexes()})
+        if total is None:
+            total = self.video_table.rowCount()
+        base_text = f"Bảng video (Đã chọn {selected} / {total})" if total == 0 else f"Bảng video Đã chọn {selected} / {total}"
+        if getattr(self, "_is_video_collapsed", False):
+            self.lbl_video_header.setText(f"{base_text} — [Thu gọn - Nhấp để mở]")
+        else:
+            self.lbl_video_header.setText(base_text)
+
+    def _on_video_header_clicked(self, event: Any) -> None:
+        if event is None or getattr(event, "button", lambda: Qt.MouseButton.LeftButton)() == Qt.MouseButton.LeftButton:
+            self._toggle_video_panel_collapse()
+
+    def _toggle_video_panel_collapse(self) -> None:
+        if getattr(self, "_is_video_collapsed", False):
+            self._expand_video_panel()
+        else:
+            self._collapse_video_panel()
+
+    def _collapse_video_panel(self) -> None:
+        if getattr(self, "_is_video_collapsed", False):
+            return
+        sizes = self.splitter.sizes()
+        if len(sizes) >= 2 and sizes[1] > 80:
+            self._saved_video_splitter_height = sizes[1]
+        self._is_video_collapsed = True
+        self.video_table.setVisible(False)
+
+        toolbar = getattr(self, "bottom_toolbar", None)
+        h = toolbar.sizeHint().height() if toolbar else 42
+        if h < 34 or h > 65:
+            h = 42
+        total_height = sum(self.splitter.sizes())
+        top_height = max(100, total_height - h)
+        self.splitter.setSizes([top_height, h])
+
+        self.btn_toggle_video.setIcon(FluentIcon.UP)
+        self.btn_toggle_video.setToolTip("Hiển thị lại bảng video (Ctrl+B)")
+        self._update_video_header_text()
+
+    def _expand_video_panel(self) -> None:
+        if not getattr(self, "_is_video_collapsed", False):
+            return
+        self._is_video_collapsed = False
+        self.video_table.setVisible(True)
+
+        restore_height = getattr(self, "_saved_video_splitter_height", 340)
+        total_height = sum(self.splitter.sizes())
+        top_height = max(150, total_height - restore_height)
+        self.splitter.setSizes([top_height, restore_height])
+
+        self.btn_toggle_video.setIcon(FluentIcon.DOWN)
+        self.btn_toggle_video.setToolTip("Thu gọn bảng video (Ctrl+B)")
+        self._update_video_header_text()
 
     def _init_settings_menu(self) -> None:
         """Centralized Settings & Tools Menu housing all administrative actions."""
@@ -2095,6 +2172,7 @@ class TikTokManagerMainWindow(QMainWindow):
     def _on_video_import_completed(self, added_count: int) -> None:
         self.refresh_videos()
         if added_count > 0:
+            self._expand_video_panel()
             InfoBar.success(
                 title="Đã Thêm Video",
                 content=f"Đã nạp thành công {added_count} video vào hàng đợi.",
@@ -2124,6 +2202,7 @@ class TikTokManagerMainWindow(QMainWindow):
             parent=self,
         )
         if self._exec_dialog(dlg):
+            self._expand_video_panel()
             self.refresh_videos()
             InfoBar.success(
                 title="Phân Bổ Hoàn Tất",
@@ -2368,6 +2447,7 @@ class TikTokManagerMainWindow(QMainWindow):
     def _on_start_upload_queue(self) -> None:
         if not self._feature_allowed(Feature.UPLOAD):
             return
+        self._expand_video_panel()
         selected_profiles = self.profile_table.get_selected_profile_ids()
         available_videos = self.video_repo.list_available(only_available=True)
 
@@ -2671,7 +2751,7 @@ class TikTokManagerMainWindow(QMainWindow):
         )
         if self._exec_dialog(msg_box):
             self.video_table.setRowCount(0)
-            self.lbl_video_header.setText("Bảng video (Đã chọn 0 / 0)")
+            self._update_video_header_text(0, 0)
             InfoBar.info(
                 title="Đã Xóa Bảng",
                 content="Đã dọn sạch toàn bộ video trong bảng.",

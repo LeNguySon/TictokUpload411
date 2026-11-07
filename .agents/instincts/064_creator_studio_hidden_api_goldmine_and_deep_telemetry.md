@@ -28,3 +28,4 @@ TikTok Creator Studio Web client sử dụng kiến trúc Webpack chia tách th�
    - Trong `ScheduleVideoDialog`: Luôn tự động đọc `optimal_posting_hours_json` hoặc `optimal_hour` của profile đang chọn để hiển thị huy hiệu giờ vàng và nút 1-click đặt lịch vào đỉnh hoạt động tiếp theo.
 3. **Chống sập giao diện (ScrollArea & Non-blocking)**:
    - Các dialog chứa nhiều metadata như `ChannelRadarDialog` bắt buộc phải bọc nội dung trong `QScrollArea(setWidgetResizable=True)` để không tràn màn hình trên độ phân giải nhỏ.
+
