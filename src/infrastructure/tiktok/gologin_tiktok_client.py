@@ -212,3 +212,106 @@ class GoLoginTikTokClient:
             "error": desc,
             "status_code": res.get("_status_code", 401),
         }
+
+    def fetch_audience_intelligence(self, profile_id: int) -> dict[str, Any]:
+        """Fetches demographics (countries, cities, age, gender), optimal posting hours,
+        and peer competitor intelligence via /tiktok/v1/analytics/insights/ and /aweme/v2/data/insight/.
+        """
+        import json as _json
+
+        from src.infrastructure.tiktok.deep_analytics_parser import (
+            calculate_optimal_post_hours,
+            parse_audience_demographics,
+            parse_competitor_intelligence,
+        )
+
+        # 1. Demographics batch
+        demo_requests = [
+            {"insight_type": "INSIGHT_TYPE_ANALYTICS_FOLLOWER_COUNTRY_CITY_PERCENT", "data_date_range": "DATA_DATE_RANGE_7D"},
+            {"insight_type": "INSIGHT_TYPE_ANALYTICS_FOLLOWER_GENDER_PERCENT", "data_date_range": "DATA_DATE_RANGE_7D"},
+            {"insight_type": "INSIGHT_TYPE_ANALYTICS_FOLLOWER_AGE_PERCENT", "data_date_range": "DATA_DATE_RANGE_7D"},
+            {"insight_type": "INSIGHT_TYPE_ANALYTICS_VIEWER_TOTAL_VIEWER", "data_date_range": "DATA_DATE_RANGE_7D"},
+        ]
+        url_demo = f"https://www.tiktok.com/tiktok/v1/analytics/insights/?type_requests={_json.dumps(demo_requests)}&time_offset=25200&is_dark_mode=false"
+        res_demo = self.request_api(profile_id, url_demo, method="GET", timeout=15)
+        demographics = parse_audience_demographics(res_demo)
+
+        # 2. Follower Active Hours & Peer Competitors batch
+        aweme_requests = [
+            {"insigh_type": "follower_active_history_hours", "days": 8, "end_days": 1},
+            {"insigh_type": "follower_active_history_days", "days": 8, "end_days": 1},
+            {"insigh_type": "top10_other_creators_recommendation"},
+            {"insigh_type": "top10_other_videos_recommendation"},
+        ]
+        url_aweme = f"https://www.tiktok.com/aweme/v2/data/insight/?aid=1988&tz_offset=25200&app_language=en&type_requests={_json.dumps(aweme_requests)}"
+        res_aweme = self.request_api(profile_id, url_aweme, method="GET", timeout=15)
+
+        raw_hours = res_aweme.get("follower_active_history_hours")
+        optimal_hours = calculate_optimal_post_hours(raw_hours if isinstance(raw_hours, list) else [])
+
+        raw_users = res_aweme.get("viewer_also_watched_users") or res_aweme.get("top10_other_creators_recommendation")
+        raw_items = res_aweme.get("viewer_also_watched_items") or res_aweme.get("top10_other_videos_recommendation")
+        competitor_intel = parse_competitor_intelligence(raw_users, raw_items)
+
+        return {
+            "demographics": demographics,
+            "optimal_hours": optimal_hours,
+            "competitor_intelligence": competitor_intel,
+        }
+
+    def fetch_video_deep_analytics(self, profile_id: int, aweme_id: str | int) -> dict[str, Any]:
+        """Fetches search terms (SEO), retention curve, finish rate, and traffic sources for a video."""
+        import json as _json
+
+        from src.infrastructure.tiktok.deep_analytics_parser import (
+            parse_retention_data,
+            parse_search_terms,
+            parse_traffic_source_matrix,
+        )
+
+        item_str = str(aweme_id)
+        video_requests = [
+            {"insigh_type": "video_info", "aweme_id": item_str},
+            {"insigh_type": "item_search_terms", "aweme_id": item_str},
+            {"insigh_type": "video_traffic_source_percent_realtime", "aweme_id": item_str},
+            {"insigh_type": "video_retention_rate_realtime", "aweme_id": item_str},
+            {"insigh_type": "video_finish_rate_realtime", "aweme_id": item_str},
+        ]
+        url = f"https://www.tiktok.com/aweme/v2/data/insight/?aid=1988&tz_offset=25200&app_language=en&type_requests={_json.dumps(video_requests)}"
+        res = self.request_api(profile_id, url, method="GET", timeout=15)
+
+        search_terms = parse_search_terms(res.get("item_search_terms"))
+        traffic_matrix = parse_traffic_source_matrix(res.get("video_traffic_source_percent_realtime"))
+        retention = parse_retention_data(res.get("video_retention_rate_realtime"), res.get("video_finish_rate_realtime"))
+
+        # AI Comment Overview
+        ai_comments = self.fetch_ai_comment_overview(profile_id, item_str)
+
+        return {
+            "aweme_id": item_str,
+            "search_terms": search_terms,
+            "traffic_sources": traffic_matrix,
+            "retention": retention,
+            "ai_comments": ai_comments,
+        }
+
+    def fetch_publish_settings(self, profile_id: int) -> dict[str, Any]:
+        """Queries /tiktok/v1/creator/publish_setting/ to verify automated copyright and content check toggles."""
+        url = "https://www.tiktok.com/tiktok/v1/creator/publish_setting/?aid=1988&app_name=tiktok_web"
+        res = self.request_api(profile_id, url, method="GET", timeout=10)
+        return {
+            "enable_auto_music_copyright_check": bool(res.get("enable_auto_music_copyright_check")),
+            "enable_auto_post_check": bool(res.get("enable_auto_post_check")),
+            "disable_tto_plus_showcase": bool(res.get("disable_tto_plus_showcase")),
+            "status_code": res.get("_status_code", 200),
+        }
+
+    def fetch_ai_comment_overview(self, profile_id: int, item_id: str | int) -> dict[str, Any]:
+        """Queries /tiktok/v1/creator/ai_comment/analytics_overview for comment categorizations & topics."""
+        from src.infrastructure.tiktok.deep_analytics_parser import parse_ai_comments
+
+        item_str = str(item_id)
+        url = "https://www.tiktok.com/tiktok/v1/creator/ai_comment/analytics_overview?aid=1988&app_name=tiktok_web"
+        payload = {"item_id": int(item_str) if item_str.isdigit() else item_str, "item_id_str": item_str}
+        res = self.request_api(profile_id, url, method="POST", json_data=payload, timeout=12)
+        return parse_ai_comments(res)

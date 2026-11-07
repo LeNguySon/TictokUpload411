@@ -19,6 +19,7 @@ from PyQt6.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QLabel,
+    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
@@ -177,10 +178,20 @@ class ChannelRadarDialog(QDialog):
         header = create_dialog_header(
             icon=FluentIcon.SPEED_HIGH,
             title=f"Chẩn Đoán Radar Kênh: @{prof_name}",
-            subtitle="Đánh giá chất lượng phân phối video, cảnh báo flop/view ảo và tư vấn chiến lược nội dung.",
+            subtitle="Đánh giá chất lượng phân phối video, chân dung khán giả, tình báo đối thủ và giờ đăng vàng.",
             parent=self,
         )
         layout.addWidget(header)
+
+        # Scroll Area for rich telemetry content
+        scroll = QScrollArea(self)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+
+        content_widget = QWidget()
+        c_layout = QVBoxLayout(content_widget)
+        c_layout.setContentsMargins(0, 0, 0, 0)
+        c_layout.setSpacing(12)
 
         # Verdict Badge
         badge_frame = QFrame(self)
@@ -203,7 +214,7 @@ class ChannelRadarDialog(QDialog):
         style_card(badge_frame, kind=verdict_kind, object_name="verdictBadge")
 
         badge_layout.addWidget(self.lbl_verdict_badge)
-        layout.addWidget(badge_frame)
+        c_layout.addWidget(badge_frame)
 
         # Grid of Cards
         grp_metrics = QGroupBox("Chỉ Số Sức Khỏe && Thống Kê Tổng Hợp", self)
@@ -234,9 +245,29 @@ class ChannelRadarDialog(QDialog):
         c4, _ = make_card("Trung Vị Lượt Xem", f"{int(report.signals.median_views):,}")
         grid.addWidget(c4, 1, 0)
 
+        import json as _json
+        opt_post_raw = self.profile.get("optimal_posting_hours_json")
+        opt_window_str = None
+        peak_users = 0
+        if opt_post_raw:
+            try:
+                opt_data = _json.loads(opt_post_raw) if isinstance(opt_post_raw, str) else opt_post_raw
+                opt_window_str = opt_data.get("peak_window")
+                peak_users = int(opt_data.get("peak_users", 0))
+            except Exception:
+                pass
+
         opt_h = self.profile.get("optimal_hour")
-        best_hour_str = f"{opt_h:02d}:00" if opt_h is not None and opt_h >= 0 else f"{report.best_posting_hour:02d}:00"
+        if opt_window_str:
+            best_hour_str = f"{opt_window_str}"
+        elif opt_h is not None and opt_h >= 0:
+            best_hour_str = f"{opt_h:02d}:00"
+        else:
+            best_hour_str = f"{report.best_posting_hour:02d}:00"
+
         c5, self.lbl_optimal_hour_stat = make_card("Giờ Đăng Tối Ưu", best_hour_str, "warning")
+        if peak_users > 0:
+            c5.setToolTip(f"Đỉnh điểm có khoảng ~{peak_users:,} followers đang trực tuyến")
         grid.addWidget(c5, 1, 1)
 
         alert_kind = "danger" if low_alert.get("alert") else "success"
@@ -244,10 +275,9 @@ class ChannelRadarDialog(QDialog):
         c6, _ = make_card("Cảnh Báo Flop/Shadowban", alert_text, alert_kind)
         grid.addWidget(c6, 1, 2)
 
-        layout.addWidget(grp_metrics)
+        c_layout.addWidget(grp_metrics)
 
         # Traffic Source Matrix GroupBox
-        import json as _json
         ts_raw = self.profile.get("traffic_source_json")
         ts_data: dict[str, Any] = {}
         if ts_raw:
@@ -291,7 +321,73 @@ class ChannelRadarDialog(QDialog):
         )
         t_grid.addWidget(c_ret, 0, 2)
 
-        layout.addWidget(grp_traffic)
+        c_layout.addWidget(grp_traffic)
+
+        # Audience Demographics GroupBox
+        demo_raw = self.profile.get("audience_demographics_json")
+        if demo_raw:
+            try:
+                demo_data = _json.loads(demo_raw) if isinstance(demo_raw, str) else demo_raw
+                countries = demo_data.get("follower_countries", [])
+                ages = demo_data.get("follower_ages", [])
+                genders = demo_data.get("follower_genders", [])
+                v_total = demo_data.get("viewer_total_7d", 0)
+
+                grp_demo = QGroupBox("Chân Dung Khán Giả && Nhân Khẩu Học (Audience Demographics)", self)
+                style_group_box(grp_demo)
+                d_lay = QVBoxLayout(grp_demo)
+                d_lay.setSpacing(6)
+
+                top_countries_str = ", ".join(f"{c.get('country')}: {c.get('percentage')}%" for c in countries[:4])
+                lbl_c = QLabel(f"• <b>Top Quốc gia xem nhiều:</b> {top_countries_str if top_countries_str else 'Đang cập nhật'}")
+                lbl_c.setStyleSheet("font-size: 12px;")
+                d_lay.addWidget(lbl_c)
+
+                top_ages_str = ", ".join(f"{a.get('range')}: {a.get('percentage')}%" for a in ages[:3])
+                lbl_a = QLabel(f"• <b>Độ tuổi khán giả:</b> {top_ages_str if top_ages_str else 'Đang cập nhật'}")
+                lbl_a.setStyleSheet("font-size: 12px;")
+                d_lay.addWidget(lbl_a)
+
+                top_gen_str = ", ".join(f"{g.get('gender')}: {g.get('percentage')}%" for g in genders[:2])
+                viewer_str = f"{v_total:,}" if v_total else "—"
+                lbl_g = QLabel(f"• <b>Giới tính:</b> {top_gen_str if top_gen_str else 'Đang cập nhật'} | <b>Tổng người xem 7 ngày:</b> {viewer_str}")
+                lbl_g.setStyleSheet("font-size: 12px;")
+                d_lay.addWidget(lbl_g)
+
+                c_layout.addWidget(grp_demo)
+            except Exception as e_demo:
+                logger.debug("Render demographics error: %s", e_demo)
+
+        # Peer Competitor Intelligence GroupBox
+        ci_raw = self.profile.get("competitor_intelligence_json")
+        if ci_raw:
+            try:
+                ci_data = _json.loads(ci_raw) if isinstance(ci_raw, str) else ci_raw
+                top_c = ci_data.get("top_creators", [])
+                top_v = ci_data.get("top_videos", [])
+                if top_c or top_v:
+                    grp_ci = QGroupBox("Tình Báo Kênh && Video Đối Thủ Khán Giả Quan Tâm", self)
+                    style_group_box(grp_ci)
+                    ci_lay = QVBoxLayout(grp_ci)
+                    ci_lay.setSpacing(6)
+
+                    if top_c:
+                        creators_str = " • ".join(f"@{c.get('unique_id')} ({c.get('follower_count', 0):,} flw)" for c in top_c[:3])
+                        lbl_cr = QLabel(f"• <b>Kênh đối thủ khán giả cùng xem:</b> {creators_str}")
+                        lbl_cr.setStyleSheet("font-size: 12px;")
+                        lbl_cr.setWordWrap(True)
+                        ci_lay.addWidget(lbl_cr)
+
+                    if top_v:
+                        vids_str = " | ".join(f"\"{v.get('desc', '')[:25]}...\" ({v.get('play_count', 0):,} views)" for v in top_v[:2])
+                        lbl_vr = QLabel(f"• <b>Video viral đối thủ:</b> {vids_str}")
+                        lbl_vr.setStyleSheet("font-size: 12px; color: #64748B;")
+                        lbl_vr.setWordWrap(True)
+                        ci_lay.addWidget(lbl_vr)
+
+                    c_layout.addWidget(grp_ci)
+            except Exception as e_ci:
+                logger.debug("Render competitor intelligence error: %s", e_ci)
 
         # Low View Alert Message Box
         if low_alert.get("alert"):
@@ -302,7 +398,7 @@ class ChannelRadarDialog(QDialog):
             a_lbl.setWordWrap(True)
             a_lbl.setStyleSheet(f"color: {status_color('warning')}; font-size: 12px; font-weight: 600;")
             a_lay.addWidget(a_lbl)
-            layout.addWidget(alert_box)
+            c_layout.addWidget(alert_box)
 
         # Recommendations Box
         grp_recs = QGroupBox("Khuyến Nghị Tối Ưu Hóa Kênh Từ AI / Heuristics", self)
@@ -314,7 +410,10 @@ class ChannelRadarDialog(QDialog):
             r_lbl.setStyleSheet("font-size: 12px; margin-bottom: 4px;")
             rec_lay.addWidget(r_lbl)
 
-        layout.addWidget(grp_recs)
+        c_layout.addWidget(grp_recs)
+
+        scroll.setWidget(content_widget)
+        layout.addWidget(scroll, 1)
 
         # Footer Buttons
         h_footer = QHBoxLayout()

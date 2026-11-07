@@ -9,7 +9,10 @@ import json
 import logging
 from typing import Any
 
-import keyring
+try:
+    import keyring
+except ImportError:
+    keyring = None
 
 logger = logging.getLogger(__name__)
 

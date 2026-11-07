@@ -62,10 +62,21 @@ def fetch_health_data(db_path: Path | str, profile_id: int) -> dict[str, Any] | 
         appeals = conn.execute(
             "SELECT * FROM accountAppeals WHERE profile_id=? ORDER BY id DESC", (profile_id,)
         ).fetchall()
+        deep_rows = conn.execute(
+            """
+            SELECT video_id, title, views, likes, comments, search_terms_json,
+                   traffic_sources_json, retention_points_json, finish_rate, ai_comments_json
+            FROM videoTables
+            WHERE profile_id=? AND (search_terms_json IS NOT NULL OR traffic_sources_json IS NOT NULL)
+            ORDER BY views DESC, id DESC LIMIT 25;
+            """,
+            (profile_id,),
+        ).fetchall()
         return {
             "profile": dict(profile),
             "violations": [dict(v) for v in violations],
             "appeals": [dict(a) for a in appeals],
+            "deep_analytics": [dict(d) for d in deep_rows],
         }
 
 
@@ -288,6 +299,25 @@ class AccountHealthDialog(QDialog):
 
         self.tabs.addTab(tab_appeals, "Lịch Sử Vé Kháng Cáo (Appeals)")
 
+        # Tab 3: Từ Khóa Tìm Kiếm SEO && Phân Bổ Nguồn View (Deep Telemetry)
+        tab_deep = QWidget()
+        d_layout = QVBoxLayout(tab_deep)
+        d_layout.setContentsMargins(6, 10, 6, 6)
+        d_layout.setSpacing(8)
+
+        self.table_deep_analytics = style_plain_table(QTableWidget(0, 6))
+        self.table_deep_analytics.setHorizontalHeaderLabels(
+            ["Video ID", "Tiêu đề video", "Lượt xem", "Xem hết", "Nguồn View (FYF/Search)", "Top Từ Khóa Tìm Kiếm (SEO FYP)"]
+        )
+        h_header(self.table_deep_analytics).setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        h_header(self.table_deep_analytics).setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        h_header(self.table_deep_analytics).setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)
+        self.table_deep_analytics.setAlternatingRowColors(True)
+        v_header(self.table_deep_analytics).setVisible(False)
+        d_layout.addWidget(self.table_deep_analytics, 1)
+
+        self.tabs.addTab(tab_deep, "Từ Khóa SEO (FYP) && Nguồn View")
+
     def _on_violate_selection_changed(self) -> None:
         """Enables or disables the appeal button based on row selection."""
         selection = self.table_violate.selectionModel()
@@ -461,6 +491,50 @@ class AccountHealthDialog(QDialog):
             self.table_appeals.setItem(row_idx, 2, QTableWidgetItem(str(a_dict.get("object_id") or "")))
             self.table_appeals.setItem(row_idx, 3, QTableWidgetItem(str(a_dict.get("reason") or "")))
             self.table_appeals.setItem(row_idx, 4, QTableWidgetItem(str(a_dict.get("status") or "Đang xử lý")))
+
+        # 6. Deep Telemetry & Search Terms (SEO FYP)
+        deep_list = data.get("deep_analytics") or []
+        self.table_deep_analytics.setRowCount(len(deep_list))
+        import json as _json
+        for row_idx, d in enumerate(deep_list):
+            v_id = str(d.get("video_id") or "")
+            title = str(d.get("title") or "Video không tiêu đề")
+            views = int(d.get("views") or 0)
+            fn_rate = float(d.get("finish_rate") or 0.0)
+
+            # Parse traffic sources
+            ts_raw = d.get("traffic_sources_json")
+            ts_str = "—"
+            if ts_raw:
+                try:
+                    ts = _json.loads(ts_raw) if isinstance(ts_raw, str) else ts_raw
+                    fyf = ts.get("for_you")
+                    search = ts.get("search")
+                    if fyf is not None or search is not None:
+                        ts_str = f"FYF: {fyf or 0:.1f}% | Search: {search or 0:.1f}%"
+                except Exception:
+                    pass
+
+            # Parse search terms
+            st_raw = d.get("search_terms_json")
+            terms_str = "—"
+            if st_raw:
+                try:
+                    terms = _json.loads(st_raw) if isinstance(st_raw, str) else st_raw
+                    if isinstance(terms, list) and terms:
+                        terms_str = ", ".join(f"{t.get('keyword')} ({t.get('percentage')}%)" for t in terms[:3])
+                except Exception:
+                    pass
+
+            self.table_deep_analytics.setItem(row_idx, 0, QTableWidgetItem(v_id))
+            self.table_deep_analytics.setItem(row_idx, 1, QTableWidgetItem(title))
+            self.table_deep_analytics.setItem(row_idx, 2, QTableWidgetItem(f"{views:,}"))
+            fn_item = QTableWidgetItem(f"{fn_rate:.1f}%" if fn_rate > 0 else "—")
+            if fn_rate >= 15.0:
+                fn_item.setForeground(QColor(status_color("success")))
+            self.table_deep_analytics.setItem(row_idx, 3, fn_item)
+            self.table_deep_analytics.setItem(row_idx, 4, QTableWidgetItem(ts_str))
+            self.table_deep_analytics.setItem(row_idx, 5, QTableWidgetItem(terms_str))
 
     def _set_reapply_eligible(self) -> None:
         """Sets UI state to allow re-applying to Creator Rewards."""

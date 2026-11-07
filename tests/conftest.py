@@ -91,6 +91,16 @@ def never_touch_the_real_daemon(monkeypatch):
     for method in ("create", "delete", "start", "stop", "post_cookies"):
         monkeypatch.setattr(GoLogin, method, _forbidden(method))
 
+    # Any HTTP call of the daemon client (reads included, e.g. the start-up fingerprint backfill) would reach the
+    # real daemon when it runs on the machine: fail fast like an unreachable daemon unless a test patches it.
+    from sammonny.core.client import SamMonnyDaemonClient
+    from sammonny.core.exceptions import DaemonConnectionError
+
+    def _no_daemon(self, method, path, *args, **kwargs):
+        raise DaemonConnectionError(f"tests never call the real SamMonny daemon ({method} {path})")
+
+    monkeypatch.setattr(SamMonnyDaemonClient, "_request", _no_daemon)
+
 
 @pytest.fixture(scope="session")
 def _session_default_db(tmp_path_factory):

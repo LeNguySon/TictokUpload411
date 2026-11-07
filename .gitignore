@@ -27,6 +27,7 @@ htmlcov/
 .mypy_cache/
 .pytype/
 *.log
+logs/
 
 # CSDL SQLite & WAL files (AgentShield & Database Provenance)
 *.db

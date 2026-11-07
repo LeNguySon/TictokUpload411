@@ -61,6 +61,31 @@ def run_all_migrations(db_path: Path | str | None = None) -> list[str]:
                 conn.execute("ALTER TABLE profiles ADD COLUMN retention_stats_json TEXT DEFAULT NULL;")
             if "fingerprint_json" not in prof_cols:
                 conn.execute("ALTER TABLE profiles ADD COLUMN fingerprint_json TEXT DEFAULT NULL;")
+            if "audience_demographics_json" not in prof_cols:
+                conn.execute("ALTER TABLE profiles ADD COLUMN audience_demographics_json TEXT DEFAULT NULL;")
+            if "optimal_posting_hours_json" not in prof_cols:
+                conn.execute("ALTER TABLE profiles ADD COLUMN optimal_posting_hours_json TEXT DEFAULT NULL;")
+            if "competitor_intelligence_json" not in prof_cols:
+                conn.execute("ALTER TABLE profiles ADD COLUMN competitor_intelligence_json TEXT DEFAULT NULL;")
+            if "publish_settings_json" not in prof_cols:
+                conn.execute("ALTER TABLE profiles ADD COLUMN publish_settings_json TEXT DEFAULT NULL;")
+
+        # Pre-migration: check if videoTables exists and needs deep analytics columns
+        vt_info = conn.execute("PRAGMA table_info(videoTables);").fetchall()
+        vt_cols = [r[1] for r in vt_info]
+        if vt_cols:
+            if "search_terms_json" not in vt_cols:
+                conn.execute("ALTER TABLE videoTables ADD COLUMN search_terms_json TEXT DEFAULT NULL;")
+            if "traffic_sources_json" not in vt_cols:
+                conn.execute("ALTER TABLE videoTables ADD COLUMN traffic_sources_json TEXT DEFAULT NULL;")
+            if "retention_points_json" not in vt_cols:
+                conn.execute("ALTER TABLE videoTables ADD COLUMN retention_points_json TEXT DEFAULT NULL;")
+            if "finish_rate" not in vt_cols:
+                conn.execute("ALTER TABLE videoTables ADD COLUMN finish_rate REAL DEFAULT 0.0;")
+            if "viewer_locations_json" not in vt_cols:
+                conn.execute("ALTER TABLE videoTables ADD COLUMN viewer_locations_json TEXT DEFAULT NULL;")
+            if "ai_comments_json" not in vt_cols:
+                conn.execute("ALTER TABLE videoTables ADD COLUMN ai_comments_json TEXT DEFAULT NULL;")
 
         conn.executescript(DDL_BASE_SCHEMAS)
 

@@ -433,7 +433,92 @@ class PassiveTikTokSyncService:
         except Exception as e:
             logger.debug("Deep sync moderation check error for profile %s: %s", profile_id, e)
 
-        # 6. Local Avatar Caching
+        # 6. Deep Audience Intelligence, Competitor Intelligence & Publish Settings
+        try:
+            import json as _json
+
+            # Demographics, Active Hours, Competitor Spy
+            intel = self.client.fetch_audience_intelligence(profile_id)
+            prof_updates: dict[str, Any] = {}
+            if intel.get("demographics"):
+                prof_updates["audience_demographics_json"] = _json.dumps(intel["demographics"], ensure_ascii=False)
+            if intel.get("optimal_hours"):
+                prof_updates["optimal_posting_hours_json"] = _json.dumps(intel["optimal_hours"], ensure_ascii=False)
+                if "peak_hour" in intel["optimal_hours"]:
+                    prof_updates["optimal_hour"] = int(intel["optimal_hours"]["peak_hour"])
+            if intel.get("competitor_intelligence"):
+                prof_updates["competitor_intelligence_json"] = _json.dumps(intel["competitor_intelligence"], ensure_ascii=False)
+
+            # Publish Settings (copyright & guideline auto-checks)
+            pub_settings = self.client.fetch_publish_settings(profile_id)
+            if pub_settings:
+                prof_updates["publish_settings_json"] = _json.dumps(pub_settings, ensure_ascii=False)
+
+            if prof_updates:
+                self.profile_repo.update(profile_id, **prof_updates)
+                any_success = True
+        except Exception as e_intel:
+            logger.debug("Deep sync audience intelligence error for profile %s: %s", profile_id, e_intel)
+
+        # 7. Video-Level Deep Analytics (SEO Search Terms, Retention Curves, Finish Rates)
+        try:
+            import json as _json
+            from src.infrastructure.database.connection import db_session
+
+            # Fetch top 5 most viewed videos for this profile
+            with db_session(self.db_path) as conn:
+                v_rows = conn.execute(
+                    "SELECT video_id FROM videoTables WHERE profile_id=? ORDER BY views DESC, id DESC LIMIT 5;",
+                    (profile_id,)
+                ).fetchall()
+                v_ids = [r["video_id"] for r in v_rows if r["video_id"]]
+
+            for vid in v_ids:
+                try:
+                    v_analytics = self.client.fetch_video_deep_analytics(profile_id, vid)
+                    if v_analytics and (v_analytics.get("search_terms") or v_analytics.get("retention", {}).get("points")):
+                        st_json = _json.dumps(v_analytics.get("search_terms") or [], ensure_ascii=False)
+                        ts_json = _json.dumps(v_analytics.get("traffic_sources") or {}, ensure_ascii=False)
+                        ret_data = v_analytics.get("retention") or {}
+                        ret_pts_json = _json.dumps(ret_data.get("points") or [], ensure_ascii=False)
+                        fn_rate = float(ret_data.get("finish_rate") or 0.0)
+                        ai_json = _json.dumps(v_analytics.get("ai_comments") or {}, ensure_ascii=False)
+
+                        with db_session(self.db_path) as conn:
+                            conn.execute(
+                                """
+                                UPDATE videoTables SET
+                                    search_terms_json = ?,
+                                    traffic_sources_json = ?,
+                                    retention_points_json = ?,
+                                    finish_rate = ?,
+                                    ai_comments_json = ?
+                                WHERE profile_id = ? AND video_id = ?;
+                                """,
+                                (st_json, ts_json, ret_pts_json, fn_rate, ai_json, profile_id, vid)
+                            )
+                            conn.execute(
+                                """
+                                INSERT INTO video_deep_analytics (
+                                    aweme_id, profile_id, search_terms_json, traffic_sources_json,
+                                    retention_points_json, finish_rate, ai_comments_json, updated_at
+                                ) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                                ON CONFLICT(aweme_id) DO UPDATE SET
+                                    search_terms_json = excluded.search_terms_json,
+                                    traffic_sources_json = excluded.traffic_sources_json,
+                                    retention_points_json = excluded.retention_points_json,
+                                    finish_rate = excluded.finish_rate,
+                                    ai_comments_json = excluded.ai_comments_json,
+                                    updated_at = CURRENT_TIMESTAMP;
+                                """,
+                                (vid, profile_id, st_json, ts_json, ret_pts_json, fn_rate, ai_json)
+                            )
+                except Exception as e_v:
+                    logger.debug("Failed video deep analytics sync for %s: %s", vid, e_v)
+        except Exception as e_vids:
+            logger.debug("Deep sync video list analytics error for profile %s: %s", profile_id, e_vids)
+
+        # 8. Local Avatar Caching
         try:
             updated_row = self.profile_repo.get_by_id(profile_id)
             if updated_row and updated_row.get("avatar_url"):

@@ -328,6 +328,12 @@ CREATE TABLE IF NOT EXISTS videoTables (
     allow_duet INTEGER DEFAULT 1,
     allow_stitch INTEGER DEFAULT 1,
     is_pinned INTEGER DEFAULT 0,
+    search_terms_json TEXT DEFAULT NULL,
+    traffic_sources_json TEXT DEFAULT NULL,
+    retention_points_json TEXT DEFAULT NULL,
+    finish_rate REAL DEFAULT 0.0,
+    viewer_locations_json TEXT DEFAULT NULL,
+    ai_comments_json TEXT DEFAULT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(profile_id, video_id)
 );
@@ -391,4 +397,18 @@ CREATE INDEX IF NOT EXISTS idx_video_profile_status ON videoTables(profile_id, s
 CREATE INDEX IF NOT EXISTS idx_statistic_profile_date ON statisticTable(profile_id, date_upload);
 CREATE INDEX IF NOT EXISTS idx_violation_profile_status ON violateVideos(profile_id, status, appeal_date);
 CREATE INDEX IF NOT EXISTS idx_appeal_profile_status ON accountAppeals(profile_id, status);
+
+-- 25. Video Deep Analytics Table (TikTok Creator Studio Telemetry)
+CREATE TABLE IF NOT EXISTS video_deep_analytics (
+    aweme_id TEXT PRIMARY KEY,
+    profile_id INTEGER REFERENCES profiles(id) ON DELETE CASCADE,
+    search_terms_json TEXT DEFAULT NULL,
+    traffic_sources_json TEXT DEFAULT NULL,
+    retention_points_json TEXT DEFAULT NULL,
+    finish_rate REAL DEFAULT 0.0,
+    viewer_locations_json TEXT DEFAULT NULL,
+    ai_comments_json TEXT DEFAULT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_video_deep_analytics_profile ON video_deep_analytics(profile_id);
 """

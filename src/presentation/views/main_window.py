@@ -83,6 +83,7 @@ from src.presentation.dialogs.batch_folder_upload_dialog import BatchFolderUploa
 from src.presentation.dialogs.bulk_add_profile_dialog import BulkAddProfileDialog
 from src.presentation.dialogs.bulk_edit_profile_dialog import BulkEditProfileDialog
 from src.presentation.dialogs.channel_radar_dialog import ChannelRadarDialog, load_radar_inputs
+from src.presentation.dialogs.dialog_cache import DialogCache
 from src.presentation.dialogs.license_activation_dialog import LicenseActivationDialog
 from src.presentation.dialogs.permissions_dialog import PermissionsDialog
 from src.presentation.dialogs.project_dialog import ProjectManagerDialog
@@ -189,6 +190,8 @@ class TikTokManagerMainWindow(QMainWindow):
         # Signal Bus & Concurrency Manager
         self.signal_bus = AppSignalBus.instance()
         self.thread_pool = ThreadPoolManager.instance()
+        # Menu dialogs are built once and re-shown: a new top-level window costs 45-110 ms (see DialogCache).
+        self._dialogs = DialogCache()
         self._is_status_sync_running: bool = False
 
         # Application Services
@@ -292,6 +295,8 @@ class TikTokManagerMainWindow(QMainWindow):
         self.session_capture_timer.start()
         # Profiles created before fingerprints were stored get their own fixed one (once, in the background).
         QTimer.singleShot(5000, self._backfill_fingerprints)
+        # Build the menu dialogs while the app is idle, one at a time, so their first opening is instant too.
+        QTimer.singleShot(12000, lambda: self._prewarm_dialogs(stagger_ms=700))
 
         self._apply_license()
         if self.license_service is not None:
@@ -851,9 +856,38 @@ class TikTokManagerMainWindow(QMainWindow):
         pos = self.btn_settings.mapToGlobal(QPoint(0, self.btn_settings.height() + 4))
         self.settings_menu.exec(pos)
 
+    def _dialog_factories(self) -> dict[str, Any]:
+        """Builders of the reusable menu dialogs (DialogCache keys)."""
+        from src.presentation.dialogs.upload_settings_dialog import UploadSettingsDialog
+
+        return {
+            "project_manager": lambda: ProjectManagerDialog(self.project_repo, self),
+            "proxy_manager": lambda: ProxyManagerDialog(self.proxy_repo, self.proxy_service, self),
+            "api_cookie": lambda: ApiCookieDialog(vault=self.vault, parent=self),
+            "permissions": lambda: PermissionsDialog(parent=self),
+            "sync_transfer": lambda: SyncTransferDialog(
+                project_repo=self.project_repo, profile_repo=self.profile_repo, proxy_repo=self.proxy_repo, parent=self
+            ),
+            "table_settings": lambda: TableSettingsDialog(hidden_columns=self.hidden_columns, parent=self),
+            "user_guide": lambda: UserGuideDialog(parent=self),
+            "trash": lambda: TrashDialog(profile_repo=self.profile_repo, parent=self),
+            "upload_settings": lambda: UploadSettingsDialog(
+                store=self._settings(), on_saved=self._upload_settings_saved, parent=self
+            ),
+        }
+
+    def _prewarm_dialogs(self, stagger_ms: int = 0) -> None:
+        """Builds the menu dialogs ahead of their first opening; with ``stagger_ms`` one per tick so the idle
+        GUI never freezes for more than one dialog at a time."""
+        for index, (key, factory) in enumerate(self._dialog_factories().items()):
+            if stagger_ms <= 0:
+                self._dialogs.prewarm(key, factory)
+            else:
+                QTimer.singleShot(index * stagger_ms, lambda k=key, f=factory: self._dialogs.prewarm(k, f))
+
     def _on_open_project_manager(self) -> None:
         try:
-            dlg = ProjectManagerDialog(self.project_repo, self)
+            dlg = self._dialogs.get("project_manager", self._dialog_factories()["project_manager"])
             dlg.exec()
             self.refresh_all_data()
         except Exception as e:
@@ -867,7 +901,7 @@ class TikTokManagerMainWindow(QMainWindow):
 
     def _on_open_proxy_manager(self) -> None:
         try:
-            dlg = ProxyManagerDialog(self.proxy_repo, self.proxy_service, self)
+            dlg = self._dialogs.get("proxy_manager", self._dialog_factories()["proxy_manager"])
             dlg.exec()
             self.refresh_profiles()
         except Exception as e:
@@ -1318,7 +1352,7 @@ class TikTokManagerMainWindow(QMainWindow):
 
     def _on_api_cookie(self) -> None:
         try:
-            dlg = ApiCookieDialog(vault=self.vault, parent=self)
+            dlg = self._dialogs.get("api_cookie", self._dialog_factories()["api_cookie"])
             dlg.exec()
         except Exception as e:
             logger.error("ApiCookieDialog error: %s", e)
@@ -1331,7 +1365,7 @@ class TikTokManagerMainWindow(QMainWindow):
 
     def _on_permissions(self) -> None:
         try:
-            dlg = PermissionsDialog(parent=self)
+            dlg = self._dialogs.get("permissions", self._dialog_factories()["permissions"])
             dlg.exec()
         except Exception as e:
             logger.error("PermissionsDialog error: %s", e)
@@ -1344,12 +1378,7 @@ class TikTokManagerMainWindow(QMainWindow):
 
     def _on_send_recv(self) -> None:
         try:
-            dlg = SyncTransferDialog(
-                project_repo=self.project_repo,
-                profile_repo=self.profile_repo,
-                proxy_repo=self.proxy_repo,
-                parent=self,
-            )
+            dlg = self._dialogs.get("sync_transfer", self._dialog_factories()["sync_transfer"])
             if dlg.exec():
                 self.refresh_all_data()
         except Exception as e:
@@ -1363,7 +1392,9 @@ class TikTokManagerMainWindow(QMainWindow):
 
     def _on_table_cfg(self) -> None:
         try:
-            dlg = TableSettingsDialog(hidden_columns=self.hidden_columns, parent=self)
+            dlg = self._dialogs.get(
+                "table_settings", self._dialog_factories()["table_settings"], hidden_columns=self.hidden_columns
+            )
             if dlg.exec():
                 self.hidden_columns = dlg.hidden_columns
                 for col_idx in range(self.profile_table.columnCount()):
@@ -1391,7 +1422,7 @@ class TikTokManagerMainWindow(QMainWindow):
 
     def _on_guide(self) -> None:
         try:
-            dlg = UserGuideDialog(parent=self)
+            dlg = self._dialogs.get("user_guide", self._dialog_factories()["user_guide"])
             dlg.exec()
         except Exception as e:
             logger.error("UserGuideDialog error: %s", e)
@@ -1958,7 +1989,7 @@ class TikTokManagerMainWindow(QMainWindow):
 
     def _on_open_trash(self) -> None:
         try:
-            dlg = TrashDialog(profile_repo=self.profile_repo, parent=self)
+            dlg = self._dialogs.get("trash", self._dialog_factories()["trash"])
             dlg.exec()
             self.refresh_profiles()
         except Exception as e:
@@ -2050,6 +2081,25 @@ class TikTokManagerMainWindow(QMainWindow):
             if dlg.auto_start_upload:
                 self._on_start_upload_queue()
 
+    def _get_selected_profile_optimal_schedule(self) -> tuple[int | None, str | None]:
+        selected_profiles = self.profile_table.get_selected_profile_ids()
+        if not selected_profiles:
+            return None, None
+        try:
+            import json as _json
+            p_row = self.profile_repo.get_by_id(selected_profiles[0])
+            if p_row:
+                opt_h = p_row.get("optimal_hour")
+                raw_opt = p_row.get("optimal_posting_hours_json")
+                opt_win = None
+                if raw_opt:
+                    opt_data = _json.loads(raw_opt) if isinstance(raw_opt, str) else raw_opt
+                    opt_win = opt_data.get("peak_window")
+                return opt_h, opt_win
+        except Exception:
+            pass
+        return None, None
+
     def _on_schedule_videos(self) -> None:
         if not self._feature_allowed(Feature.UPLOAD):
             return
@@ -2064,7 +2114,13 @@ class TikTokManagerMainWindow(QMainWindow):
             return
 
         selected_profiles = self.profile_table.get_selected_profile_ids()
-        dlg = ScheduleVideoDialog(video_count=len(available_videos), parent=self)
+        opt_h, opt_win = self._get_selected_profile_optimal_schedule()
+        dlg = ScheduleVideoDialog(
+            video_count=len(available_videos),
+            optimal_hour=opt_h,
+            optimal_window=opt_win,
+            parent=self,
+        )
         if dlg.exec() and dlg.generated_schedules:
             updated_count = 0
             is_studio = getattr(dlg, "is_studio_schedule", False)
@@ -2114,7 +2170,13 @@ class TikTokManagerMainWindow(QMainWindow):
 
         available = self.video_repo.list_available()
         selected_profiles = self.profile_table.get_selected_profile_ids()
-        dlg = ScheduleVideoDialog(video_count=len(selected_ids_or_rows), parent=self)
+        opt_h, opt_win = self._get_selected_profile_optimal_schedule()
+        dlg = ScheduleVideoDialog(
+            video_count=len(selected_ids_or_rows),
+            optimal_hour=opt_h,
+            optimal_window=opt_win,
+            parent=self,
+        )
         if dlg.exec() and dlg.generated_schedules:
             updated_count = 0
             is_studio = getattr(dlg, "is_studio_schedule", False)
@@ -2624,18 +2686,20 @@ class TikTokManagerMainWindow(QMainWindow):
         QApplication.quit()
 
     def _on_upload_settings(self) -> None:
-        from src.presentation.dialogs.upload_settings_dialog import UploadSettingsDialog
 
-        def _apply(settings: Any) -> None:
-            self.tiktok_adapter.apply_settings(settings)
-            InfoBar.success(
-                title="Cài Đặt Upload",
-                content="Đã lưu. Áp dụng cho các lượt upload tiếp theo.",
-                position=InfoBarPosition.TOP,
-                parent=self,
-            )
+        dlg = self._dialogs.get(
+            "upload_settings", self._dialog_factories()["upload_settings"], on_saved=self._upload_settings_saved
+        )
+        dlg.exec()
 
-        UploadSettingsDialog(store=self._settings(), on_saved=_apply, parent=self).exec()
+    def _upload_settings_saved(self, settings: Any) -> None:
+        self.tiktok_adapter.apply_settings(settings)
+        InfoBar.success(
+            title="Cài Đặt Upload",
+            content="Đã lưu. Áp dụng cho các lượt upload tiếp theo.",
+            position=InfoBarPosition.TOP,
+            parent=self,
+        )
 
     def _on_open_license(self) -> None:
         if self.license_service is None:

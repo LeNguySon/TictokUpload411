@@ -9,7 +9,9 @@ from PyQt6.QtCore import QDateTime
 from PyQt6.QtWidgets import (
     QDialog,
     QFormLayout,
+    QFrame,
     QHBoxLayout,
+    QLabel,
     QVBoxLayout,
     QWidget,
 )
@@ -27,6 +29,7 @@ from src.presentation.dialogs.dialog_helpers import (
     STANDARD_DIALOG_SPACING,
     create_dialog_header,
     fit_dialog_to_content,
+    style_card,
 )
 
 
@@ -85,14 +88,22 @@ class ScheduleVideoDialog(QDialog):
     Supports both Local Queue dispatch and TikTok Studio Native Cloud scheduling.
     """
 
-    def __init__(self, video_count: int, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        video_count: int,
+        optimal_hour: int | None = None,
+        optimal_window: str | None = None,
+        parent: QWidget | None = None,
+    ) -> None:
         super().__init__(parent)
         self.video_count = max(1, video_count)
+        self.optimal_hour = optimal_hour
+        self.optimal_window = optimal_window
         self.generated_schedules: list[str] = []
         self.is_studio_schedule: bool = False
 
         self.setWindowTitle("Lên Lịch Đăng Video Hàng Loạt")
-        self.resize(480, 360)
+        self.resize(500, 390)
         self._init_ui()
         fit_dialog_to_content(self)
 
@@ -112,6 +123,24 @@ class ScheduleVideoDialog(QDialog):
             parent=self,
         )
         layout.addWidget(header)
+
+        # Smart Posting Hour Recommendation Banner
+        if self.optimal_hour is not None or self.optimal_window:
+            window_text = self.optimal_window or f"{self.optimal_hour:02d}:00 - {(self.optimal_hour + 2) % 24:02d}:00"
+            opt_frame = QFrame(self)
+            style_card(opt_frame, kind="warning", object_name="optimalHourBanner")
+            opt_lay = QHBoxLayout(opt_frame)
+            opt_lay.setContentsMargins(12, 6, 12, 6)
+
+            lbl_opt = QLabel(f"⚡ <b>Giờ vàng đề xuất cho kênh:</b> {window_text}")
+            lbl_opt.setStyleSheet("font-size: 12px; color: #D97706;")
+            opt_lay.addWidget(lbl_opt)
+            opt_lay.addStretch(1)
+
+            self.btn_use_optimal = PushButton(FluentIcon.SPEED_HIGH, "Đặt vào giờ vàng", self)
+            self.btn_use_optimal.clicked.connect(self._set_to_next_optimal_hour)
+            opt_lay.addWidget(self.btn_use_optimal)
+            layout.addWidget(opt_frame)
 
         form = QFormLayout()
         form.setSpacing(10)
@@ -163,6 +192,14 @@ class ScheduleVideoDialog(QDialog):
             min_dt = QDateTime.currentDateTime().addSecs(1200)  # +20 min
             if current_dt < min_dt:
                 self.dt_start.setDateTime(min_dt)
+
+    def _set_to_next_optimal_hour(self) -> None:
+        target_h = self.optimal_hour if self.optimal_hour is not None else 12
+        now = datetime.now()
+        candidate = now.replace(hour=target_h, minute=0, second=0, microsecond=0)
+        if candidate <= now + timedelta(minutes=20):
+            candidate += timedelta(days=1)
+        self.dt_start.setDateTime(QDateTime(candidate))
 
     def _on_apply(self) -> None:
         qdt = self.dt_start.dateTime()
