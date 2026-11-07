@@ -9,6 +9,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from src.infrastructure.credentials.field_crypto import protect_fields
 from src.infrastructure.database.connection import DEFAULT_DB_PATH, db_session
 
 
@@ -73,7 +74,7 @@ class ProfileRepository:
         with db_session(self.db_path) as conn:
             col_rows = conn.execute("PRAGMA table_info(profiles);").fetchall()
             valid_cols = {r["name"] for r in col_rows}
-            clean_payload = {k: v for k, v in payload.items() if k in valid_cols}
+            clean_payload = protect_fields({k: v for k, v in payload.items() if k in valid_cols})
 
             cols = list(clean_payload.keys())
             placeholders = ", ".join("?" for _ in cols)
@@ -190,7 +191,7 @@ class ProfileRepository:
         with db_session(self.db_path) as conn:
             col_rows = conn.execute("PRAGMA table_info(profiles);").fetchall()
             valid_cols = {r["name"] for r in col_rows}
-            clean_payload = {k: v for k, v in payload.items() if k in valid_cols}
+            clean_payload = protect_fields({k: v for k, v in payload.items() if k in valid_cols})
             if not clean_payload:
                 return 0
 
@@ -244,7 +245,7 @@ class ProfileRepository:
         with db_session(self.db_path) as conn:
             col_rows = conn.execute("PRAGMA table_info(profiles);").fetchall()
             valid_cols = {r["name"] for r in col_rows}
-            clean_payload = {k: v for k, v in payload.items() if k in valid_cols}
+            clean_payload = protect_fields({k: v for k, v in payload.items() if k in valid_cols})
             if not clean_payload:
                 return False
 

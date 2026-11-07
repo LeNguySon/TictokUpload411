@@ -9,6 +9,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+from src.infrastructure.credentials.field_crypto import protect, protect_fields
 from src.infrastructure.database.connection import DEFAULT_DB_PATH, db_session
 
 
@@ -106,7 +107,7 @@ class ProxyRepository:
                     protocol = excluded.protocol,
                     change_ip_url = excluded.change_ip_url;
                 """,
-                (host, port, username, password, protocol, proxy_type, change_ip_url),
+                (host, port, username, protect(password), protocol, proxy_type, change_ip_url),
             )
             # On conflict (existing proxy) lastrowid is not that row's id: look it up.
             row = conn.execute(
@@ -135,13 +136,13 @@ class ProxyRepository:
             if row:
                 conn.execute(
                     "UPDATE proxies SET password = ?, protocol = ?, change_ip_url = ? WHERE id = ?;",
-                    (password, protocol, change_ip_url, row["id"]),
+                    (protect(password), protocol, change_ip_url, row["id"]),
                 )
                 return int(row["id"])
             cur = conn.execute(
                 "INSERT INTO proxies (host, port, username, password, protocol, proxy_type, change_ip_url) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?);",
-                (host, port, username, password, protocol, proxy_type, change_ip_url),
+                (host, port, username, protect(password), protocol, proxy_type, change_ip_url),
             )
             return int(cur.lastrowid) if cur.lastrowid is not None else None
 
@@ -168,7 +169,7 @@ class ProxyRepository:
                         protocol = excluded.protocol,
                         change_ip_url = excluded.change_ip_url;
                     """,
-                    (host, port, username, password, protocol, proxy_type, change_ip_url),
+                    (host, port, username, protect(password), protocol, proxy_type, change_ip_url),
                 )
                 seen_keys.add(key)
 
@@ -230,7 +231,7 @@ class ProxyRepository:
             return False
         cols = []
         vals = []
-        for k, v in kwargs.items():
+        for k, v in protect_fields(kwargs).items():
             cols.append(f"{k} = ?")
             vals.append(v)
         vals.append(proxy_id)

@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from src.application.signals.app_signals import AppSignalBus
+from src.infrastructure.credentials.field_crypto import protect_fields
 from src.infrastructure.database.connection import db_session
 
 logger = logging.getLogger(__name__)
@@ -398,6 +399,7 @@ class TikTokNetworkSniffer:
                 updates.pop("name")
         if not updates:
             return
+        updates = protect_fields(updates)  # any secret column (e.g. cookies) is stored DPAPI-protected
         set_clauses = [f"{k} = ?" for k in updates.keys()]
         sql = f"UPDATE profiles SET {', '.join(set_clauses)}, updated_at = CURRENT_TIMESTAMP WHERE id = ?;"
         params = list(updates.values()) + [profile_id]
