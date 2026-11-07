@@ -305,7 +305,8 @@ class VideoRepository:
             return [dict(r) for r in rows]
 
     def reset_status_to_available(self, video_ids: list[int] | int) -> int:
-        """Resets video(s) back to 'available' status and clears error_message."""
+        """Resets video(s) back to 'available' and clears error_message. Published and uploading videos are never
+        touched: a published video back in the queue would be posted a second time."""
         ids = [video_ids] if isinstance(video_ids, int) else list(video_ids)
         if not ids:
             return 0
@@ -315,14 +316,14 @@ class VideoRepository:
                 f"""
                 UPDATE video_registry
                 SET status = 'available', error_message = NULL, updated_at = CURRENT_TIMESTAMP
-                WHERE id IN ({placeholders});
+                WHERE id IN ({placeholders}) AND status IN ('available', 'reserved', 'failed');
                 """,
                 tuple(ids),
             )
             return cur.rowcount
 
     def assign_profile_to_videos(self, profile_id: int, video_ids: list[int]) -> int:
-        """Assigns target profile_id to the given video IDs."""
+        """Assigns target profile_id to the given videos, except published / uploading ones (their channel is fixed)."""
         if not video_ids:
             return 0
         placeholders = ", ".join("?" for _ in video_ids)
@@ -331,7 +332,7 @@ class VideoRepository:
                 f"""
                 UPDATE video_registry
                 SET assigned_profile_id = ?, updated_at = CURRENT_TIMESTAMP
-                WHERE id IN ({placeholders});
+                WHERE id IN ({placeholders}) AND status IN ('available', 'reserved', 'failed');
                 """,
                 (profile_id, *video_ids),
             )

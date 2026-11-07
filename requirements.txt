@@ -6,7 +6,7 @@
 # SamMonny Antidetect SDK (private, not on PyPI) — vendored wheel in ./vendor
 # Run pip from the repo root so the relative path resolves.
 --find-links ./vendor
-sammonny==1.8.5
+sammonny==1.8.6
 
 # GUI Framework & Windows 11 Fluent Theme
 PyQt6>=6.8.0,<6.12  # 6.12.0 ships invalid .pyi stubs (QtGui, QtDBus) that break mypy

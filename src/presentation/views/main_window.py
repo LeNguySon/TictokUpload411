@@ -2751,9 +2751,11 @@ class TikTokManagerMainWindow(QMainWindow):
             return
         count = self.video_repo.reset_status_to_available(video_ids)
         self.refresh_videos()
+        skipped = len(set(video_ids)) - count
+        skipped_note = f" (bỏ qua {skipped} video đã đăng hoặc đang đăng: không đăng lại)" if skipped > 0 else ""
         InfoBar.success(
             title="Đặt Lại Trạng Thái",
-            content=f"Đã đặt lại {count} video về trạng thái 'Sẵn sàng đăng' (xóa lỗi cũ).",
+            content=f"Đã đặt lại {count} video về trạng thái 'Sẵn sàng đăng' (xóa lỗi cũ){skipped_note}.",
             position=InfoBarPosition.TOP,
             duration=3500,
             parent=self,
@@ -2777,9 +2779,11 @@ class TikTokManagerMainWindow(QMainWindow):
         p_name = (p_row.get("name") if p_row else None) or f"#{target_profile_id}"
         count = self.video_repo.assign_profile_to_videos(target_profile_id, video_ids)
         self.refresh_videos()
+        skipped = len(set(video_ids)) - count
+        skipped_note = f" (bỏ qua {skipped} video đã đăng hoặc đang đăng)" if skipped > 0 else ""
         InfoBar.success(
             title="Gán Tài Khoản",
-            content=f"Đã gán {count} video cho tài khoản '{p_name}'.",
+            content=f"Đã gán {count} video cho tài khoản '{p_name}'{skipped_note}.",
             position=InfoBarPosition.TOP,
             duration=3500,
             parent=self,

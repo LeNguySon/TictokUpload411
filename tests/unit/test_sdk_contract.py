@@ -1,4 +1,4 @@
-"""Contract checks between our code and the installed SamMonny SDK (1.8.5).
+"""Contract checks between our code and the installed SamMonny SDK (1.8.6).
 
 `sammonny.MemoryManager.trim_working_set()` does not exist in the SDK; the calls were swallowed by
 try/except, so the documented post-task RAM trim never ran.
