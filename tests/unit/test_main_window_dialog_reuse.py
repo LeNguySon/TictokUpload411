@@ -93,4 +93,4 @@ def test_one_shot_dialogs_do_not_pile_up_as_hidden_children(window, qapp, handle
         for _ in range(3):
             getattr(window, handler)(*args)
             assert drain_ui_tasks()
-    assert count() == before
+    assert count() <= before + 1  # only the last finished dialog is kept (until the next one opens)

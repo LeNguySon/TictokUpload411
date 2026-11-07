@@ -192,6 +192,7 @@ class TikTokManagerMainWindow(QMainWindow):
         self.thread_pool = ThreadPoolManager.instance()
         # Menu dialogs are built once and re-shown: a new top-level window costs 45-110 ms (see DialogCache).
         self._dialogs = DialogCache()
+        self._finished_dialogs: list[QDialog] = []
         self._is_status_sync_running: bool = False
 
         # Application Services
@@ -856,6 +857,28 @@ class TikTokManagerMainWindow(QMainWindow):
         pos = self.btn_settings.mapToGlobal(QPoint(0, self.btn_settings.height() + 4))
         self.settings_menu.exec(pos)
 
+    def _exec_dialog(self, dlg: QDialog) -> int:
+        """Runs a one-shot dialog; the PREVIOUS finished one is deleted now.
+
+        Closed dialogs used to stay alive as hidden children of the main window (27 after 36 openings), each a
+        full widget tree with Fluent event filters, so the app got slower the longer it ran. A finished dialog is
+        kept until the next one opens (its caller may still read its results) and then deleted synchronously;
+        deferred deletion (deleteLater) crashed when it ran in the middle of later event processing."""
+        self._discard_finished_dialogs()
+        try:
+            return int(dlg.exec())
+        finally:
+            self._finished_dialogs.append(dlg)
+
+    def _discard_finished_dialogs(self) -> None:
+        from PyQt6 import sip
+
+        while self._finished_dialogs:
+            old = self._finished_dialogs.pop()
+            if isinstance(old, QWidget) and not sip.isdeleted(old):  # (tests may pass mocks)
+                old.setParent(None)  # leave the window's children now
+                sip.delete(old)
+
     def _dialog_factories(self) -> dict[str, Any]:
         """Builders of the reusable menu dialogs (DialogCache keys)."""
         from src.presentation.dialogs.upload_settings_dialog import UploadSettingsDialog
@@ -922,7 +945,7 @@ class TikTokManagerMainWindow(QMainWindow):
                 vault=self.vault,
                 parent=self,
             )
-            if dlg.exec():
+            if self._exec_dialog(dlg):
                 self.refresh_profiles()
                 InfoBar.success(
                     title="Hồ Sơ Mới",
@@ -947,7 +970,7 @@ class TikTokManagerMainWindow(QMainWindow):
                 proxy_repo=self.proxy_repo,
                 parent=self,
             )
-            if dlg.exec():
+            if self._exec_dialog(dlg):
                 self.refresh_profiles()
         except Exception as e:
             logger.error("BulkAddProfileDialog error: %s", e)
@@ -1478,7 +1501,7 @@ class TikTokManagerMainWindow(QMainWindow):
                 proxy_repo=self.proxy_repo,
                 parent=self,
             )
-            if dlg.exec():
+            if self._exec_dialog(dlg):
                 self.refresh_profiles()
                 InfoBar.success(
                     title="Thành Công",
@@ -1538,7 +1561,7 @@ class TikTokManagerMainWindow(QMainWindow):
             "Chỉ dùng khi bạn cố ý không dùng proxy. Gán proxy lại bất cứ lúc nào để tắt chế độ này.",
             self,
         )
-        if not box.exec():
+        if not self._exec_dialog(box):
             return
         self.profile_repo.set_direct_connection(profile_ids)
         self.refresh_profiles()
@@ -1640,7 +1663,7 @@ class TikTokManagerMainWindow(QMainWindow):
                 project_repo=self.project_repo,
                 parent=self,
             )
-            if dlg.exec():
+            if self._exec_dialog(dlg):
                 self.refresh_profiles()
                 InfoBar.success(
                     title="Thành Công",
@@ -1667,7 +1690,7 @@ class TikTokManagerMainWindow(QMainWindow):
                 project_repo=self.project_repo,
                 parent=self,
             )
-            if dlg.exec():
+            if self._exec_dialog(dlg):
                 self.refresh_profiles()
                 InfoBar.success(
                     title="Cập Nhật Thành Công",
@@ -1705,7 +1728,7 @@ class TikTokManagerMainWindow(QMainWindow):
             signal_bus=self.signal_bus,
             parent=self,
         )
-        dlg.exec()
+        self._exec_dialog(dlg)
 
     def _on_open_channel_radar(self, profile_id: int | None = None) -> None:
         if not self._feature_allowed(Feature.CHANNEL_HEALTH):
@@ -1736,7 +1759,7 @@ class TikTokManagerMainWindow(QMainWindow):
                 profile=profile,
                 videos=videos,
             )
-            dlg.exec()
+            self._exec_dialog(dlg)
 
         def radar_failed(err: str) -> None:
             InfoBar.error(title="Lỗi Radar Kênh", content=err, position=InfoBarPosition.TOP, parent=self)
@@ -1758,7 +1781,7 @@ class TikTokManagerMainWindow(QMainWindow):
             "minh lại vì thiết bị \"thay đổi\". Hồ sơ đang mở trình duyệt sẽ được bỏ qua.",
             self,
         )
-        return bool(box.exec())
+        return bool(self._exec_dialog(box))
 
     def _on_regenerate_fingerprints(self, profile_ids: list[int]) -> None:
         """Right-click > Cập Nhật Vân Tay Trình Duyệt: new fixed fingerprint for the selected profiles."""
@@ -1820,7 +1843,7 @@ class TikTokManagerMainWindow(QMainWindow):
             parent=self,
             db_path=self.db_path,
         )
-        dlg.exec()
+        self._exec_dialog(dlg)
         self.refresh_profiles()
 
     def _on_edit_profile(self, profile_id: int) -> None:
@@ -1836,7 +1859,7 @@ class TikTokManagerMainWindow(QMainWindow):
                 profile_data=p,
                 parent=self,
             )
-            if dlg.exec():
+            if self._exec_dialog(dlg):
                 self.refresh_profiles()
                 InfoBar.success(
                     title="Cập Nhật Hồ Sơ",
@@ -1974,7 +1997,7 @@ class TikTokManagerMainWindow(QMainWindow):
             f"Bạn có chắc chắn muốn chuyển {count} hồ sơ đã chọn vào thùng rác không?\n(Bạn có thể phục hồi hồ sơ bất kỳ lúc nào từ menu Thùng Rác).",
             self,
         )
-        if not msg_box.exec():
+        if not self._exec_dialog(msg_box):
             return
 
         for p_id in profile_ids:
@@ -2070,7 +2093,7 @@ class TikTokManagerMainWindow(QMainWindow):
             project_repo=self.project_repo,
             parent=self,
         )
-        if dlg.exec():
+        if self._exec_dialog(dlg):
             self.refresh_videos()
             InfoBar.success(
                 title="Phân Bổ Hoàn Tất",
@@ -2121,7 +2144,7 @@ class TikTokManagerMainWindow(QMainWindow):
             optimal_window=opt_win,
             parent=self,
         )
-        if dlg.exec() and dlg.generated_schedules:
+        if self._exec_dialog(dlg) and dlg.generated_schedules:
             updated_count = 0
             is_studio = getattr(dlg, "is_studio_schedule", False)
             for idx, sched_time in enumerate(dlg.generated_schedules):
@@ -2177,7 +2200,7 @@ class TikTokManagerMainWindow(QMainWindow):
             optimal_window=opt_win,
             parent=self,
         )
-        if dlg.exec() and dlg.generated_schedules:
+        if self._exec_dialog(dlg) and dlg.generated_schedules:
             updated_count = 0
             is_studio = getattr(dlg, "is_studio_schedule", False)
             for idx, target in enumerate(selected_ids_or_rows):
@@ -2265,7 +2288,7 @@ class TikTokManagerMainWindow(QMainWindow):
             return
 
         dlg = VideoMetadataDialog(video_data=v, parent=self)
-        if dlg.exec():
+        if self._exec_dialog(dlg):
             new_title = dlg.video_data.get("title", "")
             self.video_repo.update_metadata(v["id"], file_name=new_title)
             self.refresh_videos()
@@ -2601,7 +2624,7 @@ class TikTokManagerMainWindow(QMainWindow):
             f"Bạn có chắc chắn muốn xóa {count} video đã chọn khỏi hàng đợi không?",
             self,
         )
-        if not msg_box.exec():
+        if not self._exec_dialog(msg_box):
             return
 
         self.video_repo.delete_many(video_ids_or_rows)
@@ -2621,7 +2644,7 @@ class TikTokManagerMainWindow(QMainWindow):
             "Bạn có chắc chắn muốn dọn sạch toàn bộ video đang hiển thị trong bảng không?",
             self,
         )
-        if msg_box.exec():
+        if self._exec_dialog(msg_box):
             self.video_table.setRowCount(0)
             self.lbl_video_header.setText("Bảng video (Đã chọn 0 / 0)")
             InfoBar.info(
@@ -2676,7 +2699,7 @@ class TikTokManagerMainWindow(QMainWindow):
         self._license_locked = True
         self.hide()
         dlg = LicenseActivationDialog(self.license_service, state)
-        accepted = dlg.exec() == QDialog.DialogCode.Accepted
+        accepted = self._exec_dialog(dlg) == QDialog.DialogCode.Accepted
         self._license_locked = False
         if accepted:
             self._apply_license()
@@ -2705,7 +2728,7 @@ class TikTokManagerMainWindow(QMainWindow):
         if self.license_service is None:
             self.license_service = LicenseService()
             self.license_service.validate()
-        if LicenseActivationDialog(self.license_service, parent=self).exec() == QDialog.DialogCode.Accepted:
+        if self._exec_dialog(LicenseActivationDialog(self.license_service, parent=self)) == QDialog.DialogCode.Accepted:
             self._apply_license()
 
     def _settings(self) -> QSettings:

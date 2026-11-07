@@ -93,3 +93,14 @@
   `dist_standalone/sammonny-antidetect/bin/`, chạy `serve --port 7654 --sdk-port 36912`, cwd = gốc repo SDK.
   Daemon khởi động bằng `SamMonnyDaemonSupervisor.ensure_daemon_running()` sẽ TẮT khi tiến trình khởi động thoát
   (atexit) ⇒ khởi động thủ công bằng Start-Process cho daemon độc lập.
+
+## Dialog mở bị giật (đo 2026-11-07 trên CSDL thật)
+- Tạo cửa sổ top-level MỚI tốn 45-110 ms native trên máy này (QDialog trống, mọi tuỳ chọn QT_QPA_PLATFORM).
+- Qt 6: `done()`/`reject()`/`accept()`/`close()` HUỶ cửa sổ native ⇒ giữ đối tượng dialog vẫn phải tạo lại cửa sổ.
+  Chỉ `hide()` giữ được (mở lại ~0 ms). ⇒ `ReusableDialogMixin` (dialog_cache.py) đóng bằng hide();
+  `DialogCache` giữ 9 dialog menu + `prepare_reopen()` + tạo sẵn khi rảnh (`_prewarm_dialogs`, cách nhau 700 ms).
+- Dialog đóng xong từng nằm lại làm con ẩn của main window (27 sau 36 lần mở). Nay `_exec_dialog()` giữ tối đa 1
+  dialog đã đóng và xoá đồng bộ (`sip.delete`) ở lần mở kế tiếp. `deleteLater()` ngay sau exec ⇒ access violation.
+- Mã hoá DPAPI: `reveal()` phải có cache, nếu không mọi `SELECT * FROM profiles` giải mã lại mọi cookie (~1 ms/giá trị).
+- Đo: script mở dialog qua handler thật với `QDialog.exec` thay bằng show+done; KHÔNG đổi WA_DontShowOnScreen
+  trên cửa sổ đã tạo (Qt tạo lại cửa sổ ⇒ số đo sai).
