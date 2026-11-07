@@ -14,6 +14,7 @@ from typing import Any, cast
 
 from src.infrastructure.credentials.dpapi import unprotect_text
 from src.infrastructure.database.connection import get_db_connection
+from src.infrastructure.tiktok import request_time
 
 logger = logging.getLogger(__name__)
 
@@ -232,7 +233,7 @@ class GoLoginTikTokClient:
             {"insight_type": "INSIGHT_TYPE_ANALYTICS_FOLLOWER_AGE_PERCENT", "data_date_range": "DATA_DATE_RANGE_7D"},
             {"insight_type": "INSIGHT_TYPE_ANALYTICS_VIEWER_TOTAL_VIEWER", "data_date_range": "DATA_DATE_RANGE_7D"},
         ]
-        url_demo = f"https://www.tiktok.com/tiktok/v1/analytics/insights/?type_requests={_json.dumps(demo_requests)}&time_offset=25200&is_dark_mode=false"
+        url_demo = f"https://www.tiktok.com/tiktok/v1/analytics/insights/?type_requests={_json.dumps(demo_requests)}&time_offset={request_time.local_utc_offset_seconds()}&is_dark_mode=false"
         res_demo = self.request_api(profile_id, url_demo, method="GET", timeout=15)
         demographics = parse_audience_demographics(res_demo)
 
@@ -243,7 +244,7 @@ class GoLoginTikTokClient:
             {"insigh_type": "top10_other_creators_recommendation"},
             {"insigh_type": "top10_other_videos_recommendation"},
         ]
-        url_aweme = f"https://www.tiktok.com/aweme/v2/data/insight/?aid=1988&tz_offset=25200&app_language=en&type_requests={_json.dumps(aweme_requests)}"
+        url_aweme = f"https://www.tiktok.com/aweme/v2/data/insight/?aid=1988&tz_offset={request_time.local_utc_offset_seconds()}&app_language=en&type_requests={_json.dumps(aweme_requests)}"
         res_aweme = self.request_api(profile_id, url_aweme, method="GET", timeout=15)
 
         raw_hours = res_aweme.get("follower_active_history_hours")
@@ -277,7 +278,7 @@ class GoLoginTikTokClient:
             {"insigh_type": "video_retention_rate_realtime", "aweme_id": item_str},
             {"insigh_type": "video_finish_rate_realtime", "aweme_id": item_str},
         ]
-        url = f"https://www.tiktok.com/aweme/v2/data/insight/?aid=1988&tz_offset=25200&app_language=en&type_requests={_json.dumps(video_requests)}"
+        url = f"https://www.tiktok.com/aweme/v2/data/insight/?aid=1988&tz_offset={request_time.local_utc_offset_seconds()}&app_language=en&type_requests={_json.dumps(video_requests)}"
         res = self.request_api(profile_id, url, method="GET", timeout=15)
 
         search_terms = parse_search_terms(res.get("item_search_terms"))

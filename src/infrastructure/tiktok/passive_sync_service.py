@@ -20,6 +20,7 @@ from typing import Any
 from src.application.signals.app_signals import AppSignalBus
 from src.infrastructure.database.repositories.profile_repository import ProfileRepository
 from src.infrastructure.database.repositories.proxy_repository import ProxyRepository
+from src.infrastructure.tiktok import request_time
 from src.infrastructure.tiktok.avatar_cache_service import download_and_cache_avatar
 from src.infrastructure.tiktok.dom_hydration_extractor import TikTokDomHydrationExtractor
 from src.infrastructure.tiktok.gologin_tiktok_client import GoLoginTikTokClient
@@ -383,7 +384,7 @@ class PassiveTikTokSyncService:
                 {"insight_type": "INSIGHT_TYPE_ANALYTICS_VIEWER_NEW_VIEWER", "data_date_range": "DATA_DATE_RANGE_7D"},
             ]
             req_str = _json.dumps(type_requests)
-            url_insights = f"https://www.tiktok.com/tiktok/v1/analytics/insights/?type_requests={req_str}&time_offset=25200&is_dark_mode=false"
+            url_insights = f"https://www.tiktok.com/tiktok/v1/analytics/insights/?type_requests={req_str}&time_offset={request_time.local_utc_offset_seconds()}&is_dark_mode=false"
             resp_insights = self.client.request_api(profile_id, url_insights, method="GET", timeout=12)
             insights_success = False
             if isinstance(resp_insights, dict) and any(
@@ -396,7 +397,8 @@ class PassiveTikTokSyncService:
             # Also query aweme/v2/data/insight for retention (returning & new viewers)
             try:
                 url_aweme = (
-                    "https://www.tiktok.com/aweme/v2/data/insight/?aid=1988&tz_offset=25200&app_language=vi&"
+                    f"https://www.tiktok.com/aweme/v2/data/insight/?aid=1988&tz_offset={request_time.local_utc_offset_seconds()}"
+                    "&app_language=vi&"
                     'type_requests=[{"insigh_type":"user_rewards_data"},{"insigh_type":"vv_history","days":7,"end_days":1},{"insigh_type":"new_viewer","days":7,"end_days":1},{"insigh_type":"returning_viewer","days":7,"end_days":1}]'
                 )
                 resp_aweme = self.client.request_api(profile_id, url_aweme, method="GET", timeout=12)
