@@ -5,10 +5,13 @@ Clean Architecture: Infrastructure Layer.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from src.infrastructure.database.connection import DEFAULT_DB_PATH, db_session
 from src.infrastructure.database.migrations.schemas import DDL_BASE_SCHEMAS
+
+logger = logging.getLogger(__name__)
 
 
 def run_all_migrations(db_path: Path | str | None = None) -> list[str]:
@@ -72,7 +75,64 @@ def run_all_migrations(db_path: Path | str | None = None) -> list[str]:
         # Ensure index exists
         conn.execute("CREATE INDEX IF NOT EXISTS idx_video_registry_schedule ON video_registry(status, schedule_time);")
 
+    protect_plaintext_secrets(path)
     return get_database_tables(path)
+
+
+def protect_plaintext_secrets(db_path: Path | str, backup_dir: Path | str | None = None) -> dict[str, int]:
+    """DPAPI-protects secret values still stored as plaintext (written before field_crypto existed).
+
+    Idempotent: only non-empty values without the ``dpapi:v1:`` prefix are touched. When there is something
+    to migrate, the database is first copied to ``backup_dir`` (default: next to it). That copy still holds
+    the plaintext secrets: delete it once the app is confirmed to work. Returns updated values per table.
+    """
+    import sqlite3
+    import time
+
+    from src.infrastructure.credentials.field_crypto import PREFIX, SENSITIVE_COLUMNS, protect
+
+    path = Path(db_path)
+    pending: dict[str, list[str]] = {}
+    with db_session(path, write=False) as conn:
+        for table in ("profiles", "proxies"):
+            cols = [r["name"] for r in conn.execute(f"PRAGMA table_info({table});").fetchall()]
+            secret_cols = [c for c in cols if c in SENSITIVE_COLUMNS]
+            todo = [
+                c
+                for c in secret_cols
+                if conn.execute(
+                    f"SELECT 1 FROM {table} WHERE {c} IS NOT NULL AND {c} <> '' AND {c} NOT LIKE ? LIMIT 1;",
+                    (PREFIX + "%",),
+                ).fetchone()
+            ]
+            pending[table] = todo
+    counts = {"profiles": 0, "proxies": 0}
+    if not any(pending.values()):
+        return counts
+
+    target = Path(backup_dir) if backup_dir else path.parent
+    target.mkdir(parents=True, exist_ok=True)
+    backup = target / f"{path.stem}_before_secret_encryption_{time.strftime('%Y%m%d_%H%M%S')}.db"
+    src_con, dst_con = sqlite3.connect(path), sqlite3.connect(backup)
+    try:
+        src_con.backup(dst_con)
+    finally:
+        src_con.close()
+        dst_con.close()
+    logger.warning("Plaintext secrets found: database backed up to %s before encryption (delete it later)", backup)
+
+    with db_session(path) as conn:
+        for table, cols in pending.items():
+            for col in cols:
+                rows = conn.execute(
+                    f"SELECT id, {col} FROM {table} WHERE {col} IS NOT NULL AND {col} <> '' AND {col} NOT LIKE ?;",
+                    (PREFIX + "%",),
+                ).fetchall()
+                for row in rows:
+                    conn.execute(f"UPDATE {table} SET {col} = ? WHERE id = ?;", (protect(row[1]), row[0]))
+                counts[table] += len(rows)
+    logger.info("Protected %d profile and %d proxy secret values with DPAPI", counts["profiles"], counts["proxies"])
+    return counts
 
 
 def get_database_tables(db_path: Path | str | None = None) -> list[str]:
