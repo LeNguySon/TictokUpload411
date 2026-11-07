@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import Any, cast
 
 from src.application.signals.app_signals import AppSignalBus
 from src.infrastructure.database.connection import db_session
@@ -33,6 +34,12 @@ class _AvatarEgressBlocked(Exception):
     """The profile has no allowed route for the download (see resolve_profile_egress)."""
 
 
+def _profile_row(profile_id: int, db_path: Path | str | None) -> dict[str, Any]:
+    with db_session(db_path or Path("data/app.db"), write=False) as conn:
+        row = conn.execute("SELECT * FROM profiles WHERE id=?", (profile_id,)).fetchone()
+    return dict(row) if row else {}
+
+
 def _profile_egress(profile_id: int, db_path: Path | str | None) -> str | None:
     """Egress for the profile's avatar download, by the app's single egress rule (resolve_profile_egress):
     its proxy URL, or None when the user opted the profile into the machine's own IP (direct_connection).
@@ -52,15 +59,22 @@ def _profile_egress(profile_id: int, db_path: Path | str | None) -> str | None:
         raise _AvatarEgressBlocked(str(blocked)) from blocked
 
 
-def _http_get(url: str, proxy_url: str | None, timeout: float) -> bytes | None:
-    """GET through ``proxy_url``, or directly when it is None (profile opted into the machine's IP).
-    curl_cffi when installed, else urllib with a ProxyHandler."""
+def _http_get(
+    url: str, proxy_url: str | None, timeout: float, profile: dict[str, Any] | None = None
+) -> bytes | None:
+    """GET through ``proxy_url``, or directly when it is None (profile opted into the machine's IP), presenting the
+    profile's own browser (User-Agent, client hints, TLS). curl_cffi when installed, else urllib with a ProxyHandler."""
+    from src.infrastructure.tiktok.browser_identity import request_identity
+
+    identity_headers, impersonate = request_identity(profile or {})
     try:
         from curl_cffi import requests
         from curl_cffi.requests import ProxySpec
 
         proxies: ProxySpec | None = {"http": proxy_url, "https": proxy_url} if proxy_url else None
-        resp = requests.get(url, impersonate="chrome123", timeout=timeout, proxies=proxies)
+        resp = requests.get(
+            url, headers=identity_headers, impersonate=cast(Any, impersonate), timeout=timeout, proxies=proxies
+        )
         return resp.content if resp.status_code == 200 and resp.content else None
     except ImportError:
         pass
@@ -74,9 +88,7 @@ def _http_get(url: str, proxy_url: str | None, timeout: float) -> bytes | None:
 
     handler = urllib.request.ProxyHandler({"http": proxy_url, "https": proxy_url} if proxy_url else {})
     opener = urllib.request.build_opener(handler)
-    req = urllib.request.Request(
-        url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/123.0.0.0 Safari/537.36"}
-    )
+    req = urllib.request.Request(url, headers=identity_headers)
     try:
         with opener.open(req, timeout=timeout) as response:
             status = getattr(response, "status", getattr(response, "code", 200))
@@ -112,7 +124,7 @@ def download_and_cache_avatar(
         except _AvatarEgressBlocked as blocked:
             logger.warning("Avatar download skipped for profile %s: %s", profile_id, blocked)
             return None
-        content = _http_get(avatar_url, proxy_url, timeout)
+        content = _http_get(avatar_url, proxy_url, timeout, profile=_profile_row(profile_id, db_path))
 
         if not content or len(content) < 50:
             logger.warning("Downloaded avatar content is empty or too small for profile %s", profile_id)

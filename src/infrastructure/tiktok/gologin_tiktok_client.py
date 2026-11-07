@@ -148,12 +148,14 @@ class GoLoginTikTokClient:
         proxy_url = resolve_profile_egress(p, self.get_profile_proxy(profile_id))
         proxies = {"http": proxy_url, "https": proxy_url} if proxy_url else None
 
+        from src.infrastructure.tiktok.browser_identity import request_identity
+
+        # The profile's own browser identity (User-Agent, client hints, languages, TLS of the same Chrome).
+        identity_headers, impersonate = request_identity(p)
         req_headers = {
-            "User-Agent": p.get("user_agent")
-            or "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+            **identity_headers,
             "Cookie": cookie_hdr,
             "Accept": "application/json, text/plain, */*",
-            "Accept-Language": "en-US,en;q=0.9",
         }
         csrf = extract_cookie_val(cookie_hdr, "passport_csrf_token") or extract_cookie_val(cookie_hdr, "tt_csrf_token")
         if csrf:
@@ -170,7 +172,7 @@ class GoLoginTikTokClient:
                 json=json_data,
                 data=data,
                 proxies=cast("ProxySpec | None", proxies),
-                impersonate="chrome120",
+                impersonate=cast("Any", impersonate),
                 timeout=timeout,
             )
             try:

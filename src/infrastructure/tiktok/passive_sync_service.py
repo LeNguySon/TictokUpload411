@@ -290,13 +290,12 @@ class PassiveTikTokSyncService:
         handler = urllib.request.ProxyHandler({"http": proxy_url, "https": proxy_url} if proxy_url else {})
         opener = urllib.request.build_opener(handler)
 
+        from src.infrastructure.tiktok.browser_identity import request_identity
+
+        identity_headers, _ = request_identity(profile)  # same browser as the profile's Orbita
         req = urllib.request.Request(
             url,
-            headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36",
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                "Accept-Language": "en-US,en;q=0.9",
-            },
+            headers={**identity_headers, "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"},
         )
         try:
             with opener.open(req, timeout=5.0) as resp:
