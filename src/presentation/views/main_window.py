@@ -545,6 +545,8 @@ class TikTokManagerMainWindow(QMainWindow):
 
         # Context Menu & Selection Events on Video Table
         self.video_table.upload_now_requested.connect(self._on_upload_single_video)
+        self.video_table.reset_status_requested.connect(self._on_reset_videos_status)
+        self.video_table.assign_profile_requested.connect(self._on_assign_profile_to_videos)
         self.video_table.schedule_video_requested.connect(self._on_schedule_videos_from_table)
         self.video_table.edit_metadata_requested.connect(self._on_edit_video_metadata)
         self.video_table.preview_video_requested.connect(self._on_preview_video)
@@ -2457,13 +2459,30 @@ class TikTokManagerMainWindow(QMainWindow):
             return
 
         if not available_videos:
-            InfoBar.warning(
-                title="Hàng đợi trống",
-                content="Chưa có video nào ở trạng thái sẵn sàng để đăng.",
-                position=InfoBarPosition.TOP,
-                parent=self,
-            )
-            return
+            selected_in_table = self.video_table.get_selected_videos()
+            failed_selected = [v for v in selected_in_table if v.get("status") in ("failed", "error")]
+            if failed_selected:
+                failed_ids = [fv["id"] for fv in failed_selected if "id" in fv]
+                self.video_repo.reset_status_to_available(failed_ids)
+                available_videos = [
+                    v for fid in failed_ids if (v := self.video_repo.get_by_id(fid)) is not None
+                ]
+                self.refresh_videos()
+                InfoBar.info(
+                    title="Thử Lại Video Thất Bại",
+                    content=f"Đã tự động đặt lại {len(available_videos)} video đã chọn sang Sẵn sàng để upload.",
+                    position=InfoBarPosition.TOP,
+                    duration=3000,
+                    parent=self,
+                )
+            else:
+                InfoBar.warning(
+                    title="Hàng đợi trống",
+                    content="Chưa có video nào ở trạng thái sẵn sàng để đăng. Bạn có thể chọn video và chuột phải 'Đặt lại Sẵn sàng / Thử lại'.",
+                    position=InfoBarPosition.TOP,
+                    parent=self,
+                )
+                return
 
         # AgentShield Strict Proxy Gate: Filter profiles that have an assigned proxy
         proxied_profiles = [
@@ -2713,6 +2732,45 @@ class TikTokManagerMainWindow(QMainWindow):
             title="Bắt Đầu Đăng",
             content=f"Đã phát lệnh tải lên {dispatched} video trên QThreadPool.",
             position=InfoBarPosition.TOP,
+            parent=self,
+        )
+
+    def _on_reset_videos_status(self, video_ids: list[int]) -> None:
+        if not video_ids:
+            return
+        count = self.video_repo.reset_status_to_available(video_ids)
+        self.refresh_videos()
+        InfoBar.success(
+            title="Đặt Lại Trạng Thái",
+            content=f"Đã đặt lại {count} video về trạng thái 'Sẵn sàng đăng' (xóa lỗi cũ).",
+            position=InfoBarPosition.TOP,
+            duration=3500,
+            parent=self,
+        )
+
+    def _on_assign_profile_to_videos(self, video_ids: list[int]) -> None:
+        if not video_ids:
+            return
+        selected_profiles = self.profile_table.get_selected_profile_ids()
+        if not selected_profiles:
+            InfoBar.warning(
+                title="Chưa chọn tài khoản",
+                content="Vui lòng chọn 1 tài khoản ở bảng trên trước khi gán cho video.",
+                position=InfoBarPosition.TOP,
+                duration=4000,
+                parent=self,
+            )
+            return
+        target_profile_id = selected_profiles[0]
+        p_row = self.profile_repo.get_by_id(target_profile_id)
+        p_name = (p_row.get("name") if p_row else None) or f"#{target_profile_id}"
+        count = self.video_repo.assign_profile_to_videos(target_profile_id, video_ids)
+        self.refresh_videos()
+        InfoBar.success(
+            title="Gán Tài Khoản",
+            content=f"Đã gán {count} video cho tài khoản '{p_name}'.",
+            position=InfoBarPosition.TOP,
+            duration=3500,
             parent=self,
         )
 

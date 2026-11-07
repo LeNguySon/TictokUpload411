@@ -102,6 +102,22 @@ def never_touch_the_real_daemon(monkeypatch):
     monkeypatch.setattr(SamMonnyDaemonClient, "_request", _no_daemon)
 
 
+# Test modules that exercise SamMonnyDaemonSupervisor itself (with their own mocks).
+_SUPERVISOR_TEST_MODULES = {"test_cov_daemon_manager", "test_engine_paths", "test_sammonny_gologin_integration"}
+
+
+@pytest.fixture(autouse=True)
+def fake_healthy_daemon(request, monkeypatch):
+    """ensure_daemon_running() health-checks 127.0.0.1:7654/36912 and may START the daemon binary: tests get a
+    healthy daemon without any network call or process (same result on a dev machine and on CI, where the
+    real check took seconds and made timing-sensitive tests fail). Tests can still patch it themselves."""
+    if request.module.__name__.rsplit(".", 1)[-1] in _SUPERVISOR_TEST_MODULES:
+        return
+    from src.infrastructure.browser.sammonny_daemon_manager import SamMonnyDaemonSupervisor
+
+    monkeypatch.setattr(SamMonnyDaemonSupervisor, "ensure_daemon_running", lambda self, timeout_sec=6.0: True)
+
+
 @pytest.fixture(scope="session")
 def _session_default_db(tmp_path_factory):
     from src.infrastructure.database.migrations.runner import run_all_migrations

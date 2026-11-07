@@ -58,6 +58,8 @@ class VideoQueueTableWidget(FastTableWidget):
     """
 
     upload_now_requested = pyqtSignal(list)
+    reset_status_requested = pyqtSignal(list)
+    assign_profile_requested = pyqtSignal(list)
     schedule_video_requested = pyqtSignal(list)
     edit_metadata_requested = pyqtSignal(int)
     preview_video_requested = pyqtSignal(str)
@@ -235,12 +237,21 @@ class VideoQueueTableWidget(FastTableWidget):
             self.setItem(row_idx, 10, progress_item)
 
             # Col 11: Nhật Ký Upload
-            log_text = v.get("error_message") or "-"
-            log_item = make_item(log_text)
             if v.get("error_message"):
-                log_item.setText(f"❌ Lỗi: {v['error_message']}")
+                log_item = make_item(f"❌ Lỗi: {v['error_message']}")
                 log_item.setForeground(QColor("#D83B01"))
                 log_item.setToolTip(v["error_message"])
+            elif status in ("failed", "error"):
+                log_item = make_item("❌ Thất bại (Chưa thử lại)")
+                log_item.setForeground(QColor("#D83B01"))
+            elif status == "available":
+                log_item = make_item("Sẵn sàng đăng")
+                log_item.setForeground(QColor("#605E5C"))
+            elif status in ("published", "completed"):
+                log_item = make_item("✅ Đã xuất bản")
+                log_item.setForeground(QColor("#107C41"))
+            else:
+                log_item = make_item("-")
             self.setItem(row_idx, 11, log_item)
 
             # Col 12: Link gốc
@@ -440,6 +451,16 @@ class VideoQueueTableWidget(FastTableWidget):
         act_upload = Action(FluentIcon.SEND, upload_title, self)
         act_upload.triggered.connect(lambda: self.upload_now_requested.emit(selected_ids))
         menu.addAction(act_upload)
+
+        reset_title = f"Đặt lại Sẵn sàng / Thử lại ({count} video)..." if count > 1 else "Đặt lại Sẵn sàng / Thử lại Video Này"
+        act_reset = Action(FluentIcon.SYNC, reset_title, self)
+        act_reset.triggered.connect(lambda: self.reset_status_requested.emit(selected_ids))
+        menu.addAction(act_reset)
+
+        assign_title = f"Gán Tài Khoản Đang Chọn Cho Video ({count})..." if count > 1 else "Gán Tài Khoản Đang Chọn Cho Video Này"
+        act_assign = Action(FluentIcon.PEOPLE, assign_title, self)
+        act_assign.triggered.connect(lambda: self.assign_profile_requested.emit(selected_ids))
+        menu.addAction(act_assign)
 
         sched_title = f"Lên Lịch Đăng ({count} video đã chọn)..." if count > 1 else "Lên Lịch Đăng Video Này..."
         act_schedule = Action(FluentIcon.CALENDAR, sched_title, self)

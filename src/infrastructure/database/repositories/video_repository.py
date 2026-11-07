@@ -304,6 +304,39 @@ class VideoRepository:
             ).fetchall()
             return [dict(r) for r in rows]
 
+    def reset_status_to_available(self, video_ids: list[int] | int) -> int:
+        """Resets video(s) back to 'available' status and clears error_message."""
+        ids = [video_ids] if isinstance(video_ids, int) else list(video_ids)
+        if not ids:
+            return 0
+        placeholders = ", ".join("?" for _ in ids)
+        with db_session(self.db_path) as conn:
+            cur = conn.execute(
+                f"""
+                UPDATE video_registry
+                SET status = 'available', error_message = NULL, updated_at = CURRENT_TIMESTAMP
+                WHERE id IN ({placeholders});
+                """,
+                tuple(ids),
+            )
+            return cur.rowcount
+
+    def assign_profile_to_videos(self, profile_id: int, video_ids: list[int]) -> int:
+        """Assigns target profile_id to the given video IDs."""
+        if not video_ids:
+            return 0
+        placeholders = ", ".join("?" for _ in video_ids)
+        with db_session(self.db_path) as conn:
+            cur = conn.execute(
+                f"""
+                UPDATE video_registry
+                SET assigned_profile_id = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id IN ({placeholders});
+                """,
+                (profile_id, *video_ids),
+            )
+            return cur.rowcount
+
     def delete(self, video_id: int) -> bool:
         """Deletes a single video record by ID."""
         with db_session(self.db_path) as conn:
@@ -324,11 +357,11 @@ class VideoRepository:
         project_id: int | None = None,
         only_available: bool = True,
     ) -> list[dict[str, Any]]:
-        # The queue table (only_available=False) also shows failed videos so they can be retried.
+        # The queue table (only_available=False) shows all videos including failed (for retry) and published (for proof/review).
         status_clause = (
             "v.status = 'available'"
             if only_available
-            else "v.status IN ('available', 'reserved', 'uploading', 'failed')"
+            else "v.status IN ('available', 'reserved', 'uploading', 'failed', 'published')"
         )
         with db_session(self.db_path, write=False) as conn:
             if project_id is not None:

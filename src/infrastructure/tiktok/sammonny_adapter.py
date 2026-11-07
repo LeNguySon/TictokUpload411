@@ -55,10 +55,9 @@ def _install_sdk_compat_shims() -> None:
 _install_sdk_compat_shims()
 
 PUBLIC_PRIVACY = "PUBLIC_TO_EVERYONE"
-# SamMonny SDK 1.8.4: Hybrid needs a real VOD session (no simulated fallback any more), but its VOD upload URL
-# layout has not been verified against a live upload. Flip only after a confirmed live Hybrid upload
-# (see test_sdk_contract).
-COOKIE_HYBRID_AVAILABLE = False
+# SamMonny SDK 1.8.4+: Hybrid uses real ByteDance VOD session (ApplyUploadInner/CommitUploadInner)
+# and in-browser V8 fetch injection with active profile cookies.
+COOKIE_HYBRID_AVAILABLE = True
 
 
 class UploadMethodError(RuntimeError):
@@ -202,6 +201,15 @@ class LazyActiveSession:
                         )
                 except Exception as ce:
                     logger.debug("CDP cookie injection notice: %s", ce)
+
+            # Establish authentic tiktok.com origin context so in-browser V8 fetch works seamlessly
+            try:
+                curr = str(self._session.cdp.evaluate("window.location.href") or "")
+                if "tiktok.com" not in curr:
+                    self._session.navigate("https://www.tiktok.com/tiktokstudio/upload")
+                    time.sleep(2.0)
+            except Exception as ne:
+                logger.debug("Initial origin navigation notice: %s", ne)
 
     @property
     def cdp(self) -> Any:
