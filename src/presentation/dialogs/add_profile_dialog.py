@@ -58,54 +58,19 @@ def create_profile(
 ) -> int:
     """Creates one profile: SamMonny daemon profile (local fallback when the daemon is unreachable),
     cookies, Vault token. Blocking network + disk + DB work: run it off the GUI thread."""
+    from src.application.services.gologin_sync_service import GoLoginSyncService
+
+    sync_svc = GoLoginSyncService(profile_repo=profile_repo, project_repo=project_repo, proxy_repo=proxy_repo)
     try:
-        from src.application.services.gologin_sync_service import GoLoginSyncService
-
-        sync_svc = GoLoginSyncService(
-            profile_repo=profile_repo,
-            project_repo=project_repo,
-            proxy_repo=proxy_repo,
-        )
         profile_id = sync_svc.create_real_gologin_profile(
-            name=name,
-            project_id=project_id,
-            proxy_id=proxy_id,
-            cookie=cookie if cookie else None,
+            name=name, project_id=project_id, proxy_id=proxy_id, cookie=cookie if cookie else None
         )
-    except Exception:
-        # Resilient fallback if daemon is unreachable
-        import uuid
-
-        from src.infrastructure.browser.cookie_injector import BrowserCookieInjector
-        from src.infrastructure.browser.orbita_launcher import OrbitaLauncher
-
-        # One uuid / one folder per profile (the uuid used to be generated twice: orphan empty folder).
-        p_uuid = str(uuid.uuid4())
-        prof_dir = OrbitaLauncher.resolve_profile_dir({"uuid": p_uuid, "name": name})
-        prof_dir.mkdir(parents=True, exist_ok=True)
-
-        profile_data = {
-            "uuid": p_uuid,
-            "name": name,
-            "project_id": project_id,
-            "proxy_id": proxy_id,
-            "storage_dir": str(prof_dir),
-            "status": "LIVE" if cookie or token else "stopped",
-            "cookie": cookie if cookie else None,
-        }
-        profile_id = profile_repo.create(profile_data)
-
-        # Auto inject cookies and initialize profile environment
-        if cookie:
-            try:
-                BrowserCookieInjector.seed_profile_cookies(prof_dir, cookie)
-            except Exception as ignored:
-                logger.debug("_on_save: ignored error: %s", ignored)
-        try:
-            launcher = OrbitaLauncher()
-            launcher.prepare_profile_environment(prof_dir, profile_data)
-        except Exception as ignored:
-            logger.debug("_on_save: ignored error: %s", ignored)
+    except Exception as e:
+        # Daemon unreachable (or a step after its creation failed: that daemon profile was deleted again).
+        logger.warning("Daemon profile creation failed (%s): creating a local profile", e)
+        profile_id = sync_svc.create_local_profile(
+            name=name, project_id=project_id, proxy_id=proxy_id, cookie=cookie if cookie else None
+        )
 
     # AgentShield: Save access token to Windows Vault DPAPI
     if token and profile_id:

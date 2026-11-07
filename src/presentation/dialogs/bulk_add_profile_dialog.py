@@ -72,7 +72,12 @@ class ImportSummary:
     injected: int = 0
     bad_proxy_rows: list[str] = field(default_factory=list)
     cookie_failed_rows: list[str] = field(default_factory=list)
+    duplicate_rows: list[str] = field(default_factory=list)  # account already in the app / twice in the list
     cancelled: bool = False
+
+
+def _account_key(name: str | None) -> str:
+    return str(name or "").strip().lstrip("@").lower()
 
 
 def import_profiles(
@@ -93,12 +98,31 @@ def import_profiles(
 
     summary = ImportSummary()
     sync_svc = GoLoginSyncService(profile_repo=profile_repo, project_repo=project_repo, proxy_repo=proxy_repo)
+    # Once per batch: with the daemon down every row used to try to start it again (up to ~6 s per row).
+    try:
+        daemon_up = bool(sync_svc.daemon_supervisor.ensure_daemon_running())
+    except Exception as e:
+        logger.warning("SamMonny daemon check failed (%s): profiles are created locally", e)
+        daemon_up = False
+    # The same TikTok account twice = two browsers/fingerprints on one account: skip it.
+    known_accounts = {
+        _account_key(key)
+        for p in profile_repo.list_all()
+        for key in (p.get("name"), p.get("username_on_tiktok"))
+        if key
+    }
 
     for index, r in enumerate(rows, start=1):
         if cancelled is not None and cancelled():
             summary.cancelled = True
             break
+        if r.get("user") and _account_key(r["user"]) in known_accounts:
+            summary.duplicate_rows.append(str(r["user"]))
+            if progress is not None:
+                progress(index, len(rows))
+            continue
         user_name = r.get("user") or f"TikTok_{int(time.time() * 1000) % 100000}"
+        known_accounts.add(_account_key(user_name))
         proxy_raw = r.get("proxy")
         cookie = r.get("cookie")
         password = r.get("pass")
@@ -125,34 +149,28 @@ def import_profiles(
             "notes": note,
         }
 
-        try:
-            prof_id = sync_svc.create_real_gologin_profile(
+        prof_id: int | None = None
+        if daemon_up:
+            try:
+                prof_id = sync_svc.create_real_gologin_profile(
+                    name=user_name,
+                    project_id=project_id,
+                    proxy_id=proxy_id,
+                    cookie=cookie,
+                    extra_fields=extra_fields,
+                    ensure_daemon=False,
+                )
+            except Exception as e:
+                logger.warning("Daemon profile creation failed for %s (%s): creating it locally", user_name, e)
+        if prof_id is None:
+            prof_id = sync_svc.create_local_profile(
                 name=user_name,
                 project_id=project_id,
                 proxy_id=proxy_id,
                 cookie=cookie,
                 extra_fields=extra_fields,
+                seed_cookies=False,  # done below when auto_inject is on
             )
-        except Exception:
-            import uuid
-
-            from src.infrastructure.browser.orbita_launcher import OrbitaLauncher
-
-            p_uuid = str(uuid.uuid4())
-            prof_dir = OrbitaLauncher.resolve_profile_dir({"uuid": p_uuid, "name": user_name})
-            prof_dir.mkdir(parents=True, exist_ok=True)
-
-            profile_data = {
-                "uuid": p_uuid,
-                "name": user_name,
-                "project_id": project_id,
-                "proxy_id": proxy_id,
-                "storage_dir": str(prof_dir),
-                "status": "LIVE" if (cookie and "sessionid=" in cookie) else "stopped",
-                "cookie": cookie,
-                **extra_fields,
-            }
-            prof_id = profile_repo.create(profile_data)
 
         # The account password is kept in extra_fields (profiles.password). A Vault copy used to be
         # attempted here through a method the Vault never had (AttributeError, silently swallowed).
@@ -532,6 +550,18 @@ class BulkAddProfileDialog(QDialog):
                 content=(
                     f"{len(cookie_failed_rows)} hồ sơ đã tạo nhưng KHÔNG nạp được cookie đăng nhập: "
                     f"{', '.join(cookie_failed_rows[:5])}{'…' if len(cookie_failed_rows) > 5 else ''}."
+                ),
+                position=InfoBarPosition.TOP,
+                duration=8000,
+                parent=self.parent() or self,
+            )
+        if summary.duplicate_rows:
+            dup = summary.duplicate_rows
+            InfoBar.warning(
+                title="Bỏ qua tài khoản trùng",
+                content=(
+                    f"{len(dup)} tài khoản đã có trong ứng dụng hoặc lặp lại trong danh sách nên không tạo thêm: "
+                    f"{', '.join(dup[:5])}{'…' if len(dup) > 5 else ''}."
                 ),
                 position=InfoBarPosition.TOP,
                 duration=8000,

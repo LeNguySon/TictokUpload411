@@ -19,6 +19,13 @@ logger = logging.getLogger(__name__)
 
 
 
+def _initial_status(cookie: str | None) -> str:
+    """LIVE only with a TikTok login session in the cookies (msToken alone is set for every visitor)."""
+    from src.infrastructure.browser.cookie_injector import BrowserCookieInjector
+
+    return "LIVE" if BrowserCookieInjector.has_session_cookie(cookie) else "stopped"
+
+
 def _daemon_fingerprint(gl: Any, profile_uuid: str) -> dict[str, Any] | None:
     """The fingerprint the daemon generated for ``profile_uuid`` (None if its record cannot be read)."""
     try:
@@ -226,12 +233,17 @@ class GoLoginSyncService:
         cookie: str | None = None,
         port: int = 36912,
         extra_fields: dict[str, Any] | None = None,
+        ensure_daemon: bool = True,
     ) -> int:
         """
         Creates an authentic profile via SamMonny GoLogin SDK with Bayesian Antidetect Fingerprint,
         and records it into ProfileRepository. Returns created local profile ID.
+        If a step fails after the daemon created its profile, that daemon profile is deleted again (the
+        callers fall back to a local profile: the daemon one used to be left behind as an orphan).
+        ``ensure_daemon=False`` when the caller already checked the daemon (bulk import: once per batch).
         """
-        self.daemon_supervisor.ensure_daemon_running()
+        if ensure_daemon:
+            self.daemon_supervisor.ensure_daemon_running()
 
         from sammonny.gologin.gologin import GoLogin
 
@@ -253,6 +265,30 @@ class GoLoginSyncService:
         # 1. Create on GoLogin Daemon
         gologin_uuid = gl.create(create_payload)
         logger.info("GoLogin SDK created profile UUID: %s", gologin_uuid)
+        try:
+            return self._finish_daemon_profile(
+                gl, gologin_uuid, name, project_id, proxy_id, cookie, port, extra_fields
+            )
+        except Exception:
+            try:
+                gl.delete(gologin_uuid)
+                logger.warning("Profile creation failed after the daemon created %s: daemon profile deleted",
+                               gologin_uuid)
+            except Exception as de:
+                logger.error("Orphan daemon profile %s could not be deleted: %s", gologin_uuid, de)
+            raise
+
+    def _finish_daemon_profile(
+        self,
+        gl: Any,
+        gologin_uuid: str,
+        name: str,
+        project_id: int | None,
+        proxy_id: int | None,
+        cookie: str | None,
+        port: int,
+        extra_fields: dict[str, Any] | None,
+    ) -> int:
         daemon_fp = _daemon_fingerprint(gl, gologin_uuid)
 
         # 2. Inject cookies if provided
@@ -289,7 +325,7 @@ class GoLoginSyncService:
             "project_id": project_id,
             "proxy_id": proxy_id,
             "storage_dir": str(prof_dir),
-            "status": "LIVE" if cookie else "stopped",
+            "status": _initial_status(cookie),
             "cookie": cookie if cookie else None,
         }
 
@@ -303,3 +339,46 @@ class GoLoginSyncService:
                     profile_data[k] = v
 
         return self.profile_repo.create(profile_data)
+
+    def create_local_profile(
+        self,
+        name: str,
+        project_id: int | None = None,
+        proxy_id: int | None = None,
+        cookie: str | None = None,
+        extra_fields: dict[str, Any] | None = None,
+        seed_cookies: bool = True,
+    ) -> int:
+        """Profile without the daemon (daemon unreachable): its own uuid, folder and fixed fingerprint."""
+        import uuid
+
+        from src.infrastructure.browser.cookie_injector import BrowserCookieInjector
+        from src.infrastructure.browser.orbita_launcher import OrbitaLauncher
+
+        p_uuid = str(uuid.uuid4())  # one uuid / one folder per profile
+        prof_dir = OrbitaLauncher.resolve_profile_dir({"uuid": p_uuid, "name": name})
+        prof_dir.mkdir(parents=True, exist_ok=True)
+        profile_data: dict[str, Any] = {
+            "uuid": p_uuid,
+            "name": name,
+            "project_id": project_id,
+            "proxy_id": proxy_id,
+            "storage_dir": str(prof_dir),
+            "status": _initial_status(cookie),
+            "cookie": cookie if cookie else None,
+        }
+        for k, v in (extra_fields or {}).items():
+            if v is not None and k not in profile_data:
+                profile_data[k] = v
+        profile_id = self.profile_repo.create(profile_data)
+
+        if cookie and seed_cookies:
+            try:
+                BrowserCookieInjector.seed_profile_cookies(prof_dir, cookie)
+            except Exception as e:
+                logger.debug("Cookie seeding failed for local profile %s: %s", name, e)
+        try:
+            OrbitaLauncher().prepare_profile_environment(prof_dir, profile_data)
+        except Exception as e:
+            logger.debug("Profile environment not prepared for %s: %s", name, e)
+        return profile_id

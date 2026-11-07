@@ -208,6 +208,20 @@ class BrowserCookieInjector:
                 best = max(best or 0.0, float(exp))
         return best
 
+    SESSION_COOKIE_NAMES = frozenset({"sessionid", "sessionid_ss", "sid_tt"})
+
+    @classmethod
+    def has_session_cookie(cls, cookie_raw: str | None) -> bool:
+        """True when the cookies hold a TikTok login session (header string or JSON export). msToken /
+        tt_csrf_token alone are set for every visitor: they do not mean the account is logged in."""
+        if not cookie_raw or not str(cookie_raw).strip():
+            return False
+        try:
+            cookies = cls.parse_cookie_string(cls._plain_cookie(cookie_raw))
+        except Exception:
+            return False
+        return any(c.get("name") in cls.SESSION_COOKIE_NAMES and c.get("value") for c in cookies)
+
     @classmethod
     def _plain_cookie(cls, cookie_raw: str) -> str:
         if isinstance(cookie_raw, str) and cookie_raw.startswith("gloglin:dpapi:v1:"):
