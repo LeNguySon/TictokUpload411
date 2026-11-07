@@ -27,8 +27,16 @@
   `not self._closed and not sip.isdeleted(self)`; set `_closed` trong `done()` và `closeEvent()`.
 - Test dialog tải dữ liệu bất đồng bộ phải `assert drain_ui_tasks()` trước khi assert nội dung bảng.
 - Xóa vĩnh viễn (dọn thùng rác) phải hỏi xác nhận (`confirm_permanent_delete`).
-- Còn lại (chưa xử lý): `main_window.py` và nhiều dialog vẫn gọi repository đồng bộ trên GUI thread
-  (vd. `_on_edit_profile` → `profile_repo.get_by_id`, `ProxyManagerDialog.refresh_proxies`).
+- Đợt 2 (2026-11-07) đã chuyển ra luồng nền: bộ hẹn giờ đăng 15 s (`reserve_due_videos`, single-flight; trước
+  đó đọc+GHI SQLite trên GUI thread, có thể chờ busy_timeout 10 s mỗi nhịp), thêm hồ sơ hàng loạt
+  (`import_profiles` + `_ImportSignals.progress` queued + `threading.Event` để huỷ khi đóng dialog), tạo 1 hồ sơ
+  (`create_profile`), danh sách/nhập proxy (`ProxyManagerDialog`: kết quả check gộp bằng QTimer 300 ms — trước đó
+  mỗi proxy check xong là đọc + vẽ lại cả bảng), xuất/nhập .zip (`SyncTransferDialog._run_job`).
+- Mẫu test: gọi handler rồi `assert drain_ui_tasks()` NGAY TRONG khối `patch(...)` (thread nền dùng patch đó);
+  dialog bị huỷ giữa chừng ⇒ test `deleteLater` + `sendPostedEvents(None, 0)` rồi drain: không được crash.
+- Còn lại (~74 lệnh, đều nhanh vài ms): đọc danh sách trong `_init_ui` của các dialog, `_on_apply` của
+  assign/bulk-edit, `batch_folder_upload_dialog._sync_profiles_for_selected_projects` (7 truy vấn/lần tick).
+- File .zip xuất ra (SyncTransfer) chứa nguyên mật khẩu/cookie plaintext của hồ sơ ⇒ thuộc nợ AgentShield bên dưới.
 
 ## Lỗi bị nuốt
 - `except Exception: pass` từng che 3 lỗi thật: `vault.save_credentials` (method không tồn tại), cookie nạp lỗi
