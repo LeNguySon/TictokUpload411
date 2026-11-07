@@ -28,6 +28,7 @@ from qfluentwidgets import (
 )
 
 from src.infrastructure.database.repositories.project_repository import ProjectRepository
+from src.presentation.dialogs.dialog_cache import ReusableDialogMixin
 from src.presentation.dialogs.dialog_helpers import (
     STANDARD_DIALOG_MARGINS,
     STANDARD_DIALOG_SPACING,
@@ -40,7 +41,7 @@ from src.presentation.widgets.table_helpers import (
 )
 
 
-class ProjectManagerDialog(QDialog):
+class ProjectManagerDialog(ReusableDialogMixin, QDialog):
     """
     Dialog allowing users to create new campaigns, rename existing projects,
     view performance aggregates, and delete projects safely.

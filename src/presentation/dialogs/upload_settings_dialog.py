@@ -15,6 +15,7 @@ from src.application.settings.upload_settings import (
     load_upload_settings,
     save_upload_settings,
 )
+from src.presentation.dialogs.dialog_cache import ReusableDialogMixin
 from src.presentation.dialogs.dialog_helpers import (
     STANDARD_DIALOG_MARGINS,
     STANDARD_DIALOG_SPACING,
@@ -41,7 +42,7 @@ METHOD_HELP: dict[UploadMethod, str] = {
 }
 
 
-class UploadSettingsDialog(QDialog):
+class UploadSettingsDialog(ReusableDialogMixin, QDialog):
     def __init__(
         self,
         store: Any,

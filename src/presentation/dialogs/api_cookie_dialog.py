@@ -21,6 +21,7 @@ from qfluentwidgets import (
 )
 
 from src.infrastructure.credentials.windows_vault import WindowsCredentialVault
+from src.presentation.dialogs.dialog_cache import ReusableDialogMixin
 from src.presentation.dialogs.dialog_helpers import (
     STANDARD_DIALOG_MARGINS,
     STANDARD_DIALOG_SPACING,
@@ -28,7 +29,7 @@ from src.presentation.dialogs.dialog_helpers import (
 )
 
 
-class ApiCookieDialog(QDialog):
+class ApiCookieDialog(ReusableDialogMixin, QDialog):
     """
     Dialog for configuring Global TikTok API client parameters and inspecting stored cookie vault.
     """

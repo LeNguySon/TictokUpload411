@@ -163,3 +163,64 @@ def test_upload_settings_reopen_reloads_stored_values(qtbot, tmp_path: Path) -> 
     dlg.prepare_reopen(on_saved=on_saved)
     assert dlg.on_saved is on_saved
     assert dlg.cmb_method.currentData() == UploadMethod.OFFICIAL.value
+
+
+# ------------------------------------------------------------------ keep the native window when closing
+# Qt 6 destroys a dialog's native window in done()/reject()/close() (re-show then costs 50-110 ms again);
+# hide() keeps it (re-show ~0 ms). Reusable dialogs close by hiding.
+
+
+class _Reusable(__import__("src.presentation.dialogs.dialog_cache", fromlist=["x"]).ReusableDialogMixin, QDialog):
+    pass
+
+
+def _exec_and_close_with(dlg: QDialog, closer) -> int:
+    from PyQt6.QtCore import QTimer
+
+    QTimer.singleShot(0, lambda: closer(dlg))
+    return dlg.exec()
+
+
+@pytest.mark.parametrize("closer", [lambda d: d.reject(), lambda d: d.accept(), lambda d: d.close()])
+def test_reusable_dialog_keeps_its_native_window_and_ends_exec(qtbot, closer) -> None:
+    dlg = _Reusable()
+    qtbot.addWidget(dlg)
+    dlg.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, True)
+    result = _exec_and_close_with(dlg, closer)
+    assert not dlg.isVisible()
+    assert dlg.testAttribute(Qt.WidgetAttribute.WA_WState_Created)  # native window kept
+    assert result == dlg.result()
+
+
+def test_reusable_dialog_reports_accept_and_reject(qtbot) -> None:
+    dlg = _Reusable()
+    qtbot.addWidget(dlg)
+    dlg.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, True)
+    finished: list[int] = []
+    dlg.finished.connect(finished.append)
+    assert _exec_and_close_with(dlg, lambda d: d.accept()) == QDialog.DialogCode.Accepted
+    assert _exec_and_close_with(dlg, lambda d: d.reject()) == QDialog.DialogCode.Rejected
+    assert finished == [1, 0]
+
+
+def test_cached_dialog_classes_keep_their_native_window() -> None:
+    from src.presentation.dialogs import (
+        api_cookie_dialog,
+        permissions_dialog,
+        project_dialog,
+        proxy_dialog,
+        sync_transfer_dialog,
+        table_settings_dialog,
+        trash_dialog,
+        upload_settings_dialog,
+        user_guide_dialog,
+    )
+    from src.presentation.dialogs.dialog_cache import ReusableDialogMixin
+
+    for cls in (
+        api_cookie_dialog.ApiCookieDialog, permissions_dialog.PermissionsDialog, project_dialog.ProjectManagerDialog,
+        proxy_dialog.ProxyManagerDialog, sync_transfer_dialog.SyncTransferDialog,
+        table_settings_dialog.TableSettingsDialog, trash_dialog.TrashDialog,
+        upload_settings_dialog.UploadSettingsDialog, user_guide_dialog.UserGuideDialog,
+    ):
+        assert issubclass(cls, ReusableDialogMixin), cls.__name__

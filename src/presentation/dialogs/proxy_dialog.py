@@ -38,6 +38,7 @@ from src.application.workers.thread_pool_manager import ThreadPoolManager
 from src.infrastructure.database.repositories.proxy_repository import (
     ProxyRepository,
 )
+from src.presentation.dialogs.dialog_cache import ReusableDialogMixin
 from src.presentation.dialogs.dialog_helpers import (
     STANDARD_DIALOG_MARGINS,
     STANDARD_DIALOG_SPACING,
@@ -59,7 +60,7 @@ def rotate_ip_via_url(url: str, timeout: float = 10.0) -> int:
         return int(resp.status)
 
 
-class ProxyManagerDialog(QDialog):
+class ProxyManagerDialog(ReusableDialogMixin, QDialog):
     """
     Enterprise Proxy Manager dialog supporting 5 import formats,
     multithreaded health check dispatch, and AgentShield IP leak prevention.

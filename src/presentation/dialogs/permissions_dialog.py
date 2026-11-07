@@ -18,6 +18,7 @@ from qfluentwidgets import (
     PushButton,
 )
 
+from src.presentation.dialogs.dialog_cache import ReusableDialogMixin
 from src.presentation.dialogs.dialog_helpers import (
     STANDARD_DIALOG_MARGINS,
     STANDARD_DIALOG_SPACING,
@@ -26,7 +27,7 @@ from src.presentation.dialogs.dialog_helpers import (
 )
 
 
-class PermissionsDialog(QDialog):
+class PermissionsDialog(ReusableDialogMixin, QDialog):
     """
     Dialog assisting creators in generating TikTok OAuth authorization URLs and exchanging tokens.
     """

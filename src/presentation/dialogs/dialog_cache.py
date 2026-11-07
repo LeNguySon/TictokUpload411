@@ -22,6 +22,33 @@ logger = logging.getLogger(__name__)
 D = TypeVar("D", bound=QDialog)
 
 
+class ReusableDialogMixin:
+    """For dialogs kept by DialogCache: close by HIDING.
+
+    Qt 6 destroys a dialog's native window in done()/reject()/accept()/close(), so even a cached dialog paid the
+    45-110 ms window creation again at every opening. hide() keeps the native window (re-show ~0 ms) and still
+    ends exec(). Put it before QDialog in the bases: ``class X(ReusableDialogMixin, QDialog)``.
+    """
+
+    def done(self, result: int) -> None:
+        dlg: Any = self
+        dlg.setResult(result)
+        dlg.hide()  # ends exec() like QDialog.done(), without destroying the native window
+        dlg.finished.emit(result)
+        if result == QDialog.DialogCode.Accepted:
+            dlg.accepted.emit()
+        else:
+            dlg.rejected.emit()
+
+    def closeEvent(self, event: Any) -> None:
+        # Title-bar X / Alt+F4: a plain close would destroy the native window; reject (= hide) instead.
+        if event is not None:
+            event.ignore()
+        dlg: Any = self
+        if dlg.isVisible():
+            dlg.reject()
+
+
 class DialogCache:
     def __init__(self) -> None:
         self._dialogs: dict[str, QDialog] = {}

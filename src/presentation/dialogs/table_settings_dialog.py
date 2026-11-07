@@ -17,6 +17,7 @@ from qfluentwidgets import (
     PushButton,
 )
 
+from src.presentation.dialogs.dialog_cache import ReusableDialogMixin
 from src.presentation.dialogs.dialog_helpers import (
     STANDARD_DIALOG_MARGINS,
     STANDARD_DIALOG_SPACING,
@@ -25,7 +26,7 @@ from src.presentation.dialogs.dialog_helpers import (
 from src.presentation.widgets.table_helpers import get_profile_table_headers
 
 
-class TableSettingsDialog(QDialog):
+class TableSettingsDialog(ReusableDialogMixin, QDialog):
     """
     Dialog allowing creators to show or hide specific columns in the 28-column profile table.
     """

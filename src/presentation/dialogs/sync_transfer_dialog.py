@@ -39,6 +39,7 @@ from src.infrastructure.credentials.backup_crypto import decrypt_bundle, encrypt
 from src.infrastructure.database.repositories.profile_repository import ProfileRepository
 from src.infrastructure.database.repositories.project_repository import ProjectRepository
 from src.infrastructure.database.repositories.proxy_repository import ProxyRepository
+from src.presentation.dialogs.dialog_cache import ReusableDialogMixin
 from src.presentation.dialogs.dialog_helpers import (
     STANDARD_DIALOG_MARGINS,
     STANDARD_DIALOG_SPACING,
@@ -198,7 +199,7 @@ def import_project_dataset(
     return profiles_imported, proxies_imported
 
 
-class SyncTransferDialog(QDialog):
+class SyncTransferDialog(ReusableDialogMixin, QDialog):
     """
     Dialog for Exporting ('Gửi') and Importing ('Nhận') profiles, proxies, and project datasets.
     """

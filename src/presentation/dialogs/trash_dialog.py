@@ -36,6 +36,7 @@ from qfluentwidgets import (
 from src.application.workers.task_worker import run_task
 from src.infrastructure.database.connection import db_session
 from src.infrastructure.database.repositories.profile_repository import ProfileRepository
+from src.presentation.dialogs.dialog_cache import ReusableDialogMixin
 from src.presentation.dialogs.dialog_helpers import (
     STANDARD_DIALOG_MARGINS,
     STANDARD_DIALOG_SPACING,
@@ -75,7 +76,7 @@ def confirm_permanent_delete(parent: QWidget, count: int) -> bool:
     return bool(box.exec())
 
 
-class TrashDialog(QDialog):
+class TrashDialog(ReusableDialogMixin, QDialog):
     """
     Recycle Bin Dialog displaying soft-deleted TikTok profiles with restore capability.
     """

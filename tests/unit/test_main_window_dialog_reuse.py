@@ -69,3 +69,28 @@ def test_menu_dialogs_are_prewarmed_when_idle(window) -> None:
         window._prewarm_dialogs()
     keys = {c.args[0] for c in prewarm.call_args_list}
     assert {"proxy_manager", "project_manager", "trash"} <= keys
+
+
+ONE_SHOT = [
+    ("_on_add_profile", ()), ("_on_bulk_add_profiles", ()), ("_on_open_batch_folder_upload", ()),
+    ("_on_soft_delete_profiles", ([1],)), ("_on_regenerate_fingerprints", ([1],)),
+]
+
+
+@pytest.mark.parametrize(("handler", "args"), ONE_SHOT)
+def test_one_shot_dialogs_do_not_pile_up_as_hidden_children(window, qapp, handler: str, args: tuple) -> None:
+    """Every opening used to leave the closed dialog alive as a hidden child of the main window (27 hidden
+    dialogs after 36 openings), each a full widget tree with Fluent event filters."""
+    from PyQt6.QtCore import QEvent
+
+    def count() -> int:
+        qapp.sendPostedEvents(None, QEvent.Type.DeferredDelete.value)
+        qapp.processEvents()
+        return len([d for d in window.findChildren(QDialog) if not d.isVisible()])
+
+    before = count()
+    with patch.object(QDialog, "exec", lambda dlg, *a, **k: 0), patch.object(MessageBox, "exec", lambda dlg, *a, **k: 0):
+        for _ in range(3):
+            getattr(window, handler)(*args)
+            assert drain_ui_tasks()
+    assert count() == before

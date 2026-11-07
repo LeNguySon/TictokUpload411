@@ -15,6 +15,7 @@ from qfluentwidgets import (
     PushButton,
 )
 
+from src.presentation.dialogs.dialog_cache import ReusableDialogMixin
 from src.presentation.dialogs.dialog_helpers import (
     STANDARD_DIALOG_MARGINS,
     STANDARD_DIALOG_SPACING,
@@ -128,7 +129,7 @@ Hệ thống tích hợp công nghệ **SamMonny SDK Tri-Modal** tự động ph
 }
 
 
-class UserGuideDialog(QDialog):
+class UserGuideDialog(ReusableDialogMixin, QDialog):
     """
     Industrial-grade User Guide & Operational Runbook Dialog with multi-tab Markdown viewers.
     """

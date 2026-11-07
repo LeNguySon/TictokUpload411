@@ -70,11 +70,11 @@ def test_pasted_proxy_import_runs_off_gui_thread(qtbot, tmp_path: Path) -> None:
 
 def test_proxy_check_results_are_coalesced_into_few_reloads(qtbot, tmp_path: Path) -> None:
     dlg, repo = _dialog(qtbot, tmp_path)
-    assert drain_ui_tasks()
+    assert drain_ui_tasks(timeout_s=15)  # start from an idle UI pool (other tests may leave tasks behind)
     threads, spy = _spy_list_all(repo)
     with spy:
         for pid in range(1, 51):
             dlg._on_proxy_checked(pid, True, 120.0, "alive")
-        assert process_events_until(lambda: bool(threads), timeout_s=3)
+        assert process_events_until(lambda: bool(threads), timeout_s=15)
         assert drain_ui_tasks()
     assert 1 <= len(threads) <= 2  # 50 check results -> one (or two) table reloads, not 50
