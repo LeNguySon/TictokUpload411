@@ -190,10 +190,11 @@ Chọn các hồ sơ trên bảng danh sách và bấm <code>Bắt đầu Upload
 <tr><td><b>21. Re.Apply</b></td><td>Ngày nộp lại đơn</td><td>Ngày được phép gửi lại đơn xin tham gia Quỹ Sáng Tạo nếu bị loại.</td><td>Ngày tháng (DD-MM-YYYY)</td></tr>
 <tr><td><b>22. PRIVACY</b></td><td>Quyền riêng tư</td><td>Chế độ hiển thị mặc định khi đăng video.</td><td><code>PUBLIC</code>, <code>FRIENDS</code>, <code>SELF</code></td></tr>
 <tr><td><b>23. VAT</b></td><td>Khấu trừ thuế</td><td>Trạng thái kê khai thông tin thuế giá trị gia tăng.</td><td><code>Yes</code> / <code>No</code></td></tr>
-<tr><td><b>24. T.Likes</b></td><td>Tổng lượt thích</td><td>Tổng số lượt thích của kênh, đồng bộ từ TikTok.</td><td>Số nguyên (1.2M, 92K...)</td></tr>
-<tr><td><b>25. Shadowban</b></td><td>Trạng thái phân phối</td><td>Theo tỷ lệ view từ Dành cho bạn (FYF): trên 70% An toàn, 20–70% Cảnh báo, dưới 20% Shadowban. Hiện "—" khi kênh chưa được đồng bộ số liệu.</td><td><code>An toàn</code> / <code>Cảnh báo</code> / <code>Shadowban</code> / <code>—</code></td></tr>
+<tr><td><b>24. TS</b></td><td>Thuế Hoa Kỳ</td><td>Trạng thái kê khai mẫu thuế W-8BEN cho thị trường Mỹ.</td><td><code>Yes</code> / <code>No</code></td></tr>
+<tr><td><b>25. STT phụ</b></td><td>Thứ tự nhóm</td><td>Chỉ số thứ tự được đánh dấu riêng theo từng nhóm chiến dịch.</td><td>Số nguyên</td></tr>
 <tr><td><b>26. VVP</b></td><td>Vi phạm chính sách</td><td>Số lượng cảnh báo hoặc gậy vi phạm tiêu chuẩn cộng đồng.</td><td>Số nguyên (0, 1, 2...)</td></tr>
-<tr><td><b>27. ID</b></td><td>Khóa CSDL</td><td>Mã định danh duy nhất trong cơ sở dữ liệu SQLite nội bộ.</td><td>Khóa chính (Primary Key)</td></tr>
+<tr><td><b>27. MP</b></td><td>Marketplace</td><td>Trạng thái liên kết TikTok Creator Marketplace nhận booking tài trợ.</td><td><code>Yes</code> / <code>No</code></td></tr>
+<tr><td><b>28. ID</b></td><td>Khóa CSDL</td><td>Mã định danh duy nhất trong cơ sở dữ liệu SQLite nội bộ.</td><td>Khóa chính (Primary Key)</td></tr>
 </tbody>
 </table>
 
@@ -419,9 +420,7 @@ class UserGuideDialog(ReusableDialogMixin, QDialog):
             t_layout = QVBoxLayout(tab)
             t_layout.setContentsMargins(6, 6, 6, 6)
             browser = QTextBrowser(tab)
-            doc = browser.document()
-            if doc is not None:
-                doc.setDefaultStyleSheet(INDUSTRIAL_GUIDE_CSS)
+            browser.document().setDefaultStyleSheet(INDUSTRIAL_GUIDE_CSS)
             browser.setHtml(html_content)
             browser.setOpenExternalLinks(True)
             t_layout.addWidget(browser)
