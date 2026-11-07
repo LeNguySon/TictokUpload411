@@ -3,8 +3,10 @@ Proxy Manager Dialog for bulk import, async health checks, and leak protection.
 """
 
 import logging
+from typing import Any
 
-from PyQt6.QtCore import QPoint, Qt
+from PyQt6 import sip
+from PyQt6.QtCore import QPoint, Qt, QTimer
 from PyQt6.QtGui import QCloseEvent, QColor
 from PyQt6.QtWidgets import (
     QApplication,
@@ -45,6 +47,8 @@ from src.presentation.widgets.fast_table import FastTableWidget
 
 logger = logging.getLogger(__name__)
 
+REFRESH_COALESCE_MS = 300  # proxy check results arriving within this window -> one table reload
+
 
 def rotate_ip_via_url(url: str, timeout: float = 10.0) -> int:
     """Pokes a proxy provider's change-IP URL; raises on network/HTTP failure, returns the status."""
@@ -71,6 +75,11 @@ class ProxyManagerDialog(QDialog):
         self.proxy_repo = proxy_repo
         self.proxy_service = proxy_service
         self.signal_bus = AppSignalBus.instance()
+        self._proxy_load_gen = 0
+        self._refresh_timer = QTimer(self)
+        self._refresh_timer.setSingleShot(True)
+        self._refresh_timer.setInterval(REFRESH_COALESCE_MS)
+        self._refresh_timer.timeout.connect(self.refresh_proxies)
 
         self.setWindowTitle("Quản Lý Proxy Hàng Loạt & Kiểm Định Sức Khỏe")
         self.resize(850, 560)
@@ -165,7 +174,26 @@ class ProxyManagerDialog(QDialog):
         self.signal_bus.proxy_leak_detected.connect(self._on_proxy_leak_alert)
 
     def refresh_proxies(self) -> None:
-        proxies = self.proxy_repo.list_all()
+        """Reloads the proxy table; the SQLite read runs off the GUI thread (latest request wins)."""
+        self._proxy_load_gen += 1
+        gen = self._proxy_load_gen
+
+        def loaded(rows: list[dict[str, Any]]) -> None:
+            if not sip.isdeleted(self) and gen == self._proxy_load_gen:
+                self._render_proxies(rows)
+
+        run_task(
+            self.proxy_repo.list_all,
+            on_result=loaded,
+            on_error=lambda err: logger.warning("Proxy list load failed: %s", err),
+        )
+
+    def _schedule_refresh(self) -> None:
+        """Coalesces bursts of updates (one per checked proxy) into a single reload."""
+        if not sip.isdeleted(self):
+            self._refresh_timer.start()
+
+    def _render_proxies(self, proxies: list[dict[str, Any]]) -> None:
         self.table.setRowCount(len(proxies))
 
         for row_idx, p in enumerate(proxies):
@@ -205,15 +233,25 @@ class ProxyManagerDialog(QDialog):
         if not text:
             return
         lines = [line.strip() for line in text.splitlines() if line.strip()]
-        imported = self.proxy_repo.bulk_import(lines)
         self.txt_import.clear()
-        self.refresh_proxies()
-        InfoBar.success(
-            title="Nhập Proxy Hoàn Tất",
-            content=f"Đã nhập thành công {imported} proxy vào cơ sở dữ liệu.",
-            position=InfoBarPosition.TOP,
-            parent=self,
-        )
+
+        def imported_ok(imported: int) -> None:
+            if sip.isdeleted(self):
+                return
+            self.refresh_proxies()
+            InfoBar.success(
+                title="Nhập Proxy Hoàn Tất",
+                content=f"Đã nhập thành công {imported} proxy vào cơ sở dữ liệu.",
+                position=InfoBarPosition.TOP,
+                parent=self,
+            )
+
+        def import_failed(err: str) -> None:
+            logger.error("Proxy import failed: %s", err)
+            if not sip.isdeleted(self):
+                InfoBar.error(title="Lỗi Nhập Proxy", content=err, position=InfoBarPosition.TOP, parent=self)
+
+        run_task(self.proxy_repo.bulk_import, lines, on_result=imported_ok, on_error=import_failed)
 
     def _on_check_all(self) -> None:
         proxies = self.proxy_repo.list_all()
@@ -232,7 +270,7 @@ class ProxyManagerDialog(QDialog):
 
     def _on_proxy_checked(self, proxy_id: int, is_alive: bool, latency: float, status: str) -> None:
         try:
-            self.refresh_proxies()
+            self._schedule_refresh()
         except Exception as ignored:
             logger.debug("_on_proxy_checked: ignored error: %s", ignored)
 

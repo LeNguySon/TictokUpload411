@@ -12,6 +12,7 @@ import pytest
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QContextMenuEvent
 from PyQt6.QtWidgets import QApplication
+from src.application.workers.task_worker import drain_ui_tasks
 from src.infrastructure.database.migrations.runner import run_all_migrations
 from src.infrastructure.database.repositories.profile_repository import ProfileRepository
 from src.infrastructure.database.repositories.project_repository import ProjectRepository
@@ -216,6 +217,7 @@ def test_proxy_manager_dialog_context_menu(qapp, monkeypatch):
 
         mock_service = MagicMock()
         dlg = ProxyManagerDialog(proxy_repo=proxy_repo, proxy_service=mock_service)
+        assert drain_ui_tasks()  # the proxy list loads off the GUI thread
         assert dlg.table.rowCount() == 2
 
         # Context menu on row 1
