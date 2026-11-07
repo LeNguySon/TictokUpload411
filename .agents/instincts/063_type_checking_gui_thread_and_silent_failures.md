@@ -86,3 +86,10 @@
 - Live: 65/65 hồ sơ có vân tay (18 từ daemon, 47 sinh mới). 7 bản ghi daemon tạo 20–22/10 (daemon cũ) dùng chung
   noise 10.0/5e-07/90.0 + RTX 3060: daemon không có API sửa vân tay ⇒ phải sửa phía daemon hoặc tạo lại hồ sơ.
 - Đừng lấy cột rời (`canvas_noise`, `webgl_vendor`...) làm nguồn: chúng từng chứa giá trị dùng chung.
+- Cập nhật vân tay (SDK 1.8.5): daemon `PUT /api/v1/profiles/{id}/fingerprint` (`{"regenerate":true}` hoặc
+  `{"fingerprint":{...}}`; 409 khi đang chạy). App: chuột phải > Quản Lý Hồ Sơ > "Cập Nhật Vân Tay Trình Duyệt"
+  (`regenerate_fingerprints`): daemon đổi ⇒ app chép lại; daemon có bản ghi mà không đổi được ⇒ KHÔNG đổi gì.
+- `sammonny-daemon.exe` = bản sao `target/release/gologin-cli.exe` (`cargo build --release -p gologin-cli`), nằm ở
+  `dist_standalone/sammonny-antidetect/bin/`, chạy `serve --port 7654 --sdk-port 36912`, cwd = gốc repo SDK.
+  Daemon khởi động bằng `SamMonnyDaemonSupervisor.ensure_daemon_running()` sẽ TẮT khi tiến trình khởi động thoát
+  (atexit) ⇒ khởi động thủ công bằng Start-Process cho daemon độc lập.
