@@ -32,3 +32,12 @@
   - Bản trước được sao lưu thành `sammonny-daemon.exe.bak-before-apilocal-fix`.
   - Khởi động bằng `Start-Process` với cwd là thư mục gốc repo SDK, cổng 7654/36912.
 - Không dùng `cargo fmt -p gologin-server`: crate này chưa theo chuẩn rustfmt, nên lệnh sẽ định dạng lại hàng nghìn dòng không liên quan. Chỉ format file mình sửa, hoặc không format.
+
+## Ngày 2026-11-07 (chiều): múi giờ phân tích, rebuild exe, kiểm chứng tuyên bố của agent khác
+- TikTok trả giờ phân tích theo đúng `tz_offset` mà request gửi lên. Trên profile 78: +7h cho giờ vàng 06:00, 0 cho 00:00, −6h cho 17:00.
+  - Luôn dùng `request_time.local_utc_offset_seconds()`. Có test cấm gán cứng `tz_offset=` / `time_offset=` trong `src/`.
+- Kiểm tra "video X đã đăng" phải duyệt ĐỦ các trang `item_list` (`_list_all_items`). Trang đầu không sắp theo ngày nên dễ báo nhầm "không có".
+  - oEmbed (`/oembed`) không trả tiêu đề qua kênh này, nên không dùng được để kiểm chứng.
+- Rebuild exe: dùng worktree sạch, chạy `packaging/build_exe.py app`, chạy thử (PrintWindow chụp được nội dung cửa sổ dù bị che, chờ 60 giây, đọc log), rồi thay `dist/SonBetaPro`.
+  - KHÔNG để shell đứng bên trong `dist/SonBetaPro` khi `mv` (lỗi "Device or resource busy").
+  - KHÔNG nối `git worktree remove` sau lệnh `&&` của bước copy: copy lỗi thì bản build vẫn bị xoá theo.
