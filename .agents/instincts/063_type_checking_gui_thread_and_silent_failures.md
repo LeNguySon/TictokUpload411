@@ -36,7 +36,7 @@
   dialog bị huỷ giữa chừng ⇒ test `deleteLater` + `sendPostedEvents(None, 0)` rồi drain: không được crash.
 - Còn lại (~74 lệnh, đều nhanh vài ms): đọc danh sách trong `_init_ui` của các dialog, `_on_apply` của
   assign/bulk-edit, `batch_folder_upload_dialog._sync_profiles_for_selected_projects` (7 truy vấn/lần tick).
-- File .zip xuất ra (SyncTransfer) chứa nguyên mật khẩu/cookie plaintext của hồ sơ ⇒ thuộc nợ AgentShield bên dưới.
+- File .zip xuất ra (SyncTransfer) nay được mã hoá bằng mật khẩu (xem mục Bảo mật bên dưới).
 
 ## Lỗi bị nuốt
 - `except Exception: pass` từng che 3 lỗi thật: `vault.save_credentials` (method không tồn tại), cookie nạp lỗi
@@ -44,10 +44,21 @@
   người dùng cần biết thì phải hiện InfoBar. `except RuntimeError: pass` khi emit lên object đã huỷ là cố ý, giữ nguyên.
 - `except ... as exc` bên trong một `except ... as exc` khác sẽ XÓA biến ngoài khi thoát handler: đặt tên khác.
 
-## Nợ bảo mật đã biết (AgentShield)
-- Bảng `profiles` vẫn lưu plaintext `password`, `email_backup_password`, `cookies_json`/`cookie` (có test khẳng định
-  `imported["password"] == ...`). Chỉ `refresh_token` được chuyển sang Vault (token_manager). Muốn chuyển các cột
-  này sang Vault/DPAPI thì cần migration riêng.
+## Bảo mật dữ liệu nhạy cảm (AgentShield) — ĐÃ XỬ LÝ 2026-11-07
+- Cookie dài tới 16 KB > giới hạn ~2.5 KB/mục của Windows Credential Manager ⇒ KHÔNG dùng keyring cho cookie.
+  Dùng `field_crypto` (DPAPI CurrentUser, tiền tố `dpapi:v1:`) mã hoá từng giá trị trong SQLite.
+- Ghi: `ProfileRepository.create/update/bulk_update_fields`, mọi hàm ghi của `ProxyRepository`, và
+  `network_sniffer._update_profile_row` gọi `protect_fields`. Ghi SQL trực tiếp vào cột nhạy cảm ở chỗ khác ⇒
+  PHẢI qua `protect_fields` (danh sách cột: `field_crypto.SENSITIVE_COLUMNS`).
+- Đọc: `get_db_connection` dùng `_row_factory` tự giải mã các cột nhạy cảm ⇒ ~30 nơi đọc cookie không đổi.
+  KHÔNG lọc/so sánh SQL trên cột nhạy cảm (`WHERE cookies_json LIKE ...`): giá trị trên đĩa là ciphertext ngẫu nhiên.
+- `run_all_migrations` gọi `protect_plaintext_secrets` (idempotent; sao lưu `<db>_before_secret_encryption_*.db`
+  — bản sao này còn plaintext, xoá sau khi kiểm chứng). Live: 61 giá trị hồ sơ + 2 mật khẩu proxy, không còn
+  `sessionid=` trong file .db/WAL (PRAGMA secure_delete=ON).
+- Copy app.db sang máy/tài khoản Windows khác ⇒ giá trị đọc ra "" (không crash): chuyển máy bằng file .zip sao lưu
+  có mật khẩu (`backup_crypto`: scrypt n=2^15 ⇒ AES-256-GCM, `dataset_manifest.json.enc`); .zip cũ plaintext vẫn nhập
+  được kèm cảnh báo. Test UI: thay `dlg._ask_passphrase` (hộp thoại modal làm treo pytest).
+- Trước khi mã hoá CSDL thật phải ĐÓNG bản app cũ: nó đọc ciphertext như cookie và tiếp tục ghi plaintext.
 
 ## SamMonny SDK main sau 1.8.3 (commit 64c53a0, eacbb93, 2026-11-07): độ tương thích
 - Vẫn ghi `version = 1.8.3` dù code đã khác bản phát hành ⇒ KHÔNG đóng gói vào `vendor/` khi chưa tăng phiên bản.
