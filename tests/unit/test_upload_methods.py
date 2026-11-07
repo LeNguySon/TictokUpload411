@@ -123,11 +123,11 @@ def test_forced_browser_methods_ignore_an_existing_token(tmp_path, method, mode)
     assert _mode(adapter) is mode and "1" not in adapter.publisher._tokens
 
 
-def test_chosen_cookie_hybrid_delegates_to_hybrid_mode(tmp_path):
+def test_chosen_cookie_hybrid_is_refused_because_it_cannot_upload(tmp_path):
     adapter, video = _adapter(tmp_path, UploadMethod.HYBRID, token=None)
-    adapter.upload_video(profile_id=1, video_path=video, title="t", privacy="PUBLIC_TO_EVERYONE")
-    assert _mode(adapter) is UploadMode.COOKIE_API_HYBRID
-    adapter.publisher.upload.assert_called_once()
+    with pytest.raises(UploadMethodError, match="Hybrid"):
+        adapter.upload_video(profile_id=1, video_path=video, title="t", privacy="PUBLIC_TO_EVERYONE")
+    adapter.publisher.upload.assert_not_called()
 
 
 def test_auto_uses_official_with_token_and_studio_without(tmp_path):
@@ -158,8 +158,8 @@ def test_official_privacy_must_be_allowed_for_the_account(tmp_path):
 # ------------------------------------------------------------------ native scheduling support
 @pytest.mark.parametrize(
     ("method", "token", "native"),
-    [(UploadMethod.OFFICIAL, "tok", False), (UploadMethod.STUDIO, "tok", False), (UploadMethod.HYBRID, None, True),
-     (UploadMethod.AUTO, "tok", False), (UploadMethod.AUTO, None, False)],
+    [(UploadMethod.OFFICIAL, "tok", False), (UploadMethod.STUDIO, "tok", False), (UploadMethod.HYBRID, None, False),
+     (UploadMethod.AUTO, "tok", False), (UploadMethod.AUTO, None, False)],  # no method can let TikTok hold it
 )
 def test_supports_native_schedule(tmp_path, method, token, native):
     adapter, _ = _adapter(tmp_path, method, token=token)

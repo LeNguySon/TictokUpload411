@@ -55,9 +55,10 @@ def _install_sdk_compat_shims() -> None:
 _install_sdk_compat_shims()
 
 PUBLIC_PRIVACY = "PUBLIC_TO_EVERYONE"
-# SamMonny SDK 1.8.4+: Hybrid uses real ByteDance VOD session (ApplyUploadInner/CommitUploadInner)
-# and in-browser V8 fetch injection with active profile cookies.
-COOKIE_HYBRID_AVAILABLE = True
+# SamMonny SDK 1.8.4: Hybrid needs a real VOD session (no simulated fallback any more), but its VOD upload URL
+# layout has not been verified against a live upload. Flip only after a confirmed live Hybrid upload
+# (see test_sdk_contract). The live upload of 2026-11-07 (studio_1794034814) went through Studio DOM, not Hybrid.
+COOKIE_HYBRID_AVAILABLE = False
 
 
 class UploadMethodError(RuntimeError):
