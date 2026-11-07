@@ -24,6 +24,7 @@ from qfluentwidgets import (
     SpinBox,
 )
 
+from src.domain.analytics.optimal_hours import peak_window
 from src.presentation.dialogs.dialog_helpers import (
     STANDARD_DIALOG_MARGINS,
     STANDARD_DIALOG_SPACING,
@@ -82,6 +83,15 @@ def generate_staggered_schedule(
     return results
 
 
+def _window_start_hour(window: str | None) -> int | None:
+    """Start hour of a "HH:MM - HH:MM" window."""
+    try:
+        hour = int(str(window).split(":", 1)[0])
+    except ValueError:
+        return None
+    return hour if 0 <= hour <= 23 else None
+
+
 class ScheduleVideoDialog(QDialog):
     """
     Dialog allowing creators to set upload schedules with intervals and jitter to avoid anti-spam bans.
@@ -126,7 +136,7 @@ class ScheduleVideoDialog(QDialog):
 
         # Smart Posting Hour Recommendation Banner
         if self.optimal_hour is not None or self.optimal_window:
-            window_text = self.optimal_window or f"{self.optimal_hour:02d}:00 - {(self.optimal_hour + 2) % 24:02d}:00"
+            window_text = self.optimal_window or peak_window(self.optimal_hour or 0)
             opt_frame = QFrame(self)
             style_card(opt_frame, kind="warning", object_name="optimalHourBanner")
             opt_lay = QHBoxLayout(opt_frame)
@@ -194,7 +204,9 @@ class ScheduleVideoDialog(QDialog):
                 self.dt_start.setDateTime(min_dt)
 
     def _set_to_next_optimal_hour(self) -> None:
-        target_h = self.optimal_hour if self.optimal_hour is not None else 12
+        target_h = self.optimal_hour if self.optimal_hour is not None else _window_start_hour(self.optimal_window)
+        if target_h is None:
+            return
         now = datetime.now()
         candidate = now.replace(hour=target_h, minute=0, second=0, microsecond=0)
         if candidate <= now + timedelta(minutes=20):

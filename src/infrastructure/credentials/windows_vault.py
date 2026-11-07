@@ -9,10 +9,7 @@ import json
 import logging
 from typing import Any
 
-try:
-    import keyring
-except ImportError:
-    keyring = None
+import keyring  # required: without it tokens would silently not be stored in the Credential Manager
 
 logger = logging.getLogger(__name__)
 

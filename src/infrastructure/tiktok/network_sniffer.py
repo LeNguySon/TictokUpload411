@@ -182,8 +182,20 @@ class TikTokNetworkSniffer:
                                 except (ValueError, TypeError):
                                     continue
                     if hourly_totals:
-                        best_h = max(hourly_totals.items(), key=lambda x: x[1])[0]
-                        updates["optimal_hour"] = int(best_h)
+                        best_h, best_users = max(hourly_totals.items(), key=lambda x: x[1])
+                        if best_users > 0:
+                            from src.domain.analytics.optimal_hours import peak_window
+
+                            updates["optimal_hour"] = int(best_h)
+                            # The measurement readers trust (the bare column has a schema default of 12).
+                            updates["optimal_posting_hours_json"] = json.dumps(
+                                {
+                                    "peak_hour": int(best_h),
+                                    "peak_window": peak_window(int(best_h)),
+                                    "peak_users": int(best_users),
+                                    "hourly_totals": [hourly_totals.get(h, 0) for h in range(24)],
+                                }
+                            )
 
                 # Audience Retention: New Viewers vs Returning Viewers
                 new_v_data = overview.get("new_viewer")

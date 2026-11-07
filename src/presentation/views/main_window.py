@@ -2108,20 +2108,15 @@ class TikTokManagerMainWindow(QMainWindow):
         selected_profiles = self.profile_table.get_selected_profile_ids()
         if not selected_profiles:
             return None, None
+        from src.domain.analytics.optimal_hours import measured_optimal_schedule
+
         try:
-            import json as _json
             p_row = self.profile_repo.get_by_id(selected_profiles[0])
-            if p_row:
-                opt_h = p_row.get("optimal_hour")
-                raw_opt = p_row.get("optimal_posting_hours_json")
-                opt_win = None
-                if raw_opt:
-                    opt_data = _json.loads(raw_opt) if isinstance(raw_opt, str) else raw_opt
-                    opt_win = opt_data.get("peak_window")
-                return opt_h, opt_win
         except Exception:
-            pass
-        return None, None
+            return None, None
+        # Only a measurement: the bare optimal_hour column defaults to 12 for every channel.
+        measured = measured_optimal_schedule(p_row) if p_row else None
+        return (measured.hour, measured.window) if measured is not None else (None, None)
 
     def _on_schedule_videos(self) -> None:
         if not self._feature_allowed(Feature.UPLOAD):

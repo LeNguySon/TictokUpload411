@@ -194,6 +194,7 @@ def test_channel_radar_dialog_displays_traffic_matrix_and_optimal_hour(test_db: 
         UPDATE profiles SET
             traffic_source_json = '{"for_you": 96.1, "search": 3.0, "profile": 0.7, "following": 0.2}',
             optimal_hour = 22,
+            optimal_posting_hours_json = '{"peak_hour": 22, "peak_window": "22:00", "peak_users": 16000}',
             retention_stats_json = '{"total_new": 60000, "total_returning": 20000, "returning_ratio": 25.0}'
         WHERE id = 78;
         """

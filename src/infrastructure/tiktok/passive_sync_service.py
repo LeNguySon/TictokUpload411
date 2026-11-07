@@ -442,10 +442,15 @@ class PassiveTikTokSyncService:
             prof_updates: dict[str, Any] = {}
             if intel.get("demographics"):
                 prof_updates["audience_demographics_json"] = _json.dumps(intel["demographics"], ensure_ascii=False)
-            if intel.get("optimal_hours"):
-                prof_updates["optimal_posting_hours_json"] = _json.dumps(intel["optimal_hours"], ensure_ascii=False)
-                if "peak_hour" in intel["optimal_hours"]:
-                    prof_updates["optimal_hour"] = int(intel["optimal_hours"]["peak_hour"])
+            from src.domain.analytics.optimal_hours import measured_optimal_schedule
+
+            # Without activity data the parser returns a 12:00 placeholder (peak_users = 0): never store it as a
+            # measurement, or every channel shows "12:00" as its best posting hour.
+            opt_hours = intel.get("optimal_hours")
+            measured = measured_optimal_schedule({"optimal_posting_hours_json": opt_hours}) if opt_hours else None
+            if measured is not None:
+                prof_updates["optimal_posting_hours_json"] = _json.dumps(opt_hours, ensure_ascii=False)
+                prof_updates["optimal_hour"] = measured.hour
             if intel.get("competitor_intelligence"):
                 prof_updates["competitor_intelligence_json"] = _json.dumps(intel["competitor_intelligence"], ensure_ascii=False)
 
@@ -463,6 +468,7 @@ class PassiveTikTokSyncService:
         # 7. Video-Level Deep Analytics (SEO Search Terms, Retention Curves, Finish Rates)
         try:
             import json as _json
+
             from src.infrastructure.database.connection import db_session
 
             # Fetch top 5 most viewed videos for this profile

@@ -6,6 +6,7 @@ flop/shadowban warnings, and strategic recommendations in Windows 11 Fluent Desi
 
 from __future__ import annotations
 
+import html
 import logging
 from datetime import datetime
 from pathlib import Path
@@ -34,6 +35,7 @@ from src.domain.analytics.channel_quality_radar import (
     VideoDataPoint,
 )
 from src.domain.analytics.low_view_alert import analyze_low_view_alert
+from src.domain.analytics.optimal_hours import measured_optimal_schedule
 from src.infrastructure.database.connection import db_session
 from src.infrastructure.database.repositories.profile_repository import ProfileRepository
 from src.presentation.dialogs.dialog_helpers import (
@@ -88,14 +90,22 @@ def video_posted_hour(video: dict[str, Any]) -> int | None:
         return None
 
 
-def _optimal_hour(profile: dict[str, Any]) -> int | None:
-    """TikTok's audience-active hour stored on the profile (0-23), if any."""
-    value = profile.get("optimal_hour")
+def _html(value: Any) -> str:
+    """TikTok-supplied text (titles, names) shown in a rich-text QLabel: never markup."""
+    return html.escape(str(value if value is not None else ""))
+
+
+def _count(value: Any) -> int:
     try:
-        hour = int(value) if value is not None else None
+        return int(float(value or 0))
     except (TypeError, ValueError):
-        return None
-    return hour if hour is not None and 0 <= hour <= 23 else None
+        return 0
+
+
+def _optimal_hour(profile: dict[str, Any]) -> int | None:
+    """TikTok's MEASURED audience-active hour (0-23), if any (the bare ``optimal_hour`` column defaults to 12)."""
+    measured = measured_optimal_schedule(profile)
+    return measured.hour if measured is not None else None
 
 
 def load_radar_inputs(
@@ -246,24 +256,9 @@ class ChannelRadarDialog(QDialog):
         grid.addWidget(c4, 1, 0)
 
         import json as _json
-        opt_post_raw = self.profile.get("optimal_posting_hours_json")
-        opt_window_str = None
-        peak_users = 0
-        if opt_post_raw:
-            try:
-                opt_data = _json.loads(opt_post_raw) if isinstance(opt_post_raw, str) else opt_post_raw
-                opt_window_str = opt_data.get("peak_window")
-                peak_users = int(opt_data.get("peak_users", 0))
-            except Exception:
-                pass
-
-        opt_h = self.profile.get("optimal_hour")
-        if opt_window_str:
-            best_hour_str = f"{opt_window_str}"
-        elif opt_h is not None and opt_h >= 0:
-            best_hour_str = f"{opt_h:02d}:00"
-        else:
-            best_hour_str = f"{report.best_posting_hour:02d}:00"
+        measured = measured_optimal_schedule(self.profile)
+        peak_users = measured.peak_users if measured is not None else 0
+        best_hour_str = measured.window if measured is not None else f"{report.best_posting_hour:02d}:00"
 
         c5, self.lbl_optimal_hour_stat = make_card("Giờ Đăng Tối Ưu", best_hour_str, "warning")
         if peak_users > 0:
@@ -338,17 +333,17 @@ class ChannelRadarDialog(QDialog):
                 d_lay = QVBoxLayout(grp_demo)
                 d_lay.setSpacing(6)
 
-                top_countries_str = ", ".join(f"{c.get('country')}: {c.get('percentage')}%" for c in countries[:4])
+                top_countries_str = ", ".join(f"{_html(c.get('country'))}: {c.get('percentage')}%" for c in countries[:4])
                 lbl_c = QLabel(f"• <b>Top Quốc gia xem nhiều:</b> {top_countries_str if top_countries_str else 'Đang cập nhật'}")
                 lbl_c.setStyleSheet("font-size: 12px;")
                 d_lay.addWidget(lbl_c)
 
-                top_ages_str = ", ".join(f"{a.get('range')}: {a.get('percentage')}%" for a in ages[:3])
+                top_ages_str = ", ".join(f"{_html(a.get('range'))}: {a.get('percentage')}%" for a in ages[:3])
                 lbl_a = QLabel(f"• <b>Độ tuổi khán giả:</b> {top_ages_str if top_ages_str else 'Đang cập nhật'}")
                 lbl_a.setStyleSheet("font-size: 12px;")
                 d_lay.addWidget(lbl_a)
 
-                top_gen_str = ", ".join(f"{g.get('gender')}: {g.get('percentage')}%" for g in genders[:2])
+                top_gen_str = ", ".join(f"{_html(g.get('gender'))}: {g.get('percentage')}%" for g in genders[:2])
                 viewer_str = f"{v_total:,}" if v_total else "—"
                 lbl_g = QLabel(f"• <b>Giới tính:</b> {top_gen_str if top_gen_str else 'Đang cập nhật'} | <b>Tổng người xem 7 ngày:</b> {viewer_str}")
                 lbl_g.setStyleSheet("font-size: 12px;")
@@ -372,14 +367,19 @@ class ChannelRadarDialog(QDialog):
                     ci_lay.setSpacing(6)
 
                     if top_c:
-                        creators_str = " • ".join(f"@{c.get('unique_id')} ({c.get('follower_count', 0):,} flw)" for c in top_c[:3])
+                        creators_str = " • ".join(
+                            f"@{_html(c.get('unique_id'))} ({_count(c.get('follower_count')):,} flw)" for c in top_c[:3]
+                        )
                         lbl_cr = QLabel(f"• <b>Kênh đối thủ khán giả cùng xem:</b> {creators_str}")
                         lbl_cr.setStyleSheet("font-size: 12px;")
                         lbl_cr.setWordWrap(True)
                         ci_lay.addWidget(lbl_cr)
 
                     if top_v:
-                        vids_str = " | ".join(f"\"{v.get('desc', '')[:25]}...\" ({v.get('play_count', 0):,} views)" for v in top_v[:2])
+                        vids_str = " | ".join(
+                            f"\"{_html(str(v.get('desc') or '')[:25])}...\" ({_count(v.get('play_count')):,} views)"
+                            for v in top_v[:2]
+                        )
                         lbl_vr = QLabel(f"• <b>Video viral đối thủ:</b> {vids_str}")
                         lbl_vr.setStyleSheet("font-size: 12px; color: #64748B;")
                         lbl_vr.setWordWrap(True)
