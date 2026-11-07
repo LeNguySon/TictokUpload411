@@ -113,7 +113,8 @@ def test_orbita_launcher_prepares_profile_and_injects_cookies(temp_profile_dir: 
     }
 
     resolved = launcher.prepare_profile_environment(temp_profile_dir, profile_data)
-    assert resolved == temp_profile_dir
+    # Compare resolved paths: Windows TEMP may be an 8.3 short path (RUNNER~1 on GitHub runners).
+    assert resolved.resolve() == temp_profile_dir.resolve()
 
     cookies_db = temp_profile_dir / "Default" / "Network" / "Cookies"
     assert cookies_db.is_file()

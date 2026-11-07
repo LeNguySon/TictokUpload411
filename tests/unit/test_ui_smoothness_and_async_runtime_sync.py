@@ -71,7 +71,11 @@ def test_batch_check_profiles_running_batching():
     mock_p2.status = "running"
     mock_p2.port = None
 
-    with patch("sammonny.core.client.SamMonnyDaemonClient") as mock_client_cls:
+    # The daemon port check is patched too: otherwise the test only passes while a real daemon listens on 7654.
+    with (
+        patch("sammonny.core.client.SamMonnyDaemonClient") as mock_client_cls,
+        patch("src.infrastructure.browser.orbita_launcher.is_port_open", return_value=True),
+    ):
         mock_client = MagicMock()
         mock_client.list_profiles.return_value = [mock_p2]
         mock_client_cls.return_value = mock_client

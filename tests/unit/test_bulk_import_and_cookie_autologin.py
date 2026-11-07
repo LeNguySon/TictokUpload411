@@ -156,9 +156,23 @@ def test_bulk_add_profile_dialog_import_all_execution(qapp, tmp_path):
     test_line = "creator_pro|mypassword999|sessionid=valid_sess_111; msToken=tok222|creator@tiktok.com|mailpass333|rf_token_444|cid_555|mailck_666"
     dlg.txt_input.setPlainText(test_line)
 
-    with patch(
-        "src.infrastructure.browser.cookie_injector.BrowserCookieInjector.inject_to_gologin", return_value=True
-    ) as mock_inject:
+    # Hermetic: no real SamMonny daemon (it would create a real profile) and no real profiles folder.
+    fake_gl = MagicMock()
+    fake_gl.create.return_value = "uuid-fake-bulk-1"
+    with (
+        patch(
+            "src.infrastructure.browser.cookie_injector.BrowserCookieInjector.inject_to_gologin", return_value=True
+        ) as mock_inject,
+        patch("sammonny.gologin.gologin.GoLogin", return_value=fake_gl),
+        patch(
+            "src.infrastructure.browser.sammonny_daemon_manager.SamMonnyDaemonSupervisor.ensure_daemon_running",
+            return_value=True,
+        ),
+        patch(
+            "src.infrastructure.browser.orbita_launcher.OrbitaLauncher.resolve_profile_dir",
+            return_value=tmp_path / "profile_uuid-fake-bulk-1",
+        ),
+    ):
         dlg._on_import_all()
 
     # Verify profile created in DB

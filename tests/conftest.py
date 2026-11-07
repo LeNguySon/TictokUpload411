@@ -78,6 +78,19 @@ def never_touch_the_real_daemon(monkeypatch):
     ):
         monkeypatch.setattr(target, MagicMock())
 
+    # GoLogin SDK calls that create/start/stop/delete profiles or write cookies hit the real daemon
+    # (127.0.0.1:36912) when it runs on the machine: a test must patch them explicitly.
+    from sammonny.gologin.gologin import GoLogin
+
+    def _forbidden(method: str):
+        def call(*_args, **_kwargs):
+            raise RuntimeError(f"test tried to call the real SamMonny daemon (GoLogin.{method}); patch it")
+
+        return call
+
+    for method in ("create", "delete", "start", "stop", "post_cookies"):
+        monkeypatch.setattr(GoLogin, method, _forbidden(method))
+
 
 @pytest.fixture(scope="session")
 def _session_default_db(tmp_path_factory):

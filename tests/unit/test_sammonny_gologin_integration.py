@@ -36,11 +36,24 @@ def test_orbita_launcher_finds_real_orbita_executable():
     assert "chrome.exe" in exe.name.lower() or "orbita" in str(exe).lower()
 
 
-def test_daemon_supervisor_detects_binary_path(supervisor):
-    bin_path = supervisor.find_daemon_binary()
-    assert bin_path is not None
-    assert bin_path.exists()
+def test_daemon_supervisor_detects_binary_path(supervisor, tmp_path):
+    # Hermetic: the first existing candidate wins (no dependency on a daemon installed on this machine).
+    missing = tmp_path / "missing" / "sammonny-daemon.exe"
+    installed = tmp_path / "engine" / "sammonny-daemon.exe"
+    installed.parent.mkdir()
+    installed.write_bytes(b"MZ")
+    with patch(
+        "src.infrastructure.browser.sammonny_daemon_manager.daemon_binary_candidates",
+        return_value=[missing, installed],
+    ):
+        bin_path = supervisor.find_daemon_binary()
+    assert bin_path == installed
     assert bin_path.name == "sammonny-daemon.exe"
+
+    with patch(
+        "src.infrastructure.browser.sammonny_daemon_manager.daemon_binary_candidates", return_value=[missing]
+    ):
+        assert supervisor.find_daemon_binary() is None
 
 
 def test_daemon_supervisor_check_health(supervisor):
