@@ -473,18 +473,11 @@ class TikTokNetworkSniffer:
                 create_time = 0
 
             stats = it.get("statistics") or it.get("stats") or it.get("item_stats") or {}
-            views = int(stats.get("views") or stats.get("playCount") or stats.get("play_count") or it.get("views") or 0)
-            likes = int(stats.get("likes") or stats.get("diggCount") or stats.get("digg_count") or it.get("likes") or 0)
-            comments = int(
-                stats.get("comments")
-                or stats.get("commentCount")
-                or stats.get("comment_count")
-                or it.get("comments")
-                or 0
-            )
-            shares = int(
-                stats.get("shares") or stats.get("shareCount") or stats.get("share_count") or it.get("shares") or 0
-            )
+            # Studio 2026 item_list/v1 puts the counters at the item's top level, as strings.
+            views = _first_count(stats, it, ("views", "playCount", "play_count"))
+            likes = _first_count(stats, it, ("likes", "diggCount", "digg_count", "like_count"))
+            comments = _first_count(stats, it, ("comments", "commentCount", "comment_count"))
+            shares = _first_count(stats, it, ("shares", "shareCount", "share_count"))
 
             eng_rate = round(((likes + comments + shares) / max(1, views)) * 100, 2)
 
@@ -497,6 +490,8 @@ class TikTokNetworkSniffer:
             raw_video = it.get("video")
             video_obj: dict[str, Any] = raw_video if isinstance(raw_video, dict) else {}
             duration = int(video_obj.get("duration") or it.get("duration") or 0)
+            if not video_obj and "play_count" in it and duration >= 1000:
+                duration = round(duration / 1000)  # Studio item_list/v1 reports milliseconds
             thumbnail = str(
                 video_obj.get("cover")
                 or video_obj.get("originCover")
@@ -557,6 +552,23 @@ class TikTokNetworkSniffer:
             "views_month": month_views,
             "total_views": total_observed_views,
         }
+
+
+def _first_count(stats: dict[str, Any], item: dict[str, Any], keys: tuple[str, ...]) -> int:
+    """First present counter among ``keys``, nested ``stats`` first, then the item's top level.
+
+    Values may be ints or numeric strings (Studio 2026 item_list/v1 sends "843"); unparsable values count as 0.
+    """
+    for source in (stats, item):
+        for key in keys:
+            value = source.get(key)
+            if value in (None, ""):
+                continue
+            try:
+                return int(float(value))
+            except (TypeError, ValueError):
+                continue
+    return 0
 
 
 def attach_playwright_sniffer(

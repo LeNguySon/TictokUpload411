@@ -35,3 +35,9 @@ Reverse-engineering TikTok Studio web bundles (`main.5cc4d756.js`, async chunk `
 2. Parse cookies from DPAPI encrypted storage seamlessly.
 3. Fall back gracefully to legacy endpoints if 2026 endpoints are throttled or unavailable.
 
+
+## item_list/v1: số liệu nằm ở cấp item, dạng chuỗi (kiểm chứng live @swall.pain, 2026-11-07)
+- Mỗi item có `play_count`, `like_count`, `comment_count`, `share_count`, `favorite_count` là STRING ở cấp
+  item (không có `stats{}`); `duration` tính bằng MILI-GIÂY; `create_time`/`post_time` là chuỗi epoch.
+- Sniffer từng chỉ đọc `stats{}` / `views` ⇒ 50/50 video lưu 0 view ⇒ Radar engagement 0%, cảnh báo Flop giả.
+  Nay `_first_count()` đọc cả hai nơi; duration ms ⇒ giây (`test_studio_item_list_stats.py`).
