@@ -5,9 +5,11 @@ Sync & Transfer Dialog: Export and Import profiles, proxies, and project dataset
 import json
 import logging
 import zipfile
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from PyQt6 import sip
 from PyQt6.QtWidgets import (
     QButtonGroup,
     QDialog,
@@ -30,6 +32,7 @@ from qfluentwidgets import (
     PushButton,
 )
 
+from src.application.workers.task_worker import run_task
 from src.infrastructure.database.repositories.profile_repository import ProfileRepository
 from src.infrastructure.database.repositories.project_repository import ProjectRepository
 from src.infrastructure.database.repositories.proxy_repository import ProxyRepository
@@ -233,9 +236,9 @@ class SyncTransferDialog(QDialog):
         exp_layout.addLayout(file_exp_layout)
 
         exp_layout.addStretch()
-        btn_start_export = PrimaryPushButton(FluentIcon.SHARE, "Bắt Đầu Đóng Gói && Xuất Dữ Liệu", tab_export)
-        btn_start_export.clicked.connect(self._on_start_export)
-        exp_layout.addWidget(btn_start_export)
+        self.btn_start_export = PrimaryPushButton(FluentIcon.SHARE, "Bắt Đầu Đóng Gói && Xuất Dữ Liệu", tab_export)
+        self.btn_start_export.clicked.connect(self._on_start_export)
+        exp_layout.addWidget(self.btn_start_export)
 
         self.tabs.addTab(tab_export, "Gửi (Sao Lưu)")
 
@@ -265,9 +268,9 @@ class SyncTransferDialog(QDialog):
         imp_layout.addWidget(self.rb_overwrite)
 
         imp_layout.addStretch()
-        btn_start_import = PrimaryPushButton(FluentIcon.DOWNLOAD, "Bắt Đầu Nhận && Khôi Phục Dữ Liệu", tab_import)
-        btn_start_import.clicked.connect(self._on_start_import)
-        imp_layout.addWidget(btn_start_import)
+        self.btn_start_import = PrimaryPushButton(FluentIcon.DOWNLOAD, "Bắt Đầu Nhận && Khôi Phục Dữ Liệu", tab_import)
+        self.btn_start_import.clicked.connect(self._on_start_import)
+        imp_layout.addWidget(self.btn_start_import)
 
         self.tabs.addTab(tab_import, "Nhận (Khôi Phục)")
 
@@ -312,30 +315,21 @@ class SyncTransferDialog(QDialog):
             )
             return
 
-        try:
-            proj_id = self.combo_project_export.currentData()
-            count = export_project_dataset(
-                zip_path=out_path,
-                project_id=proj_id,
-                profile_repo=self.profile_repo,
-                proxy_repo=self.proxy_repo,
-                project_repo=self.project_repo,
-                include_proxies=self.chk_include_proxies.isChecked(),
-            )
-            InfoBar.success(
-                title="Xuất Dữ Liệu Thành Công",
-                content=f"Đã đóng gói thành công {count} hồ sơ ra file: {out_path}",
-                position=InfoBarPosition.TOP,
-                parent=self,
-            )
-        except Exception as e:
-            logger.error("Export failed: %s", e)
-            InfoBar.error(
-                title="Xuất Dữ Liệu Thất Bại",
-                content=str(e),
-                position=InfoBarPosition.TOP,
-                parent=self,
-            )
+        self._run_job(
+            self.btn_start_export,
+            export_project_dataset,
+            {
+                "zip_path": out_path,
+                "project_id": self.combo_project_export.currentData(),
+                "profile_repo": self.profile_repo,
+                "proxy_repo": self.proxy_repo,
+                "project_repo": self.project_repo,
+                "include_proxies": self.chk_include_proxies.isChecked(),
+            },
+            ok_title="Xuất Dữ Liệu Thành Công",
+            ok_text=lambda count: f"Đã đóng gói thành công {count} hồ sơ ra file: {out_path}",
+            fail_title="Xuất Dữ Liệu Thất Bại",
+        )
 
     def _on_start_import(self) -> None:
         in_path = self.txt_import_path.text().strip()
@@ -348,25 +342,47 @@ class SyncTransferDialog(QDialog):
             )
             return
 
-        try:
-            p_count, px_count = import_project_dataset(
-                zip_path=in_path,
-                profile_repo=self.profile_repo,
-                proxy_repo=self.proxy_repo,
-                project_repo=self.project_repo,
-                overwrite=self.rb_overwrite.isChecked(),
-            )
-            InfoBar.success(
-                title="Nhận Dữ Liệu Thành Công",
-                content=f"Đã khôi phục {p_count} hồ sơ và {px_count} proxy vào CSDL.",
-                position=InfoBarPosition.TOP,
-                parent=self,
-            )
-        except Exception as e:
-            logger.error("Import failed: %s", e)
-            InfoBar.error(
-                title="Nhận Dữ Liệu Thất Bại",
-                content=str(e),
-                position=InfoBarPosition.TOP,
-                parent=self,
-            )
+        self._run_job(
+            self.btn_start_import,
+            import_project_dataset,
+            {
+                "zip_path": in_path,
+                "profile_repo": self.profile_repo,
+                "proxy_repo": self.proxy_repo,
+                "project_repo": self.project_repo,
+                "overwrite": self.rb_overwrite.isChecked(),
+            },
+            ok_title="Nhận Dữ Liệu Thành Công",
+            ok_text=lambda counts: f"Đã khôi phục {counts[0]} hồ sơ và {counts[1]} proxy vào CSDL.",
+            fail_title="Nhận Dữ Liệu Thất Bại",
+        )
+
+    def _run_job(
+        self,
+        button: Any,
+        fn: Callable[..., Any],
+        kwargs: dict[str, Any],
+        *,
+        ok_title: str,
+        ok_text: Callable[[Any], str],
+        fail_title: str,
+    ) -> None:
+        """Runs an export/import (zip + many SQLite writes) off the GUI thread; one job per button."""
+        button.setEnabled(False)
+
+        def finish() -> bool:
+            if sip.isdeleted(self):
+                return False
+            button.setEnabled(True)
+            return True
+
+        def ok(result: Any) -> None:
+            if finish():
+                InfoBar.success(title=ok_title, content=ok_text(result), position=InfoBarPosition.TOP, parent=self)
+
+        def failed(err: str) -> None:
+            logger.error("%s: %s", fail_title, err)
+            if finish():
+                InfoBar.error(title=fail_title, content=err, position=InfoBarPosition.TOP, parent=self)
+
+        run_task(fn, on_result=ok, on_error=failed, **kwargs)
