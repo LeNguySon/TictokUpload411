@@ -184,8 +184,12 @@ def test_auto_dispatch_scheduler_dispatches_worker(test_db: Path):
     main_win.upload_service = MagicMock()
     main_win.signal_bus = MagicMock()
 
-    # Call the auto-dispatch method logic
-    TikTokManagerMainWindow._check_scheduled_queue(main_win)
+    # Scheduler logic: reservation (off the GUI thread in the app) then dispatch on the GUI thread
+    from src.presentation.views.main_window import reserve_due_videos
+
+    pairs = reserve_due_videos(repo, "2026-11-05 00:00:00", fallback_profile_ids=[1])
+    assert pairs == [(vid_id, 1)]
+    TikTokManagerMainWindow._dispatch_reserved_uploads(main_win, pairs)
 
     # Worker should have been dispatched on the dedicated upload pool (UI responsiveness T8)
     assert main_win.thread_pool.dispatch_upload.called

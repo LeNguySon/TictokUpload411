@@ -120,6 +120,26 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def reserve_due_videos(
+    video_repo: Any, now_iso: str, fallback_profile_ids: list[int]
+) -> list[tuple[int, int]]:
+    """Reserves every scheduled video due at ``now_iso`` (DB read + atomic write: run it off the GUI thread).
+
+    Target profile: the video's assigned profile, else the selected profiles in round-robin. Videos with
+    no target, or already reserved by someone else, are skipped. Returns [(video_id, profile_id)].
+    """
+    reserved: list[tuple[int, int]] = []
+    for v in video_repo.list_scheduled_due(max_time_iso=now_iso) or []:
+        target = v.get("assigned_profile_id")
+        if not target and fallback_profile_ids:
+            target = fallback_profile_ids[len(reserved) % len(fallback_profile_ids)]
+        if not target:
+            continue
+        if video_repo.try_reserve(video_id=v["id"], assigned_profile_id=target):
+            reserved.append((int(v["id"]), int(target)))
+    return reserved
+
+
 class TikTokManagerMainWindow(QMainWindow):
     _active_status_sync_worker: "ProfileRuntimeSyncWorker | None" = None
     """
@@ -2061,48 +2081,46 @@ class TikTokManagerMainWindow(QMainWindow):
             )
 
     def _check_scheduled_queue(self) -> None:
-        """Periodically scans for scheduled videos that have reached their upload time."""
+        """Every 15 s: reserves due scheduled videos OFF the GUI thread (SQLite read + write may wait up to
+        busy_timeout while uploads write), then dispatches their upload workers on the GUI thread."""
         if not entitlements.has(Feature.UPLOAD):
             return  # plan without automatic upload
-        try:
-            now_iso = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            due_videos = self.video_repo.list_scheduled_due(max_time_iso=now_iso)
-            if not due_videos:
-                return
+        if getattr(self, "_scheduler_check_running", False):
+            return  # previous tick still reserving
+        self._scheduler_check_running = True
+        now_iso = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        selected_profiles = list(self.profile_table.get_selected_profile_ids())
 
-            selected_profiles = self.profile_table.get_selected_profile_ids()
-            dispatched = 0
+        def done(pairs: list[tuple[int, int]]) -> None:
+            self._scheduler_check_running = False
+            self._dispatch_reserved_uploads(pairs)
 
-            for v in due_videos:
-                vid_id = v["id"]
-                # Target profile: assigned profile first, or fallback to selected profiles
-                target_profile = v.get("assigned_profile_id")
-                if not target_profile and selected_profiles:
-                    target_profile = selected_profiles[dispatched % len(selected_profiles)]
+        def failed(err: str) -> None:
+            self._scheduler_check_running = False
+            logger.debug("Auto-dispatch queue check bypassed (DB closed/recycled): %s", err)
 
-                if not target_profile:
-                    # Cannot dispatch without an assigned or selected profile
-                    continue
+        self._run_bg(
+            reserve_due_videos,
+            self.video_repo,
+            now_iso,
+            selected_profiles,
+            on_result=done,
+            on_error=failed,
+        )
 
-                # Atomically reserve to prevent duplicate triggering
-                reserved = self.video_repo.try_reserve(video_id=vid_id, assigned_profile_id=target_profile)
-                if not reserved:
-                    continue
-
-                worker = UploadWorker(
-                    video_id=vid_id,
-                    profile_id=target_profile,
-                    upload_service=self.upload_service,
-                    signal_bus=self.signal_bus,
-                )
-                self.thread_pool.dispatch_upload(worker)
-                dispatched += 1
-
-            if dispatched > 0:
-                logger.info("Auto-dispatch scheduler launched %d due videos", dispatched)
-                self.refresh_videos()
-        except Exception as e:
-            logger.debug("Auto-dispatch queue check bypassed (DB closed/recycled): %s", e)
+    def _dispatch_reserved_uploads(self, pairs: list[tuple[int, int]]) -> None:
+        """Starts one upload worker per (video_id, profile_id) reserved by reserve_due_videos (GUI thread)."""
+        for vid_id, target_profile in pairs:
+            worker = UploadWorker(
+                video_id=vid_id,
+                profile_id=target_profile,
+                upload_service=self.upload_service,
+                signal_bus=self.signal_bus,
+            )
+            self.thread_pool.dispatch_upload(worker)
+        if pairs:
+            logger.info("Auto-dispatch scheduler launched %d due videos", len(pairs))
+            self.refresh_videos()
 
     def _on_edit_video_metadata(self, video_id_or_row: int) -> None:
         v = self.video_repo.get_by_id(video_id_or_row)

@@ -16,6 +16,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from PyQt6.QtCore import QThreadPool
 from PyQt6.QtWidgets import QApplication
+from src.application.workers.task_worker import drain_ui_tasks
 
 WAIT_MS = 5000
 
@@ -121,6 +122,7 @@ def test_scheduled_uploads_are_dispatched_to_upload_pool(main_window):
         patch.object(win, "refresh_videos"),
     ):
         win._check_scheduled_queue()
+        assert drain_ui_tasks()  # reservation runs off the GUI thread
     assert up.call_count == 1 and isinstance(up.call_args.args[0], UploadWorker)
     assert not any(isinstance(c.args[0], UploadWorker) for c in general.call_args_list)
 
