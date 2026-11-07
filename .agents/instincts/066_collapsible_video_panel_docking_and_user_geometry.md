@@ -21,3 +21,4 @@ Nếu dùng `QSplitter` thuần túy:
    - Lưu lại `self._saved_video_splitter_height` trước khi thu gọn (tối thiểu 200px, mặc định 340px) để khi mở lại (`_expand_video_panel`), bảng trở về đúng kích thước mong muốn.
 4. **Auto-Expand on Data Ingestion**:
    - Khi đang thu gọn, nếu người dùng kích hoạt các hành động nạp/tải dữ liệu (`_on_pick_video_files`, `_on_open_batch_folder_upload`, `_on_start_upload_queue`), tự động mở lại bảng video để người dùng quan sát tiến trình.
+

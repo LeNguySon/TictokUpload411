@@ -45,3 +45,4 @@ Khi thực hiện tải video lên kênh TikTok thực qua Cookie / Web Studio A
 - Hình ảnh bằng chứng lưu tại:
   - `post_confirmation_proof.png`: Hộp thoại xác nhận xuất bản từ TikTok Studio DOM.
   - `live_upload_cookie_api_proof.png`: Giao diện ứng dụng máy tính hiển thị trạng thái đã xuất bản thành công.
+
