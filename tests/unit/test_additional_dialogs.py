@@ -135,7 +135,18 @@ def test_sync_transfer_dataset_export_and_import(tmp_path):
 
 def test_user_guide_dialog_tabs(qapp):
     dlg = UserGuideDialog()
-    assert dlg.tabs.count() == 5
+    assert dlg.tabs.count() == 7
+    expected_tabs = [
+        "Bắt Đầu Nhanh",
+        "28 Cột MMO",
+        "Chống Leak Proxy",
+        "3 Chế Độ Upload",
+        "Radar và Kháng Cáo",
+        "Sao Lưu và RAM",
+        "Bản Quyền và Phím Tắt",
+    ]
+    for i, title in enumerate(expected_tabs):
+        assert dlg.tabs.tabText(i) == title
     dlg.close()
 
 
