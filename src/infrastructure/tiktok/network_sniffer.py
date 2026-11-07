@@ -421,8 +421,8 @@ class TikTokNetworkSniffer:
 
         stat_sql = """
         INSERT INTO statisticTable (
-            profile_id, id_video, title, views, likes, comments, shares, engagement_rate, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            profile_id, id_video, title, views, likes, comments, shares, engagement_rate, date_upload, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
         ON CONFLICT(profile_id, id_video) DO UPDATE SET
             title = COALESCE(excluded.title, statisticTable.title),
             views = excluded.views,
@@ -430,6 +430,7 @@ class TikTokNetworkSniffer:
             comments = excluded.comments,
             shares = excluded.shares,
             engagement_rate = excluded.engagement_rate,
+            date_upload = COALESCE(excluded.date_upload, statisticTable.date_upload),
             updated_at = CURRENT_TIMESTAMP;
         """
 
@@ -485,7 +486,11 @@ class TikTokNetworkSniffer:
                 month_views += views
             total_observed_views += views
 
-            stat_records.append((profile_id, vid_id, title, views, likes, comments, shares, eng_rate))
+            # Local posting time (the radar's posting-hour analysis needs it; None when TikTok omits it).
+            date_upload = (
+                datetime.fromtimestamp(create_time).strftime("%Y-%m-%d %H:%M:%S") if create_time > 0 else None
+            )
+            stat_records.append((profile_id, vid_id, title, views, likes, comments, shares, eng_rate, date_upload))
 
             raw_video = it.get("video")
             video_obj: dict[str, Any] = raw_video if isinstance(raw_video, dict) else {}

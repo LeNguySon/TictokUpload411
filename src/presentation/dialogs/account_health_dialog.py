@@ -69,6 +69,26 @@ def fetch_health_data(db_path: Path | str, profile_id: int) -> dict[str, Any] | 
         }
 
 
+def format_appeal_deadline(value: object) -> str:
+    """Appeal deadline as dd/mm/YYYY. TikTok sends epoch seconds (sometimes milliseconds) as a string; appeal
+    actions store "YYYY-MM-DD[ HH:MM:SS]". Anything else is shown as-is, empty as an em dash."""
+    text = str(value).strip() if value is not None else ""
+    if not text:
+        return "—"
+    if text.isdigit():
+        stamp = int(text)
+        if stamp > 10**11:  # milliseconds
+            stamp //= 1000
+        try:
+            return datetime.fromtimestamp(stamp).strftime("%d/%m/%Y")
+        except (OverflowError, OSError, ValueError):
+            return text
+    try:
+        return datetime.fromisoformat(text).strftime("%d/%m/%Y")
+    except ValueError:
+        return text
+
+
 # Legacy hex colors (picked for a dark background) -> semantic Fluent status colors that read well
 # on the app's light theme and follow dark mode.
 _HEX_TO_KIND = {
@@ -420,7 +440,8 @@ class AccountHealthDialog(QDialog):
                 v_item.setForeground(QColor(status_color("danger")))
             self.table_violate.setItem(row_idx, 2, v_item)
 
-            self.table_violate.setItem(row_idx, 3, QTableWidgetItem(str(v_dict.get("appeal_date") or "—")))
+            deadline = format_appeal_deadline(v_dict.get("appeal_date"))
+            self.table_violate.setItem(row_idx, 3, QTableWidgetItem(deadline))
 
             st_text = str(v_dict.get("status") or "pending")
             if st_text == "appealed":

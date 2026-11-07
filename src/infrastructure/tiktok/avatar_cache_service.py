@@ -29,25 +29,38 @@ def get_avatar_cache_path(profile_id: int, storage_dir: str | Path | None = None
     return _DEFAULT_AVATAR_DIR / f"{profile_id}.jpg"
 
 
-def _profile_proxy_url(profile_id: int, db_path: Path | str | None) -> str | None:
-    """Proxy URL of the profile, or None if it has none / it is flagged as leaking."""
+class _AvatarEgressBlocked(Exception):
+    """The profile has no allowed route for the download (see resolve_profile_egress)."""
+
+
+def _profile_egress(profile_id: int, db_path: Path | str | None) -> str | None:
+    """Egress for the profile's avatar download, by the app's single egress rule (resolve_profile_egress):
+    its proxy URL, or None when the user opted the profile into the machine's own IP (direct_connection).
+    Raises _AvatarEgressBlocked when neither applies (no proxy, leaking proxy, VPN-only profile)."""
+    from src.infrastructure.proxy.egress import EgressBlocked, resolve_profile_egress
     from src.infrastructure.tiktok.gologin_tiktok_client import GoLoginTikTokClient
 
-    client = GoLoginTikTokClient(db_path=db_path or Path("data/app.db"))
-    proxy = client.get_profile_proxy(profile_id)
-    if not proxy or proxy.get("status") == "leak_detected":
-        return None
-    return client._build_proxy_url(proxy)
+    path = db_path or Path("data/app.db")
+    with db_session(path, write=False) as conn:
+        row = conn.execute("SELECT * FROM profiles WHERE id=?", (profile_id,)).fetchone()
+    if not row:
+        raise _AvatarEgressBlocked(f"profile {profile_id} not found")
+    proxy = GoLoginTikTokClient(db_path=path).get_profile_proxy(profile_id)
+    try:
+        return resolve_profile_egress(dict(row), proxy)
+    except EgressBlocked as blocked:
+        raise _AvatarEgressBlocked(str(blocked)) from blocked
 
 
-def _http_get(url: str, proxy_url: str, timeout: float) -> bytes | None:
-    """GET through ``proxy_url`` (curl_cffi when installed, else urllib with a ProxyHandler)."""
+def _http_get(url: str, proxy_url: str | None, timeout: float) -> bytes | None:
+    """GET through ``proxy_url``, or directly when it is None (profile opted into the machine's IP).
+    curl_cffi when installed, else urllib with a ProxyHandler."""
     try:
         from curl_cffi import requests
+        from curl_cffi.requests import ProxySpec
 
-        resp = requests.get(
-            url, impersonate="chrome123", timeout=timeout, proxies={"http": proxy_url, "https": proxy_url}
-        )
+        proxies: ProxySpec | None = {"http": proxy_url, "https": proxy_url} if proxy_url else None
+        resp = requests.get(url, impersonate="chrome123", timeout=timeout, proxies=proxies)
         return resp.content if resp.status_code == 200 and resp.content else None
     except ImportError:
         pass
@@ -55,11 +68,12 @@ def _http_get(url: str, proxy_url: str, timeout: float) -> bytes | None:
         logger.debug("Avatar download via curl_cffi failed: %s", e)
         return None
 
-    if not proxy_url.startswith(("http://", "https://")):
+    if proxy_url and not proxy_url.startswith(("http://", "https://")):
         return None  # urllib cannot tunnel through SOCKS: never fall back to a direct connection
     import urllib.request
 
-    opener = urllib.request.build_opener(urllib.request.ProxyHandler({"http": proxy_url, "https": proxy_url}))
+    handler = urllib.request.ProxyHandler({"http": proxy_url, "https": proxy_url} if proxy_url else {})
+    opener = urllib.request.build_opener(handler)
     req = urllib.request.Request(
         url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/123.0.0.0 Safari/537.36"}
     )
@@ -91,11 +105,12 @@ def download_and_cache_avatar(
         dest_path = get_avatar_cache_path(profile_id, storage_dir)
         dest_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Strict Proxy Gate: TikTok CDN requests must go through the profile's own proxy, never the
-        # host IP (a direct download links every account to the same machine).
-        proxy_url = _profile_proxy_url(profile_id, db_path)
-        if not proxy_url:
-            logger.warning("Avatar download skipped for profile %s: no usable proxy (host IP protected)", profile_id)
+        # Strict Proxy Gate: the profile's own proxy, or the machine's IP only if the user opted this profile
+        # into it (direct_connection). Never an implicit direct download: it links every account to one IP.
+        try:
+            proxy_url = _profile_egress(profile_id, db_path)
+        except _AvatarEgressBlocked as blocked:
+            logger.warning("Avatar download skipped for profile %s: %s", profile_id, blocked)
             return None
         content = _http_get(avatar_url, proxy_url, timeout)
 

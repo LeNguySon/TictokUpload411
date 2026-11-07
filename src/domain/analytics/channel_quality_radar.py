@@ -39,7 +39,7 @@ class VideoDataPoint:
     shares: int = 0
     saves: int = 0
     duration_secs: float = 30.0
-    posted_hour: int = 12
+    posted_hour: int | None = None  # local hour the video was posted; None = unknown
     for_you_pct: float = 0.0
 
 
@@ -89,7 +89,9 @@ class ChannelQualityRadar:
         videos: list[VideoDataPoint],
         followers: int = 0,
         views_30d: int = 0,
+        fallback_best_hour: int | None = None,
     ) -> ChannelQualityReport:
+        """``fallback_best_hour`` (e.g. TikTok's audience-active hour) is used when no video has a known posting hour."""
         if not videos:
             empty_signals = QualitySignals(
                 engagement_pct=0.0,
@@ -104,7 +106,7 @@ class ChannelQualityRadar:
                 verdict=ChannelVerdict.REAL,
                 confidence=0.5,
                 signals=empty_signals,
-                best_posting_hour=19,
+                best_posting_hour=fallback_best_hour if fallback_best_hour is not None else 19,
                 recommendations=["Chưa có dữ liệu video để phân tích chuyên sâu."],
             )
 
@@ -126,10 +128,10 @@ class ChannelQualityRadar:
         views_per_video = total_views / n if n > 0 else 0.0
 
         # 3. Hours Coefficient of Variation
-        hours = [v.posted_hour for v in videos]
-        mean_hour = sum(hours) / n
-        if n > 1 and mean_hour > 0:
-            variance_hour = sum((h - mean_hour) ** 2 for h in hours) / (n - 1)
+        hours = [v.posted_hour for v in videos if v.posted_hour is not None]
+        mean_hour = sum(hours) / len(hours) if hours else 0.0
+        if len(hours) > 1 and mean_hour > 0:
+            variance_hour = sum((h - mean_hour) ** 2 for h in hours) / (len(hours) - 1)
             hours_cv = math.sqrt(variance_hour) / mean_hour
         else:
             hours_cv = 0.0
@@ -148,7 +150,7 @@ class ChannelQualityRadar:
         )
 
         verdict, confidence, recs = self._compute_verdict(signals, videos, followers, views_30d)
-        best_hour = self._compute_best_posting_hour(videos)
+        best_hour = self._compute_best_posting_hour(videos, fallback_best_hour)
 
         return ChannelQualityReport(
             account_id=account_id,
@@ -191,12 +193,13 @@ class ChannelQualityRadar:
 
         return ChannelVerdict.REAL, 0.80, recs
 
-    def _compute_best_posting_hour(self, videos: list[VideoDataPoint]) -> int:
+    def _compute_best_posting_hour(self, videos: list[VideoDataPoint], fallback: int | None = None) -> int:
         hour_views: dict[int, list[int]] = {}
         for v in videos:
-            hour_views.setdefault(v.posted_hour, []).append(v.views)
+            if v.posted_hour is not None:
+                hour_views.setdefault(v.posted_hour, []).append(v.views)
 
-        best_hour = 19
+        best_hour = fallback if fallback is not None else 19
         best_avg = -1.0
         for h, v_list in hour_views.items():
             avg = sum(v_list) / len(v_list)

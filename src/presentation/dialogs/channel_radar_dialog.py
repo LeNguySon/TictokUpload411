@@ -7,6 +7,7 @@ flop/shadowban warnings, and strategic recommendations in Windows 11 Fluent Desi
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -53,7 +54,7 @@ def _load_profile_videos(db_path: Path, profile_id: int) -> list[dict[str, Any]]
         with db_session(db_path, write=False) as conn:
             rows = conn.execute(
                 """
-                SELECT id_video AS video_id, title, views, likes, comments, shares, engagement_rate, updated_at
+                SELECT id_video AS video_id, title, views, likes, comments, shares, engagement_rate, date_upload, updated_at
                 FROM statisticTable WHERE profile_id = ? ORDER BY id DESC LIMIT 50;
                 """,
                 (profile_id,),
@@ -73,6 +74,27 @@ def _load_profile_videos(db_path: Path, profile_id: int) -> list[dict[str, Any]]
     except Exception as e:
         logger.warning("Radar video history unreadable for profile %s: %s", profile_id, e)
         return []
+
+
+def video_posted_hour(video: dict[str, Any]) -> int | None:
+    """Local posting hour of a video row (``date_upload`` "YYYY-MM-DD HH:MM:SS"), or None if unknown."""
+    raw = video.get("date_upload")
+    if not raw:
+        return None
+    try:
+        return datetime.fromisoformat(str(raw)).hour
+    except ValueError:
+        return None
+
+
+def _optimal_hour(profile: dict[str, Any]) -> int | None:
+    """TikTok's audience-active hour stored on the profile (0-23), if any."""
+    value = profile.get("optimal_hour")
+    try:
+        hour = int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+    return hour if hour is not None and 0 <= hour <= 23 else None
 
 
 def load_radar_inputs(
@@ -125,6 +147,7 @@ class ChannelRadarDialog(QDialog):
                     likes=int(v.get("likes") or 0),
                     comments=int(v.get("comments") or 0),
                     shares=int(v.get("shares") or 0),
+                    posted_hour=video_posted_hour(v),
                 )
             )
 
@@ -136,6 +159,7 @@ class ChannelRadarDialog(QDialog):
             videos=datapoints,
             followers=followers,
             views_30d=views_30d,
+            fallback_best_hour=_optimal_hour(self.profile),
         )
         self.report = report
         self.recommendations = report.recommendations

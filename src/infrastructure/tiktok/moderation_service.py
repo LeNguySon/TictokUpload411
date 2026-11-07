@@ -29,6 +29,11 @@ from src.infrastructure.tiktok.gologin_tiktok_client import (
 
 logger = logging.getLogger(__name__)
 
+# getPenaltyDetails requests in flight at once during a violation scan (one per video; no flag in item_list).
+PENALTY_LOOKUP_WORKERS = 8
+# Safety cap on item_list/v1 pagination.
+ITEM_LIST_MAX_ITEMS = 2000
+
 
 PAGE_TYPE_MAP: dict[int, str] = {
     1: "PenaltyDetailPage",
@@ -298,44 +303,8 @@ class TikTokModerationService:
                             "status": status_v,
                         })
                 else:
-                    item_list = resp_items.get("item_list") or []
-                    for it in item_list:
-                        if not isinstance(it, dict):
-                            continue
-                        item_id = str(it.get("item_id") or it.get("id") or "")
-                        if not item_id:
-                            continue
-
-                        # Query penalty details for each item
-                        url_pen = f"https://www.tiktok.com/mod/v1/getPenaltyDetails/?vid={item_id}"
-                        resp_pen = self._request_tiktok_api(url_pen, cookie_hdr, ua, profile_id=profile_id, method="GET", timeout=8)
-                        penalties = resp_pen.get("penalties") or []
-                        appeal_st = resp_pen.get("appeal_status")
-
-                        if penalties or (appeal_st is not None and appeal_st != 2):
-                            title = str(it.get("desc") or it.get("item_title") or it.get("title") or "#shorts")
-                            v_title = "Community Guidelines"
-                            v_desc = "Ineligible for the For You feed (FYF)"
-                            appeal_deadline = ""
-
-                            if penalties:
-                                p0 = penalties[0]
-                                reasons = p0.get("penalty_reason_info_list") or []
-                                if reasons and isinstance(reasons[0], dict):
-                                    v_title = reasons[0].get("title") or v_title
-                                    v_desc = reasons[0].get("content") or v_desc
-                                appeal_deadline = str(p0.get("date") or "")
-
-                            status_str = "can_appeal" if appeal_st == 0 else ("under_review" if appeal_st == 1 else "penalized")
-                            violations.append({
-                                "video_id": item_id,
-                                "title": title,
-                                "violate_title": v_title,
-                                "violate_description": v_desc,
-                                "video_posted_date": str(it.get("create_time") or ""),
-                                "appeal_date": appeal_deadline,
-                                "status": status_str,
-                            })
+                    items = self._list_all_items(resp_items, cookie_hdr, ua, profile_id)
+                    violations.extend(self._penalized_items(items, cookie_hdr, ua, profile_id))
 
             for item in violations:
                 conn.execute(
@@ -366,6 +335,83 @@ class TikTokModerationService:
             return violations
         finally:
             conn.close()
+
+    def _list_all_items(
+        self, first_page: dict[str, Any], cookie_hdr: str, ua: str, profile_id: int
+    ) -> list[dict[str, Any]]:
+        """Every video of the channel: follows item_list/v1 pagination (``has_more`` / ``cursor``)."""
+        items: list[dict[str, Any]] = [it for it in (first_page.get("item_list") or []) if isinstance(it, dict)]
+        page = first_page
+        seen_cursors: set[Any] = set()
+        while page.get("has_more") and len(items) < ITEM_LIST_MAX_ITEMS:
+            cursor = page.get("cursor")
+            if cursor in (None, "") or cursor in seen_cursors:
+                break  # no usable cursor: stop rather than loop on the same page
+            seen_cursors.add(cursor)
+            page = self._request_tiktok_api(
+                "https://www.tiktok.com/tiktok/creator/manage/item_list/v1/",
+                cookie_hdr,
+                ua,
+                profile_id=profile_id,
+                method="POST",
+                json_data={"cursor": cursor, "size": 50, "query": {}},
+                timeout=15,
+            )
+            batch = [it for it in (page.get("item_list") or []) if isinstance(it, dict)]
+            if not batch:
+                break
+            items.extend(batch)
+        return items
+
+    def _penalized_items(
+        self, items: list[dict[str, Any]], cookie_hdr: str, ua: str, profile_id: int
+    ) -> list[dict[str, Any]]:
+        """getPenaltyDetails for every video, PENALTY_LOOKUP_WORKERS at a time; keeps the item order.
+
+        item_list/v1 carries no penalty flag (a penalized video looks like any other), so each video is
+        checked; doing it sequentially took ~85 s for 79 videos.
+        """
+        from concurrent.futures import ThreadPoolExecutor
+
+        candidates = [it for it in items if str(it.get("item_id") or it.get("id") or "")]
+
+        def lookup(it: dict[str, Any]) -> dict[str, Any] | None:
+            item_id = str(it.get("item_id") or it.get("id") or "")
+            url_pen = f"https://www.tiktok.com/mod/v1/getPenaltyDetails/?vid={item_id}"
+            resp_pen = self._request_tiktok_api(url_pen, cookie_hdr, ua, profile_id=profile_id, method="GET", timeout=8)
+            penalties = resp_pen.get("penalties") or []
+            appeal_st = resp_pen.get("appeal_status")
+            if not (penalties or (appeal_st is not None and appeal_st != 2)):
+                return None
+
+            title = str(it.get("desc") or it.get("item_title") or it.get("title") or "#shorts")
+            v_title = "Community Guidelines"
+            v_desc = "Ineligible for the For You feed (FYF)"
+            appeal_deadline = ""
+            if penalties:
+                p0 = penalties[0]
+                reasons = p0.get("penalty_reason_info_list") or []
+                if reasons and isinstance(reasons[0], dict):
+                    v_title = reasons[0].get("title") or v_title
+                    v_desc = reasons[0].get("content") or v_desc
+                appeal_deadline = str(p0.get("date") or "")
+
+            status_str = "can_appeal" if appeal_st == 0 else ("under_review" if appeal_st == 1 else "penalized")
+            return {
+                "video_id": item_id,
+                "title": title,
+                "violate_title": v_title,
+                "violate_description": v_desc,
+                "video_posted_date": str(it.get("create_time") or ""),
+                "appeal_date": appeal_deadline,
+                "status": status_str,
+            }
+
+        if not candidates:
+            return []
+        with ThreadPoolExecutor(max_workers=min(PENALTY_LOOKUP_WORKERS, len(candidates))) as pool:
+            results = list(pool.map(lookup, candidates))
+        return [r for r in results if r is not None]
 
     def fetch_video_appeal_info(self, profile_id: int, video_id: str) -> dict[str, Any]:
         """

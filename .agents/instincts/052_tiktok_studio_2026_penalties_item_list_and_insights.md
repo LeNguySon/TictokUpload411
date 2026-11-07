@@ -41,3 +41,18 @@ Reverse-engineering TikTok Studio web bundles (`main.5cc4d756.js`, async chunk `
   item (không có `stats{}`); `duration` tính bằng MILI-GIÂY; `create_time`/`post_time` là chuỗi epoch.
 - Sniffer từng chỉ đọc `stats{}` / `views` ⇒ 50/50 video lưu 0 view ⇒ Radar engagement 0%, cảnh báo Flop giả.
   Nay `_first_count()` đọc cả hai nơi; duration ms ⇒ giây (`test_studio_item_list_stats.py`).
+
+## Quét vi phạm, giờ đăng, avatar (kiểm chứng live @swall.pain, 2026-11-07)
+- item_list/v1 có phân trang (`has_more`, `cursor`): kênh 79 video ⇒ 2 trang. Trước chỉ đọc trang đầu ⇒ 29 video
+  không bao giờ được kiểm tra vi phạm. Nay `_list_all_items()` đọc hết (giới hạn ITEM_LIST_MAX_ITEMS).
+- item_list KHÔNG có cờ nào cho biết video bị phạt (video bị gậy giống hệt video thường: status 102,
+  visibility 1, permissions như nhau) ⇒ phải gọi getPenaltyDetails cho từng video; chạy song song
+  PENALTY_LOOKUP_WORKERS=8 ⇒ 79 video ~36 s (trước 50 video tuần tự 85 s).
+- `penalties[0].date` là epoch (chuỗi). Video đăng 01/09/2026, date = 08/09/2026, vẫn `can_appeal` ngày 07/11
+  ⇒ khả năng đây là NGÀY BỊ PHẠT chứ không phải hạn kháng cáo (cột UI đang ghi "Hạn nộp đơn"). Hiển thị qua
+  `format_appeal_deadline()` (dd/mm/YYYY).
+- `optimal_hour` = giờ cao điểm người xem (insights VIEWER_ACTIVE_HOURS, 7 ngày, `time_offset=25200` ⇒ giờ VN).
+  Kênh khán giả GB ⇒ cao điểm 01:00 VN (~19:00 UK); giá trị cũ 22 chỉ là dữ liệu cũ, không phải lỗi.
+- Giờ đăng video: sniffer lưu `statisticTable.date_upload` (giờ máy, cùng múi với insights); Radar dùng
+  `video_posted_hour()`; không có giờ ⇒ `fallback_best_hour=optimal_hour` thay vì 12 mặc định.
+- Avatar đi qua `resolve_profile_egress` (quy tắc egress duy nhất): proxy, hoặc IP máy nếu `direct_connection=1`.
