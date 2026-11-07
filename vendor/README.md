@@ -2,7 +2,7 @@
 
 | Package | Version | Source |
 | :--- | :--- | :--- |
-| `sammonny` | 1.8.3 | SamMonny Antidetect SDK (`sdk/python` of the SamMonny repo), not published on PyPI |
+| `sammonny` | 1.8.4 | SamMonny Antidetect SDK (`sdk/python` of the SamMonny repo), not published on PyPI |
 
 `requirements.txt` resolves it with `--find-links ./vendor`, so run pip from the repo root:
 

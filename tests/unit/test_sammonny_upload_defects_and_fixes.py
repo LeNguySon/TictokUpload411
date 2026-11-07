@@ -213,16 +213,25 @@ def test_defect_4_hybrid_uploader_no_duplicate_dom_fallback(dummy_video: Path):
     mock_session.cdp = MagicMock()
 
     mock_pipeline = MagicMock()
-    mock_pipeline.prepare_upload_session.return_value = {
-        "upload_url": "https://tos.tiktokcdn.com/upload/mock",
-        "session_id": "vod_session_888",
-    }
     mock_pipeline.execute_tos_upload.return_value = {"success": True}
+
+    # SDK 1.8.4: Hybrid needs a real VOD session (no synthetic fallback); provide an accepted one.
+    vod = MagicMock()
+    vod.apply_upload_inner.return_value = {
+        "vid": "vod_session_888",
+        "upload_host": "tos.example.test",
+        "store_uri": "mock-store/888",
+        "upload_id": "up-888",
+        "session_key": "sk-888",
+    }
 
     uploader = TikTokHybridApiUploader(session=mock_session, pipeline=mock_pipeline)
 
-    # Mock CDPLiveSigner returning failure/network error
-    with patch("sammonny.signatures.kernel_live.CDPLiveSigner") as MockSigner:
+    # Mock CDPLiveSigner returning failure/network error on the publish request
+    with (
+        patch.object(TikTokHybridApiUploader, "_vod_client", return_value=vod),
+        patch("sammonny.signatures.kernel_live.CDPLiveSigner") as MockSigner,
+    ):
         instance = MockSigner.return_value
         instance.execute_in_browser_fetch.return_value = {
             "status": 504,

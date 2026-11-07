@@ -50,3 +50,8 @@
   URL upload/`store_uri`/`upload_id` có giá trị dự phòng tự bịa; lỗi CommitUploadInner chỉ warning.
   ⇒ Giữ `COOKIE_HYBRID_AVAILABLE = False`; test chặn bật lại khi SDK còn đường giả lập.
 - Kiểm tra app với SDK chưa phát hành mà không đổi venv: `PYTHONPATH=<sdk>/sdk/python python -m pytest tests`.
+- **Đã sửa tận gốc ở SDK 1.8.4** (repo SDK commit `6f4b4d4`): có `import random`; Hybrid bắt buộc phiên VOD
+  thật (`TikTokHybridApiUploader._vod_client()`), không còn dựa vào `prepare_upload_session` giả lập, không bịa
+  host/store_uri/upload_id, CommitUploadInner lỗi ⇒ FAILED. App đã vendor + ghim `sammonny==1.8.4`.
+  Test cần tới pha publish của Hybrid phải patch `_vod_client` (store_uri chứa `mock` ⇒ bỏ qua PUT thật).
+  Hybrid vẫn TẮT trong app vì layout URL VOD chưa được kiểm chứng bằng upload thật.

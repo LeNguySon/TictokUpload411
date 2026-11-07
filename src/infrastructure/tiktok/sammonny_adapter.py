@@ -40,9 +40,9 @@ logger = logging.getLogger(__name__)
 def _install_sdk_compat_shims() -> None:
     """Works around SamMonny SDK defects that would otherwise fail silently inside the SDK.
 
-    SDK main after 1.8.3 calls ``random.uniform`` in TikTokHeadlessStudioUploader's Post click but never
-    imports ``random``: the NameError is swallowed, the Post button is not clicked and Studio uploads end
-    ambiguous. Binding the module is harmless on SDK builds that already import it.
+    Unreleased SDK main after 1.8.3 called ``random.uniform`` in TikTokHeadlessStudioUploader's Post click
+    without importing ``random`` (fixed in 1.8.4): the NameError was swallowed, the Post button never clicked
+    and Studio uploads ended ambiguous. Binding the module is harmless on builds that already import it.
     """
     import random
 
@@ -55,9 +55,9 @@ def _install_sdk_compat_shims() -> None:
 _install_sdk_compat_shims()
 
 PUBLIC_PRIVACY = "PUBLIC_TO_EVERYONE"
-# SamMonny SDK 1.8.3 (and main after it): the Cookie Hybrid media transfer can still be simulated
-# (execute_tos_upload sleeps instead of PUT, and main falls back to that path when the VOD session cannot be
-# opened), so a Hybrid "success" may carry no video. Flip only when the SDK really uploads (see test_sdk_contract).
+# SamMonny SDK 1.8.4: Hybrid needs a real VOD session (no simulated fallback any more), but its VOD upload URL
+# layout has not been verified against a live upload. Flip only after a confirmed live Hybrid upload
+# (see test_sdk_contract).
 COOKIE_HYBRID_AVAILABLE = False
 
 

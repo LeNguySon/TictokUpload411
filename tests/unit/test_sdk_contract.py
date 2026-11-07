@@ -1,4 +1,4 @@
-"""Contract checks between our code and the installed SamMonny SDK (1.8.3).
+"""Contract checks between our code and the installed SamMonny SDK (1.8.4).
 
 `sammonny.MemoryManager.trim_working_set()` does not exist in the SDK; the calls were swallowed by
 try/except, so the documented post-task RAM trim never ran.
@@ -55,9 +55,9 @@ def test_upload_trims_process_tree_once_with_real_sdk_api(tmp_path: Path):
 
 
 def test_studio_post_click_can_use_random_in_sdk_tiktok_module():
-    """SamMonny SDK main (after 1.8.3) calls random.uniform() in the Studio Post click without importing
-    random: the NameError is swallowed and the post button is never clicked (upload ends ambiguous).
-    The adapter must make sure the module has `random` bound, whichever SDK build is installed."""
+    """Unreleased SDK main after 1.8.3 called random.uniform() in the Studio Post click without importing
+    random: the NameError was swallowed and the post button never clicked (fixed in 1.8.4). The adapter keeps
+    `random` bound whichever SDK build is installed."""
     import random
 
     import sammonny.platforms.tiktok as sdk_tiktok
@@ -66,15 +66,13 @@ def test_studio_post_click_can_use_random_in_sdk_tiktok_module():
     assert getattr(sdk_tiktok, "random", None) is random
 
 
-def test_cookie_hybrid_stays_disabled_while_sdk_simulates_the_transfer():
-    """The SDK's TOS upload still has a simulated path (sleep instead of PUT) that it falls back to when the
-    real VOD session cannot be opened, so a Hybrid 'success' may carry no video. Re-enable only when gone."""
-    import re
-
-    from sammonny.platforms.tiktok import TikTokPipeline
+def test_cookie_hybrid_stays_disabled_until_verified_live():
+    """SDK 1.8.4 Hybrid no longer simulates: it needs a real VOD session and never falls back to the synthetic
+    TOS session. Its VOD upload URL layout is still unverified against a live upload, so the app keeps Hybrid
+    off. A build that again falls back to the synthetic session must never be enabled."""
+    from sammonny.platforms.tiktok import TikTokHybridApiUploader
     from src.infrastructure.tiktok import sammonny_adapter
 
-    source = inspect.getsource(TikTokPipeline.execute_tos_upload)
-    simulates = re.search(r"time\.sleep\(0\.01\)", source) is not None
-    if simulates:
-        assert sammonny_adapter.COOKIE_HYBRID_AVAILABLE is False
+    hybrid_source = inspect.getsource(TikTokHybridApiUploader.upload_via_hybrid)
+    assert "prepare_upload_session" not in hybrid_source, "SDK Hybrid falls back to the simulated TOS session again"
+    assert sammonny_adapter.COOKIE_HYBRID_AVAILABLE is False
