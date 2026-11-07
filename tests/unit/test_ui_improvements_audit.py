@@ -54,9 +54,9 @@ def test_profile_table_numeric_column_sorting(qapp):
     ]
     table.load_profiles(mock_data)
 
-    # Sort by ID column (Col 28)
-    table.sortByColumn(28, Qt.SortOrder.AscendingOrder)
-    sorted_ids = [int(table.item(r, 28).text()) for r in range(table.rowCount())]
+    # Sort by ID column (last column, 27 since layout v2)
+    table.sortByColumn(27, Qt.SortOrder.AscendingOrder)
+    sorted_ids = [int(table.item(r, 27).text()) for r in range(table.rowCount())]
     assert sorted_ids == [2, 3, 10], f"Expected numeric sort [2, 3, 10], got {sorted_ids}"
     qapp.processEvents()
 

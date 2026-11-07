@@ -1,5 +1,5 @@
 """
-Table Settings Dialog for configuring 28-column visibility preferences with Fluent design.
+Table Settings Dialog for configuring profile-column visibility preferences with Fluent design.
 """
 
 from PyQt6.QtWidgets import (
@@ -28,7 +28,7 @@ from src.presentation.widgets.table_helpers import get_profile_table_headers
 
 class TableSettingsDialog(ReusableDialogMixin, QDialog):
     """
-    Dialog allowing creators to show or hide specific columns in the 28-column profile table.
+    Dialog allowing creators to show or hide specific columns in the profile table.
     """
 
     def __init__(self, hidden_columns: set[int] | None = None, parent: QWidget | None = None) -> None:
@@ -37,8 +37,8 @@ class TableSettingsDialog(ReusableDialogMixin, QDialog):
         self.hidden_columns: set[int] = set(hidden_columns or set())
         self._checkboxes: dict[int, CheckBox] = {}
 
-        self.setWindowTitle("Cài Đặt Cột Bảng Hồ Sơ (28 Cột MMO)")
-        self.resize(620, 600)  # 29 Fluent checkboxes fit without a scrollbar
+        self.setWindowTitle(f"Cài Đặt Cột Bảng Hồ Sơ ({len(self.headers)} cột MMO)")
+        self.resize(620, 600)  # all Fluent checkboxes fit without a scrollbar
         self._init_ui()
 
     def prepare_reopen(self, hidden_columns: set[int] | None = None) -> None:
@@ -58,13 +58,13 @@ class TableSettingsDialog(ReusableDialogMixin, QDialog):
 
         header = create_dialog_header(
             icon=FluentIcon.SETTING,
-            title="Cài Đặt Cột Bảng Hồ Sơ (28 Cột MMO)",
+            title=f"Cài Đặt Cột Bảng Hồ Sơ ({len(self.headers)} cột MMO)",
             subtitle="Tùy biến hiển thị/ẩn các cột dữ liệu theo nhu cầu quản trị tài khoản.",
             parent=self,
         )
         layout.addWidget(header)
 
-        # Scroll Area for 29 columns
+        # Scroll Area for the columns
         scroll = QScrollArea(self)
         scroll.setWidgetResizable(True)
         container = QWidget()

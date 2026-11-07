@@ -1,5 +1,5 @@
 """
-Profile Table Widget displaying the 28 TikTok MMO attributes with Windows 11 Fluent Design styling.
+Profile Table Widget displaying the TikTok MMO attributes with Windows 11 Fluent Design styling.
 """
 
 from typing import Any
@@ -13,6 +13,7 @@ from src.presentation.delegates.circular_avatar_delegate import CircularAvatarDe
 from src.presentation.delegates.status_badge_delegate import StatusBadgeDelegate
 from src.presentation.widgets.fast_table import FastTableWidget, RowIndex
 from src.presentation.widgets.table_helpers import (
+    PROFILE_COL_ID,
     NumericTableWidgetItem,
     format_mmo_metric,
     format_money_string,
@@ -67,9 +68,22 @@ def _session_cell(cookie_raw: str, expires_at: Any, synced_at: Any) -> tuple[str
     return f"Còn {days} ngày", seconds / 86400, color, f"Phiên hết hạn lúc {until}.{hint}" + synced
 
 
+_SHADOWBAN_TEXT = {"safe": "An toàn", "warning": "Cảnh báo", "shadowban": "Shadowban"}
+
+
+def shadowban_label(p: dict[str, Any]) -> tuple[str, str]:
+    """Shadowban cell text + tooltip. ``shadowban_status`` defaults to 'safe' in the schema: it is a measurement only
+    once TikTok's traffic sources were read (traffic_source_json), otherwise the cell shows "—"."""
+    if not p.get("traffic_source_json"):
+        return "—", "Chưa đo: đồng bộ số liệu TikTok để đo nguồn traffic (Dành cho bạn) của kênh."
+    status = str(p.get("shadowban_status") or "").lower()
+    text = _SHADOWBAN_TEXT.get(status, status or "—")
+    return text, str(p.get("shadowban_reasons") or "Theo tỷ lệ view từ Dành cho bạn (FYF) của kênh.")
+
+
 class ProfileTableWidget(FastTableWidget):
     """
-    Fluent UI Table for managing TikTok profiles with 28 columns matching SSMATool parity.
+    Fluent UI Table for managing TikTok profiles (columns: table_helpers.get_profile_table_headers).
     Supports multi-row context actions, crisp vector icons, and robust data persistence.
     """
 
@@ -147,11 +161,10 @@ class ProfileTableWidget(FastTableWidget):
         self.setColumnWidth(21, 75)  # Re.Apply
         self.setColumnWidth(22, 70)  # PRIVACY
         self.setColumnWidth(23, 45)  # VAT
-        self.setColumnWidth(24, 45)  # TS
-        self.setColumnWidth(25, 45)  # STT
+        self.setColumnWidth(24, 70)  # T.Likes
+        self.setColumnWidth(25, 80)  # Shadowban
         self.setColumnWidth(26, 45)  # VVP
-        self.setColumnWidth(27, 45)  # MP
-        self.setColumnWidth(28, 50)  # ID
+        self.setColumnWidth(PROFILE_COL_ID, 50)  # ID
 
     def load_profiles(self, profiles: list[dict[str, Any]]) -> None:
         """Populates the table with profile records."""
@@ -192,7 +205,7 @@ class ProfileTableWidget(FastTableWidget):
         def make_item(
             text: str, align: Qt.AlignmentFlag = Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft
         ) -> QTableWidgetItem:
-            item = QTableWidgetItem(str(text))
+            item = QTableWidgetItem("" if text is None else str(text))  # a NULL column is blank, not "None"
             item.setTextAlignment(align)
             item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
             return item
@@ -342,7 +355,8 @@ class ProfileTableWidget(FastTableWidget):
         strikes = int(p.get("strike_count") or 0)
         standing = str(p.get("account_standing") or "").strip()
         if strikes > 0:
-            cs_display = f"🔴 {strikes}/3 Gậy"
+            # Same scale as the account health dialog: 1 strike = Warning (🟡), 2+ = High Risk (🔴).
+            cs_display = f"{'🟡' if strikes == 1 else '🔴'} {strikes}/3 Gậy"
         elif standing == "Good":
             cs_display = "🟢 Tốt"
         elif standing == "Warning":
@@ -382,21 +396,26 @@ class ProfileTableWidget(FastTableWidget):
         # Col 23: VAT
         self.setItem(row_idx, 23, make_item(p.get("vat", "No"), Qt.AlignmentFlag.AlignCenter))
 
-        # Col 24: TS
-        self.setItem(row_idx, 24, make_item(p.get("ts", "Yes"), Qt.AlignmentFlag.AlignCenter))
+        # Col 24: T.Likes (total likes of the channel)
+        likes = _pick(p, "total_likes", default=0)
+        self.setItem(
+            row_idx,
+            24,
+            make_num_item(likes, format_mmo_metric(likes), Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter),
+        )
 
-        # Col 25: STT (secondary)
-        self.setItem(row_idx, 25, make_num_item(p.get("stt", stt)))
+        # Col 25: Shadowban (only a measured status: the schema default is 'safe')
+        sb_text, sb_tip = shadowban_label(p)
+        sb_item = make_item(sb_text, Qt.AlignmentFlag.AlignCenter)
+        sb_item.setToolTip(sb_tip)
+        self.setItem(row_idx, 25, sb_item)
 
         # Col 26: VVP (Số lượng Video Vi Phạm)
         vvp_val = int(p.get("ttl_violations") or p.get("vvp") or 0)
         self.setItem(row_idx, 26, make_num_item(vvp_val))
 
-        # Col 27: MP
-        self.setItem(row_idx, 27, make_num_item(p.get("mp", 0)))
-
-        # Col 28: ID
-        self.setItem(row_idx, 28, make_num_item(p.get("id", 0)))
+        # Col 27: ID
+        self.setItem(row_idx, PROFILE_COL_ID, make_num_item(p.get("id", 0)))
 
     def get_selected_profiles(self) -> list[dict[str, Any]]:
         """Returns list of selected profile dicts stored in ItemDataRole.UserRole."""
@@ -409,7 +428,7 @@ class ProfileTableWidget(FastTableWidget):
                 if isinstance(data, dict):
                     profiles.append(data)
                     continue
-            id_item = self.item(row, 28)
+            id_item = self.item(row, PROFILE_COL_ID)
             if id_item and id_item.text().isdigit():
                 profiles.append({"id": int(id_item.text())})
         return profiles
@@ -427,7 +446,7 @@ class ProfileTableWidget(FastTableWidget):
             if isinstance(data, dict) and "id" in data:
                 self.open_orbita_requested.emit([data["id"]])
                 return
-        id_item = self.item(row, 28)
+        id_item = self.item(row, PROFILE_COL_ID)
         if id_item and id_item.text().isdigit():
             self.open_orbita_requested.emit([int(id_item.text())])
 

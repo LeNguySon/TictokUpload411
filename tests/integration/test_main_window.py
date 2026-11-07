@@ -31,7 +31,7 @@ def test_main_window_creation_and_layout(qapp):
         assert not window.windowIcon().isNull()
 
         # Check top table (Profiles)
-        assert window.profile_table.columnCount() == 29
+        assert window.profile_table.columnCount() == 28
         assert window.profile_table.horizontalHeaderItem(0).text() == "STT"
         assert window.profile_table.horizontalHeaderItem(1).text() == "Avt"
         assert window.profile_table.horizontalHeaderItem(2).text() == "Tên hồ sơ"

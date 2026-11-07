@@ -53,8 +53,29 @@ class NumericTableWidgetItem(QTableWidgetItem):
             return super().__lt__(other)
 
 
+# Column layout version of the profile table (saved hidden columns are migrated when it changes).
+PROFILE_COLUMNS_VERSION = "2"
+# Last column: the database id (selection / double-click fallback).
+PROFILE_COL_ID = 27
+# v1 -> v2: "TS" (24, field never existed: always "Yes"), "STT" (25, duplicate of 0) and "MP" (27, field never
+# existed: always 0) were replaced by real data (T.Likes, Shadowban); VVP stays 26, ID moved 28 -> 27.
+_V1_TO_V2 = {**{i: i for i in range(24)}, 26: 26, 28: 27}
+
+
+def migrate_hidden_profile_columns(saved: object, version: object) -> set[int]:
+    """Hidden profile-table columns saved as "3,5,26" (by index), moved to the current layout."""
+    hidden: set[int] = set()
+    for token in str(saved or "").split(","):
+        token = token.strip()
+        if token.lstrip("-").isdigit():
+            hidden.add(int(token))
+    if str(version or "") == PROFILE_COLUMNS_VERSION:
+        return hidden
+    return {_V1_TO_V2[i] for i in hidden if i in _V1_TO_V2}
+
+
 def get_profile_table_headers() -> list[str]:
-    """Returns the exact 29-column headers (28 MMO attributes + STT) for the Profiles Table."""
+    """Headers of the Profiles Table: every column shows real database data (no placeholder columns)."""
     return [
         "STT",
         "Avt",
@@ -80,10 +101,9 @@ def get_profile_table_headers() -> list[str]:
         "Re.Apply",
         "PRIVACY",
         "VAT",
-        "TS",
-        "STT",
+        "T.Likes",
+        "Shadowban",
         "VVP",
-        "MP",
         "ID",
     ]
 

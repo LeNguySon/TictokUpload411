@@ -140,8 +140,8 @@ class TikTokNetworkSniffer:
                     if v_list:
                         sum_vv = sum(int(item.get("value") or 0) for item in v_list if isinstance(item, dict))
                         if sum_vv > 0:
+                            # A 30-day series: never the channel total (T.Views showed the 30-day sum).
                             updates["views_month"] = sum_vv
-                            updates["total_views"] = sum_vv
 
                 # Traffic Source Matrix & Shadowban Detection
                 if "analytics_overview_traffic_source" in overview:
@@ -238,8 +238,7 @@ class TikTokNetworkSniffer:
                 if "vv_history" in overview and isinstance(overview["vv_history"], list):
                     vv_sum = sum(int(it.get("value") or 0) for it in overview["vv_history"] if isinstance(it, dict))
                     if vv_sum > 0:
-                        updates["views_month"] = vv_sum
-                        updates["total_views"] = vv_sum
+                        updates["views_month"] = vv_sum  # 30-day series, not the channel total
 
                 # Legacy keys
                 if "money_earned" in overview or "total_revenue" in overview or "revenue" in overview:
@@ -578,6 +577,17 @@ class TikTokNetworkSniffer:
             )
         except Exception as e:
             logger.error("Failed to upsert videos for profile %s: %s", profile_id, e)
+
+        # The channel total is the sum over EVERY video known for the profile (pages seen now and earlier):
+        # one item_list page alone undercounted it.
+        try:
+            with db_session(self.db_path) as conn:
+                row = conn.execute(
+                    "SELECT COALESCE(SUM(views), 0) FROM statisticTable WHERE profile_id = ?;", (profile_id,)
+                ).fetchone()
+                total_observed_views = max(total_observed_views, int(row[0] or 0))
+        except Exception as e:
+            logger.debug("Could not total the known videos of profile %s: %s", profile_id, e)
 
         return {
             "views_month": month_views,

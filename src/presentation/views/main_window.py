@@ -97,6 +97,7 @@ from src.presentation.dialogs.video_metadata_dialog import VideoMetadataDialog
 from src.presentation.widgets.clickable_label import ClickableLabel
 from src.presentation.widgets.fluent_compat import apply_fluent_compat_patches
 from src.presentation.widgets.profile_table_widget import ProfileTableWidget
+from src.presentation.widgets.table_helpers import get_profile_table_headers as _profile_headers
 from src.presentation.widgets.video_queue_table_widget import VideoQueueTableWidget
 from src.version import __version__
 
@@ -231,13 +232,18 @@ class TikTokManagerMainWindow(QMainWindow):
 
         # UI Preferences & Persistent Settings
         settings = self._settings()
-        saved_hidden = settings.value("hidden_profile_columns", "")
-        self.hidden_columns: set[int] = set()
-        if saved_hidden:
-            try:
-                self.hidden_columns = {int(x) for x in str(saved_hidden).split(",") if x.strip()}
-            except (ValueError, TypeError):
-                self.hidden_columns = set()
+        from src.presentation.widgets.table_helpers import PROFILE_COLUMNS_VERSION, migrate_hidden_profile_columns
+
+        # Saved by index: moved to the current column layout (v2 replaced TS / duplicate STT / MP).
+        self.hidden_columns: set[int] = migrate_hidden_profile_columns(
+            settings.value("hidden_profile_columns", ""), settings.value("profile_columns_version", "")
+        )
+        settings.setValue("hidden_profile_columns", ",".join(str(x) for x in sorted(self.hidden_columns)))
+        settings.setValue("profile_columns_version", PROFILE_COLUMNS_VERSION)
+        # "Cấu hình luồng check" is kept between runs (it used to fall back to the default at every start).
+        saved_threads = settings.value("max_threads", 0, type=int)
+        if saved_threads:
+            self.thread_pool.set_max_threads(int(saved_threads))
 
         self.setWindowTitle("SonBetaPro")
         app_icon = get_app_icon()
@@ -859,7 +865,7 @@ class TikTokManagerMainWindow(QMainWindow):
         act_orbita.triggered.connect(self._on_launch_orbita_selected)
         self.settings_menu.addAction(act_orbita)
 
-        act_gologin_sync = Action(FluentIcon.CLOUD_DOWNLOAD, "Đồng bộ Profile GoLogin SDK (22+ có sẵn)", self)
+        act_gologin_sync = Action(FluentIcon.CLOUD_DOWNLOAD, "Đồng bộ Profile GoLogin SDK", self)
         act_gologin_sync.triggered.connect(self._on_sync_gologin_profiles)
         self.settings_menu.addAction(act_gologin_sync)
 
@@ -878,7 +884,9 @@ class TikTokManagerMainWindow(QMainWindow):
         act_proxy.triggered.connect(self._on_open_proxy_manager)
         self.settings_menu.addAction(act_proxy)
 
-        act_table_cfg = Action(FluentIcon.LAYOUT, "Cài đặt bảng (28 cột MMO)", self)
+        act_table_cfg = Action(
+            FluentIcon.LAYOUT, f"Cài đặt bảng ({len(_profile_headers())} cột MMO)", self
+        )
         act_table_cfg.triggered.connect(self._on_table_cfg)
         self.settings_menu.addAction(act_table_cfg)
 
@@ -1409,6 +1417,9 @@ class TikTokManagerMainWindow(QMainWindow):
             )
             if ok:
                 self.thread_pool.set_max_threads(val)
+                settings = self._settings()
+                settings.setValue("max_threads", int(val))
+                settings.sync()
                 self._init_settings_menu()
                 InfoBar.success(
                     title="Cấu Hình Luồng",
@@ -1530,7 +1541,7 @@ class TikTokManagerMainWindow(QMainWindow):
 
                 # Persist to QSettings
                 settings = self._settings()
-                settings.setValue("hidden_profile_columns", ",".join(str(x) for x in self.hidden_columns))
+                settings.setValue("hidden_profile_columns", ",".join(str(x) for x in sorted(self.hidden_columns)))
 
                 visible_count = self.profile_table.columnCount() - len(self.hidden_columns)
                 InfoBar.success(

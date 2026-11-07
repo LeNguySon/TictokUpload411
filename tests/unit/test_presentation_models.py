@@ -14,7 +14,7 @@ from src.presentation.widgets.table_helpers import (
 
 def test_table_headers_match_specification():
     profile_headers = get_profile_table_headers()
-    assert len(profile_headers) == 29
+    assert len(profile_headers) == 28  # TS / duplicate STT / MP replaced by T.Likes / Shadowban (v2)
     assert profile_headers[0] == "STT"
     assert profile_headers[1] == "Avt"
     assert profile_headers[2] == "Tên hồ sơ"
@@ -23,7 +23,7 @@ def test_table_headers_match_specification():
     assert profile_headers[12] == "Tình trạng"
     assert profile_headers[14] == "$Earned"
     assert profile_headers[18] == "QG"
-    assert profile_headers[28] == "ID"
+    assert profile_headers[27] == "ID"
 
     video_headers = get_video_table_headers()
     assert len(video_headers) == 16  # 16 columns since b6eb013 (Source -> Tiến trình + Nhật Ký Upload)
