@@ -245,9 +245,7 @@ class SyncTransferDialog(QDialog):
 
         exp_layout.addWidget(QLabel("<b>1. Chọn phạm vi dự án cần xuất:</b>"))
         self.combo_project_export = ComboBox(tab_export)
-        self.combo_project_export.addItem("Toàn bộ dữ liệu (Tất cả dự án)", userData=None)
-        for p in self.project_repo.list_all():
-            self.combo_project_export.addItem(p["name"], userData=p["id"])
+        self._fill_project_combo()
         exp_layout.addWidget(self.combo_project_export)
 
         self.chk_include_proxies = CheckBox("Kèm theo danh sách Proxy liên kết", tab_export)
@@ -408,6 +406,16 @@ class SyncTransferDialog(QDialog):
             ok_text=lambda counts: f"Đã khôi phục {counts[0]} hồ sơ và {counts[1]} proxy vào CSDL.",
             fail_title="Nhận Dữ Liệu Thất Bại",
         )
+
+    def _fill_project_combo(self) -> None:
+        self.combo_project_export.clear()
+        self.combo_project_export.addItem("Toàn bộ dữ liệu (Tất cả dự án)", userData=None)
+        for p in self.project_repo.list_all():
+            self.combo_project_export.addItem(p["name"], userData=p["id"])
+
+    def prepare_reopen(self) -> None:
+        """Reused by the main window (DialogCache): list projects created since the last opening."""
+        self._fill_project_combo()
 
     def _ask_passphrase(self, confirm: bool) -> str | None:
         """Asks for the bundle passphrase (twice when exporting). None when cancelled or invalid."""

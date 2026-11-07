@@ -40,6 +40,12 @@ class TableSettingsDialog(QDialog):
         self.resize(620, 600)  # 29 Fluent checkboxes fit without a scrollbar
         self._init_ui()
 
+    def prepare_reopen(self, hidden_columns: set[int] | None = None) -> None:
+        """Reused by the main window (DialogCache): show the columns hidden right now."""
+        self.hidden_columns = set(hidden_columns or set())
+        for idx, chk in self._checkboxes.items():
+            chk.setChecked(idx not in self.hidden_columns)
+
     def exec(self) -> int:
         """Explicit Python wrapper over QDialog.exec for testability and lifecycle hooks."""
         return super().exec()

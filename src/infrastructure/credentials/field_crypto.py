@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import base64
 import logging
+import threading
 from collections.abc import Mapping
 from typing import Any
 
@@ -57,19 +58,42 @@ def protect(value: str | None) -> str | None:
     return PREFIX + base64.b64encode(blob).decode("ascii")
 
 
+# ciphertext -> plaintext. DPAPI costs ~1 ms per value and every "SELECT * FROM profiles" decrypts every
+# cookie: without this cache a 65-profile list read spent ~65 ms in CryptUnprotectData, several times per
+# dialog open. Plaintext is already in process memory whenever it is used; this keeps it there once.
+_REVEAL_CACHE: dict[str, str] = {}
+_REVEAL_CACHE_MAX = 4096
+_REVEAL_LOCK = threading.Lock()
+
+
+def reveal_cache_clear() -> None:
+    with _REVEAL_LOCK:
+        _REVEAL_CACHE.clear()
+
+
 def reveal(value: Any) -> Any:
-    """Decrypts a protected value; anything else (legacy plaintext, None, numbers) is returned unchanged."""
+    """Decrypts a protected value; anything else (legacy plaintext, None, numbers) is returned unchanged.
+    Each protected value is decrypted once per process (see _REVEAL_CACHE)."""
     if not is_protected(value):
         return value
+    with _REVEAL_LOCK:
+        cached = _REVEAL_CACHE.get(value)
+    if cached is not None:
+        return cached
     import win32crypt
 
     try:
         blob = base64.b64decode(value[len(PREFIX) :])
         _description, data = win32crypt.CryptUnprotectData(blob, _ENTROPY, None, None, _CRYPTPROTECT_UI_FORBIDDEN)
-        return data.decode("utf-8")
+        plain = data.decode("utf-8")
     except Exception as e:  # other machine/user, corrupted value
         logger.warning("A protected field could not be decrypted (%s); treated as empty", type(e).__name__)
         return ""
+    with _REVEAL_LOCK:
+        if len(_REVEAL_CACHE) >= _REVEAL_CACHE_MAX:
+            _REVEAL_CACHE.clear()
+        _REVEAL_CACHE[value] = plain
+    return plain
 
 
 def protect_fields(data: Mapping[str, Any]) -> dict[str, Any]:

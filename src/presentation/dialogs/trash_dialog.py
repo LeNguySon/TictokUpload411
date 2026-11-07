@@ -157,6 +157,11 @@ class TrashDialog(QDialog):
         self._closed = True
         super().closeEvent(event)
 
+    def prepare_reopen(self) -> None:
+        """Reused by the main window (DialogCache): accept results again and reload the trash."""
+        self._closed = False
+        self.refresh_trash()
+
     def refresh_trash(self) -> None:
         self._run(list_trashed_profiles, self.profile_repo.db_path, on_result=self._render_trash, title="Lỗi Thùng Rác")
 

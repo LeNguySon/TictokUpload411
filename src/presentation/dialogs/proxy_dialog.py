@@ -170,8 +170,16 @@ class ProxyManagerDialog(QDialog):
         layout.addLayout(bottom_layout)
 
     def _connect_signals(self) -> None:
+        if getattr(self, "_signals_connected", False):
+            return
         self.signal_bus.proxy_checked.connect(self._on_proxy_checked)
         self.signal_bus.proxy_leak_detected.connect(self._on_proxy_leak_alert)
+        self._signals_connected = True
+
+    def prepare_reopen(self) -> None:
+        """Reused by the main window (DialogCache): listen to the bus again and reload the proxies."""
+        self._connect_signals()
+        self.refresh_proxies()
 
     def refresh_proxies(self) -> None:
         """Reloads the proxy table; the SQLite read runs off the GUI thread (latest request wins)."""
@@ -287,6 +295,7 @@ class ProxyManagerDialog(QDialog):
             logger.debug("_on_proxy_leak_alert: ignored error: %s", ignored)
 
     def _disconnect_signals(self) -> None:
+        self._signals_connected = False
         try:
             self.signal_bus.proxy_checked.disconnect(self._on_proxy_checked)
         except Exception as ignored:

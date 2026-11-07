@@ -52,3 +52,26 @@ def test_protect_fields_only_touches_sensitive_keys() -> None:
     assert out["name"] == "acc" and out["status"] == "LIVE" and out["password"] is None
     assert fc.is_protected(out["cookies_json"]) and fc.reveal(out["cookies_json"]) == "sessionid=fake"
     assert data["cookies_json"] == "sessionid=fake"  # input not mutated
+
+
+def test_reveal_decrypts_each_value_once_per_process() -> None:
+    """Every SELECT * FROM profiles decrypted every cookie again (~1 ms of DPAPI each): 65 profiles = 65 ms per
+    list read, several reads per dialog open. A value is now decrypted once and served from memory afterwards."""
+    from unittest.mock import patch
+
+    import win32crypt
+
+    token = fc.protect("sessionid=cache_me_fake")
+    fc.reveal_cache_clear()
+    real = win32crypt.CryptUnprotectData
+    with patch.object(win32crypt, "CryptUnprotectData", side_effect=real) as unprotect:
+        for _ in range(50):
+            assert fc.reveal(token) == "sessionid=cache_me_fake"
+    assert unprotect.call_count == 1
+
+
+def test_undecryptable_values_are_not_cached_as_plaintext() -> None:
+    bad = fc.PREFIX + "bm90LWEtcmVhbC1ibG9i"
+    fc.reveal_cache_clear()
+    assert fc.reveal(bad) == ""
+    assert fc.reveal(bad) == ""

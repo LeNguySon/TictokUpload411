@@ -129,6 +129,12 @@ class UploadSettingsDialog(QDialog):
         layout.addLayout(row)
         return switch
 
+    def prepare_reopen(self, on_saved: Callable[[UploadSettings], None] | None = None) -> None:
+        """Reused by the main window (DialogCache): show the stored settings again."""
+        if on_saved is not None:
+            self.on_saved = on_saved
+        self._load(load_upload_settings(self.store))
+
     def _load(self, settings: UploadSettings) -> None:
         self.cmb_method.setCurrentIndex(max(0, self.cmb_method.findData(settings.method.value)))
         self.sw_fallback.setChecked(settings.allow_fallback)

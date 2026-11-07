@@ -127,6 +127,10 @@ class ProjectManagerDialog(QDialog):
         bottom_layout.addWidget(self.btn_close)
         layout.addLayout(bottom_layout)
 
+    def prepare_reopen(self) -> None:
+        """Reused by the main window (DialogCache): reload the projects."""
+        self.refresh_projects()
+
     def refresh_projects(self) -> None:
         """Fetches campaign aggregates and populates the table without inline editable flags."""
         aggregates = self.project_repo.get_project_aggregates()

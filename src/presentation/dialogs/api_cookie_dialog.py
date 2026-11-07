@@ -41,6 +41,12 @@ class ApiCookieDialog(QDialog):
         self.resize(540, 420)
         self._init_ui()
 
+    def prepare_reopen(self) -> None:
+        """Reused by the main window (DialogCache): secrets typed last time must not stay in the form."""
+        self.txt_client_key.clear()
+        self.txt_client_secret.clear()
+        self.txt_cookies.clear()
+
     def exec(self) -> int:
         """Explicit Python wrapper over QDialog.exec for testability and lifecycle hooks."""
         return super().exec()

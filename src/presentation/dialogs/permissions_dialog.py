@@ -38,6 +38,12 @@ class PermissionsDialog(QDialog):
         self._init_ui()
         fit_dialog_to_content(self)
 
+    def prepare_reopen(self) -> None:
+        """Reused by the main window (DialogCache): clear the previous authorization attempt."""
+        self.txt_client_key.clear()
+        self.txt_auth_url.clear()
+        self.txt_auth_code.clear()
+
     def exec(self) -> int:
         """Explicit Python wrapper over QDialog.exec for testability and lifecycle hooks."""
         return super().exec()

@@ -138,7 +138,10 @@ def test_all_dialogs_use_fluent_headers_and_margins():
     from pathlib import Path
 
     dialog_files = glob.glob("src/presentation/dialogs/*.py")
-    dialog_modules = [f for f in dialog_files if not f.endswith("__init__.py") and not f.endswith("dialog_helpers.py")]
+    dialog_modules = [
+        f for f in dialog_files
+        if not f.endswith(("__init__.py", "dialog_helpers.py", "dialog_cache.py"))  # infrastructure, not dialogs
+    ]
     assert len(dialog_modules) == 21, f"Expected 21 dialog modules, found {len(dialog_modules)}"
 
     for file_path in dialog_modules:
