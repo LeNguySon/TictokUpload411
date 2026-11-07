@@ -245,7 +245,7 @@ def test_batch_dialog_folder_count_runs_off_gui_thread(qtbot, tmp_path: Path):
     folder = tmp_path / "vids"
     folder.mkdir()
     for i in range(3):
-        (folder / f"v{i}.mp4").write_bytes(b"x")
+        (folder / f"v{i}.mp4").write_bytes(b"x" * 2048)  # >= 1 KB: the count applies the upload validation
 
     real = mod.count_valid_videos_in_folder
     spy = _recorder(result=real)

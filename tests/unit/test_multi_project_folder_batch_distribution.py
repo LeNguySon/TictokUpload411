@@ -45,14 +45,14 @@ def test_upload_service_distribute_multi_project_batches(test_db: Path, tmp_path
     # 1. Setup Project 1 (Japan) and Project 2 (Korea)
     folder_jp = tmp_path / "videos_jp"
     folder_jp.mkdir()
-    (folder_jp / "jp1.mp4").write_bytes(b"DATA_JP1" + b"\x00" * 1000)
-    (folder_jp / "jp2.mp4").write_bytes(b"DATA_JP2" + b"\x00" * 1000)
+    (folder_jp / "jp1.mp4").write_bytes(b"DATA_JP1" + b"\x00" * 2048)
+    (folder_jp / "jp2.mp4").write_bytes(b"DATA_JP2" + b"\x00" * 2048)
 
     folder_kr = tmp_path / "videos_kr"
     folder_kr.mkdir()
-    (folder_kr / "kr1.mp4").write_bytes(b"DATA_KR1" + b"\x00" * 1000)
-    (folder_kr / "kr2.mp4").write_bytes(b"DATA_KR2" + b"\x00" * 1000)
-    (folder_kr / "kr3.mp4").write_bytes(b"DATA_KR3" + b"\x00" * 1000)
+    (folder_kr / "kr1.mp4").write_bytes(b"DATA_KR1" + b"\x00" * 2048)
+    (folder_kr / "kr2.mp4").write_bytes(b"DATA_KR2" + b"\x00" * 2048)
+    (folder_kr / "kr3.mp4").write_bytes(b"DATA_KR3" + b"\x00" * 2048)
 
     p_jp = proj_repo.create(name="Nhóm Japan", video_folder=str(folder_jp))
     p_kr = proj_repo.create(name="Nhóm Korea", video_folder=str(folder_kr))
@@ -118,11 +118,11 @@ def test_folder_distribution_worker_with_multi_project_batches(qapp, test_db: Pa
 
     f1 = tmp_path / "f1"
     f1.mkdir()
-    (f1 / "v1.mp4").write_bytes(b"V1_CONTENT" + b"\x00" * 1000)
+    (f1 / "v1.mp4").write_bytes(b"V1_CONTENT" + b"\x00" * 2048)
 
     f2 = tmp_path / "f2"
     f2.mkdir()
-    (f2 / "v2.mp4").write_bytes(b"V2_CONTENT" + b"\x00" * 1000)
+    (f2 / "v2.mp4").write_bytes(b"V2_CONTENT" + b"\x00" * 2048)
 
     p1 = proj_repo.create(name="Project A")
     p2 = proj_repo.create(name="Project B")
@@ -161,8 +161,8 @@ def test_batch_folder_upload_dialog_multi_project_table_ui(qapp, test_db: Path, 
 
     dir_jp = tmp_path / "vid_jp"
     dir_jp.mkdir()
-    (dir_jp / "c1.mp4").write_bytes(b"CLIP1" + b"\x00" * 1000)
-    (dir_jp / "c2.mp4").write_bytes(b"CLIP2" + b"\x00" * 1000)
+    (dir_jp / "c1.mp4").write_bytes(b"CLIP1" + b"\x00" * 2048)
+    (dir_jp / "c2.mp4").write_bytes(b"CLIP2" + b"\x00" * 2048)
 
     p1 = proj_repo.create(name="Chiến dịch Japan", video_folder=str(dir_jp))
     p2 = proj_repo.create(name="Chiến dịch US", video_folder="")

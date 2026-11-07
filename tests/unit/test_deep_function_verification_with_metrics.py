@@ -162,11 +162,11 @@ def test_metric_recursive_scan_and_deduplication_isolation(metric_db: Path, tmp_
     deep_dir.mkdir(parents=True)
 
     # 5 Unique valid videos across folder levels
-    (root_dir / "clip1.mp4").write_bytes(b"DATA_CLIP_1" + b"\x00" * 1000)
-    (root_dir / "Sub1" / "clip2.mov").write_bytes(b"DATA_CLIP_2" + b"\x00" * 1000)
-    (root_dir / "Sub1" / "Sub2" / "clip3.mkv").write_bytes(b"DATA_CLIP_3" + b"\x00" * 1000)
-    (deep_dir / "clip4.webm").write_bytes(b"DATA_CLIP_4" + b"\x00" * 1000)
-    (deep_dir / "clip5.avi").write_bytes(b"DATA_CLIP_5" + b"\x00" * 1000)
+    (root_dir / "clip1.mp4").write_bytes(b"DATA_CLIP_1" + b"\x00" * 2048)
+    (root_dir / "Sub1" / "clip2.mov").write_bytes(b"DATA_CLIP_2" + b"\x00" * 2048)
+    (root_dir / "Sub1" / "Sub2" / "clip3.mkv").write_bytes(b"DATA_CLIP_3" + b"\x00" * 2048)
+    (deep_dir / "clip4.webm").write_bytes(b"DATA_CLIP_4" + b"\x00" * 2048)
+    (deep_dir / "clip5.avi").write_bytes(b"DATA_CLIP_5" + b"\x00" * 2048)
 
     # Non-video file (must be ignored)
     (root_dir / "readme.txt").write_text("not a video")
@@ -184,7 +184,7 @@ def test_metric_recursive_scan_and_deduplication_isolation(metric_db: Path, tmp_
     # Duplicate video (exact duplicate content of clip1.mp4 in a separate folder)
     dup_dir = root_dir / "Duplicates"
     dup_dir.mkdir()
-    (dup_dir / "clip1_copy.mp4").write_bytes(b"DATA_CLIP_1" + b"\x00" * 1000)
+    (dup_dir / "clip1_copy.mp4").write_bytes(b"DATA_CLIP_1" + b"\x00" * 2048)
 
     # Execute batch distribution
     distributed = service.distribute_folder_videos_to_queue(
@@ -193,8 +193,8 @@ def test_metric_recursive_scan_and_deduplication_isolation(metric_db: Path, tmp_
         deduplicate=True,
     )
 
-    # Exactly 5 unique videos should be indexed
-    assert len(distributed) == 5, f"Expected exactly 5 unique videos distributed, got {len(distributed)}"
+    # 4 unique videos: the duplicate is deduplicated and the .avi is skipped (the upload validation rejects .avi)
+    assert len(distributed) == 4, f"Expected exactly 4 unique videos distributed, got {len(distributed)}"
     names = [Path(d["file_path"]).name for d in distributed]
     # Exactly one copy of the duplicate content is retained, the other deduplicated
     assert any(n in ("clip1.mp4", "clip1_copy.mp4") for n in names)
@@ -202,7 +202,7 @@ def test_metric_recursive_scan_and_deduplication_isolation(metric_db: Path, tmp_
     assert "clip2.mov" in names
     assert "clip3.mkv" in names
     assert "clip4.webm" in names
-    assert "clip5.avi" in names
+    assert "clip5.avi" not in names  # not uploadable: skipped instead of failing at upload time
     assert "old_clip.mp4" not in names  # Filtered by _posted exclusion
     assert "archived_clip.mov" not in names  # Filtered by .posted exclusion
 
@@ -216,7 +216,7 @@ def test_metric_fair_share_round_robin_and_interval_slots(metric_db: Path, tmp_p
     - Profile 1: 4 videos
     - Profile 2: 3 videos
     - Profile 3: 3 videos
-    - Offset formula: slot_offset_min = 5 + idx * (min_interval_hours * 60)
+    - Each channel's videos are min_interval_hours apart (per channel, channels post in parallel)
     """
     prof_repo = ProfileRepository(metric_db)
     video_repo = VideoRepository(metric_db)
@@ -230,7 +230,7 @@ def test_metric_fair_share_round_robin_and_interval_slots(metric_db: Path, tmp_p
     video_folder = tmp_path / "10_videos"
     video_folder.mkdir()
     for i in range(1, 11):
-        (video_folder / f"video_{i:02d}.mp4").write_bytes(f"DATA_{i}".encode() + b"\x00" * 1000)
+        (video_folder / f"video_{i:02d}.mp4").write_bytes(f"DATA_{i}".encode() + b"\x00" * 2048)
 
     # 1.5 hours interval (90 minutes)
     items = service.distribute_folder_videos_to_queue(
@@ -251,13 +251,12 @@ def test_metric_fair_share_round_robin_and_interval_slots(metric_db: Path, tmp_p
     assert len(p2_items) == 3, f"Profile 2 must receive 3 videos, got {len(p2_items)}"
     assert len(p3_items) == 3, f"Profile 3 must receive 3 videos, got {len(p3_items)}"
 
-    # Check timing progression: Each video must be spaced by ~90 minutes
-    times = [datetime.strptime(item["schedule_time"], "%Y-%m-%d %H:%M:%S") for item in items]
-    for idx in range(1, len(times)):
-        delta_minutes = (times[idx] - times[idx - 1]).total_seconds() / 60
-        assert round(delta_minutes) == 90, (
-            f"Expected 90m interval between video {idx - 1} and {idx}, got {delta_minutes}"
-        )
+    # Timing: the interval is per channel (channels post in parallel): each channel's videos are 90 minutes apart
+    for p_items in (p1_items, p2_items, p3_items):
+        times = sorted(datetime.strptime(item["schedule_time"], "%Y-%m-%d %H:%M:%S") for item in p_items)
+        for idx in range(1, len(times)):
+            delta_minutes = (times[idx] - times[idx - 1]).total_seconds() / 60
+            assert round(delta_minutes) == 90, f"Expected 90m between a channel's videos, got {delta_minutes}"
 
 
 # ---------------------------------------------------------------------------
@@ -391,9 +390,9 @@ def test_metric_batch_folder_upload_dialog_live_counter_and_banner(qapp, qtbot, 
 
     folder = tmp_path / "Tokyo_Files"
     folder.mkdir()
-    (folder / "tokyo_01.mp4").write_bytes(b"DATA" + b"\x00" * 1000)
-    (folder / "tokyo_02.mov").write_bytes(b"DATA" + b"\x00" * 1000)
-    (folder / "tokyo_03.mkv").write_bytes(b"DATA" + b"\x00" * 1000)
+    (folder / "tokyo_01.mp4").write_bytes(b"DATA" + b"\x00" * 2048)
+    (folder / "tokyo_02.mov").write_bytes(b"DATA" + b"\x00" * 2048)
+    (folder / "tokyo_03.mkv").write_bytes(b"DATA" + b"\x00" * 2048)
 
     dlg = BatchFolderUploadDialog(
         profile_repo=prof_repo,

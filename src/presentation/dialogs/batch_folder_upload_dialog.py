@@ -57,6 +57,14 @@ FOLDER_SCAN_DEBOUNCE_MS = 300
 SCANNING_TEXT = "⏳ Đang quét..."
 
 
+# The interval is per channel: channels post in parallel, after the videos they already have queued.
+INTERVAL_LABEL = "Khoảng cách giữa 2 video của cùng 1 kênh (giờ):"
+INTERVAL_TOOLTIP = (
+    "Mỗi kênh đăng cách nhau ít nhất số giờ này (mặc định 12 giờ); các kênh đăng song song.\n"
+    "Video mới được xếp sau các video kênh đã có sẵn trong hàng đợi."
+)
+
+
 def scan_text_for(folder: str, count: int) -> str:
     return f"{count} video" if folder and count > 0 else ("0 video" if folder else "Chưa chọn")
 
@@ -68,14 +76,19 @@ def count_valid_videos_in_folder(folder_path: str) -> int:
     p = Path(folder_path)
     if not p.is_dir():
         return 0
-    valid_exts = {".mp4", ".mov", ".mkv", ".webm", ".avi"}
+    # Same rules as the distribution (scan + validation policy): the count is what will actually be queued.
+    from src.application.services.upload_service import SCANNED_VIDEO_EXTENSIONS
+    from src.domain.policies.video_validation_policy import VideoValidationPolicy
+
+    policy = VideoValidationPolicy()
     try:
         return sum(
             1
             for f in p.rglob("*")
             if f.is_file()
-            and f.suffix.lower() in valid_exts
+            and f.suffix.lower() in SCANNED_VIDEO_EXTENSIONS
             and not any(part in ("_posted", ".posted") for part in f.parts)
+            and policy.validate_file(f).is_valid
         )
     except Exception:
         return 0
@@ -240,7 +253,9 @@ class BatchFolderUploadDialog(QDialog):
         layout_opts.setSpacing(8)
 
         row1 = QHBoxLayout()
-        row1.addWidget(QLabel("Khoảng cách tối thiểu giữa các video (giờ):", self))
+        lbl_interval = QLabel(INTERVAL_LABEL, self)
+        lbl_interval.setToolTip(INTERVAL_TOOLTIP)
+        row1.addWidget(lbl_interval)
         self.spin_interval = SpinBox(self)
         self.spin_interval.setRange(1, 72)
         self.spin_interval.setValue(12)

@@ -30,6 +30,10 @@ from src.infrastructure.tiktok.sammonny_adapter import SamMonnyTikTokAdapter
 logger = logging.getLogger(__name__)
 
 
+# Collected by the folder scan; the validation policy then rejects what the TikTok upload does not accept.
+SCANNED_VIDEO_EXTENSIONS = {".mp4", ".mov", ".mkv", ".webm", ".avi"}
+
+
 class UploadService:
     """
     Coordinates end-to-end video preparation, atomic allocation, and publishing dispatch.
@@ -111,130 +115,27 @@ class UploadService:
         progress_callback: Callable[[int, int, str], None] | None = None,
         cancel_token: Callable[[], bool] | None = None,
     ) -> list[dict[str, Any]]:
-        """
-        Scans folder for videos, filters duplicates, performs fair-share round-robin
-        distribution across profile_ids, calculates staggered schedules, and registers
-        drafts atomically into video_registry.
-        Supports async progress reporting and cooperative cancellation.
-        """
-        p = Path(folder_path).resolve()
-        if not p.is_dir():
+        """One folder shared by ``profile_ids``: same rules as distribute_multi_project_batches."""
+        if not Path(folder_path).resolve().is_dir():
             raise FileNotFoundError(f"Folder not found: {folder_path}")
-
         if not profile_ids:
             return []
-
-        valid_extensions = {".mp4", ".mov", ".mkv", ".webm", ".avi"}
-        all_video_files: list[Path] = []
-
-        for vf in p.rglob("*"):
-            if cancel_token and cancel_token():
-                logger.info("Folder scan cancelled early for: %s", folder_path)
-                return []
-            if any(part in ("_posted", ".posted") for part in vf.parts):
-                continue
-            if vf.is_file() and vf.suffix.lower() in valid_extensions:
-                all_video_files.append(vf)
-
-        if not all_video_files:
-            logger.info("No video files found in folder: %s", folder_path)
-            return []
-
-        # Sort order
-        if prioritize_newest:
-            all_video_files.sort(key=lambda f: f.stat().st_mtime, reverse=True)
-        else:
-            all_video_files.sort(key=lambda f: f.name)
-
-        # Deduplication filtering
-        available_videos: list[dict[str, Any]] = []
-        seen_in_batch: set[str] = set()
-        total_files = len(all_video_files)
-
-        for idx, vf in enumerate(all_video_files, start=1):
-            if cancel_token and cancel_token():
-                logger.info("Distribution hashing cancelled at file %d/%d", idx, total_files)
-                break
-            if progress_callback:
-                progress_callback(idx, total_files, vf.name)
-
-            file_hash = self.compute_sha256(vf)
-            if deduplicate:
-                existing = self.video_repo.get_by_hash(file_hash)
-                if existing:
-                    logger.info("Skipping already claimed/indexed video: %s (hash: %s)", vf.name, file_hash[:8])
-                    continue
-                if file_hash in seen_in_batch:
-                    logger.info("Skipping duplicate video within same batch: %s", vf.name)
-                    continue
-
-            seen_in_batch.add(file_hash)
-            available_videos.append(
-                {
-                    "path": vf,
-                    "hash": file_hash,
-                    "size": vf.stat().st_size,
-                    "mtime": vf.stat().st_mtime,
-                }
-            )
-
-        if not available_videos:
-            logger.info("No available videos left after deduplication: %s", folder_path)
-            return []
-
-        if random_order:
-            random.shuffle(available_videos)
-
-        created_items: list[dict[str, Any]] = []
-        now = datetime.now()
-
-        for idx, item in enumerate(available_videos):
-            target_profile_id = profile_ids[idx % len(profile_ids)]
-            v_path: Path = item["path"]
-            raw_title = v_path.stem.replace("_", " ").replace("-", " ")
-
-            if caption_template:
-                final_caption = spin_caption(caption_template, title=raw_title, filename=v_path.name)
-            else:
-                final_caption = v_path.name
-
-            # Calculate schedule slot
-            slot_offset_min = 5 + int(idx * (min_interval_hours * 60))
-            sched_time = (now + timedelta(minutes=slot_offset_min)).strftime("%Y-%m-%d %H:%M:%S")
-
-            vid_id = self.video_repo.register_or_update(
-                video_hash=item["hash"],
-                file_path=str(v_path),
-                file_name=final_caption,
-                file_size=item["size"],
-                mtime=item["mtime"],
-                assigned_profile_id=target_profile_id,
-                schedule_time=sched_time,
-            )
-
-            created_items.append(
-                {
-                    "id": vid_id,
-                    "file_path": str(v_path),
-                    "file_name": final_caption,
-                    "assigned_profile_id": target_profile_id,
-                    "schedule_time": sched_time,
-                    "privacy": privacy,
-                    "allow_comment": allow_comment,
-                    "allow_duet": allow_duet,
-                    "allow_stitch": allow_stitch,
-                    "allow_hd": allow_hd,
-                    "is_ai_generated": is_ai_generated,
-                }
-            )
-
-        logger.info(
-            "Distributed %d videos across %d profiles from folder: %s",
-            len(created_items),
-            len(profile_ids),
-            folder_path,
+        return self.distribute_multi_project_batches(
+            [{"project_id": None, "project_name": None, "folder_path": folder_path, "profile_ids": profile_ids}],
+            min_interval_hours=min_interval_hours,
+            random_order=random_order,
+            prioritize_newest=prioritize_newest,
+            deduplicate=deduplicate,
+            caption_template=caption_template,
+            privacy=privacy,
+            allow_comment=allow_comment,
+            allow_duet=allow_duet,
+            allow_stitch=allow_stitch,
+            allow_hd=allow_hd,
+            is_ai_generated=is_ai_generated,
+            progress_callback=progress_callback,
+            cancel_token=cancel_token,
         )
-        return created_items
 
     def distribute_multi_project_batches(
         self,
@@ -254,138 +155,168 @@ class UploadService:
         cancel_token: Callable[[], bool] | None = None,
     ) -> list[dict[str, Any]]:
         """
-        Distributes video folders across multiple projects concurrently.
-        Each project batch contains:
-          - 'project_id': int
-          - 'project_name': str
-          - 'folder_path': str | Path
-          - 'profile_ids': list[int]
-        Fair-share distribution ensures videos from a project's folder are only
-        assigned to profiles within that project.
+        Queues the videos of each batch's folder for that batch's profiles only. Each batch:
+        ``{"project_id", "project_name", "folder_path", "profile_ids"}``.
+
+        - files the upload would reject (validation policy: format, size) are skipped, not queued;
+        - round-robin over the profiles; ``min_interval_hours`` is the gap between two videos of the SAME
+          channel (channels post in parallel), counted after the videos the channel already has queued;
+        - the upload options (privacy, comment/duet/stitch/HD, AI label) are stored with each video.
         """
-        all_created_items: list[dict[str, Any]] = []
-        valid_extensions = {".mp4", ".mov", ".mkv", ".webm", ".avi"}
-        total_files_across_projects = 0
-        batch_file_maps: list[tuple[dict[str, Any], list[Path]]] = []
+        cancelled = cancel_token or (lambda: False)
+        upload_options: dict[str, Any] = {
+            "privacy": privacy,
+            "allow_comment": allow_comment,
+            "allow_duet": allow_duet,
+            "allow_stitch": allow_stitch,
+            "allow_hd": allow_hd,
+            "is_ai_generated": is_ai_generated,
+        }
 
+        batch_files: list[tuple[dict[str, Any], list[Path]]] = []
         for batch in project_batches:
-            f_path_str = batch.get("folder_path")
-            if not f_path_str:
+            folder = batch.get("folder_path")
+            if not folder or not batch.get("profile_ids") or not Path(folder).resolve().is_dir():
                 continue
-            f_path = Path(f_path_str).resolve()
-            if not f_path.is_dir() or not batch.get("profile_ids"):
-                continue
+            files = self._scan_video_files(Path(folder).resolve(), prioritize_newest, cancelled)
+            if files is None:
+                logger.info("Folder scan cancelled early for: %s", folder)
+                return []
+            batch_files.append((batch, files))
 
-            v_files: list[Path] = []
-            for vf in f_path.rglob("*"):
-                if cancel_token and cancel_token():
-                    return []
-                if any(part in ("_posted", ".posted") for part in vf.parts):
-                    continue
-                if vf.is_file() and vf.suffix.lower() in valid_extensions:
-                    v_files.append(vf)
-
-            if prioritize_newest:
-                v_files.sort(key=lambda f: f.stat().st_mtime, reverse=True)
-            else:
-                v_files.sort(key=lambda f: f.name)
-
-            total_files_across_projects += len(v_files)
-            batch_file_maps.append((batch, v_files))
-
-        if total_files_across_projects == 0:
+        total = sum(len(files) for _, files in batch_files)
+        if total == 0:
             return []
 
-        processed_so_far = 0
-
-        for batch, v_files in batch_file_maps:
-            if cancel_token and cancel_token():
+        created: list[dict[str, Any]] = []
+        processed = 0
+        for batch, files in batch_files:
+            if cancelled():
                 break
-
-            proj_name = batch.get("project_name") or f"Project #{batch.get('project_id')}"
-            profile_ids = batch["profile_ids"]
-
-            seen_in_batch: set[str] = set()
-            available_videos: list[dict[str, Any]] = []
-
-            for vf in v_files:
-                if cancel_token and cancel_token():
-                    break
-
-                processed_so_far += 1
-                if progress_callback:
-                    progress_callback(processed_so_far, total_files_across_projects, f"[{proj_name}] {vf.name}")
-
-                file_hash = self.compute_sha256(vf)
-                if deduplicate:
-                    existing = self.video_repo.get_by_hash(file_hash)
-                    if existing:
-                        continue
-                    if file_hash in seen_in_batch:
-                        continue
-
-                seen_in_batch.add(file_hash)
-                available_videos.append(
-                    {
-                        "path": vf,
-                        "hash": file_hash,
-                        "size": vf.stat().st_size,
-                        "mtime": vf.stat().st_mtime,
-                    }
+            label = batch.get("project_name") or (
+                f"Project #{batch['project_id']}" if batch.get("project_id") is not None else None
+            )
+            available, processed = self._collect_available_videos(
+                files, deduplicate, label, processed, total, progress_callback, cancelled
+            )
+            if random_order:
+                random.shuffle(available)
+            created.extend(
+                self._assign_and_register(
+                    available, list(batch["profile_ids"]), min_interval_hours, caption_template, upload_options
                 )
+            )
 
-            if not available_videos:
+        logger.info("Folder distribution completed: %d videos across %d batches", len(created), len(project_batches))
+        return created
+
+    @staticmethod
+    def _scan_video_files(folder: Path, prioritize_newest: bool, cancelled: Callable[[], bool]) -> list[Path] | None:
+        """Video files of ``folder`` (recursive, ``_posted``/``.posted`` excluded); None when cancelled."""
+        files: list[Path] = []
+        for vf in folder.rglob("*"):
+            if cancelled():
+                return None
+            if any(part in ("_posted", ".posted") for part in vf.parts):
+                continue
+            if vf.is_file() and vf.suffix.lower() in SCANNED_VIDEO_EXTENSIONS:
+                files.append(vf)
+        if prioritize_newest:
+            files.sort(key=lambda f: f.stat().st_mtime, reverse=True)
+        else:
+            files.sort(key=lambda f: f.name)
+        return files
+
+    def _collect_available_videos(
+        self,
+        files: list[Path],
+        deduplicate: bool,
+        label: str | None,
+        processed: int,
+        total: int,
+        progress_callback: Callable[[int, int, str], None] | None,
+        cancelled: Callable[[], bool],
+    ) -> tuple[list[dict[str, Any]], int]:
+        """Valid, not yet queued files (with hash/size/mtime) and the updated progress count."""
+        available: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for vf in files:
+            if cancelled():
+                logger.info("Distribution hashing cancelled at file %d/%d", processed, total)
+                break
+            processed += 1
+            if progress_callback:
+                progress_callback(processed, total, f"[{label}] {vf.name}" if label else vf.name)
+
+            check = self.validation_policy.validate_file(vf)
+            if not check.is_valid:
+                # Queueing it would only fail at upload time (after waiting for its slot).
+                logger.warning("Skipping invalid video %s: %s", vf.name, check.error_message)
                 continue
 
-            if random_order:
-                random.shuffle(available_videos)
+            file_hash = self.compute_sha256(vf)
+            if deduplicate and (file_hash in seen or self.video_repo.get_by_hash(file_hash)):
+                logger.info("Skipping already queued/duplicate video: %s (hash: %s)", vf.name, file_hash[:8])
+                continue
+            seen.add(file_hash)
+            stat = vf.stat()
+            available.append({"path": vf, "hash": file_hash, "size": stat.st_size, "mtime": stat.st_mtime})
+        return available, processed
 
-            now = datetime.now()
-            for idx, item in enumerate(available_videos):
-                target_profile_id = profile_ids[idx % len(profile_ids)]
-                v_path: Path = item["path"]
-                raw_title = v_path.stem.replace("_", " ").replace("-", " ")
+    def _assign_and_register(
+        self,
+        available: list[dict[str, Any]],
+        profile_ids: list[int],
+        min_interval_hours: float,
+        caption_template: str | None,
+        upload_options: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Round-robin over ``profile_ids``; each channel's videos are ``min_interval_hours`` apart, starting
+        after the channel's already queued videos (never sooner than 5 minutes from now)."""
+        interval = timedelta(hours=min_interval_hours)
+        earliest = datetime.now() + timedelta(minutes=5)
+        next_slot: dict[int, datetime] = {}
+        created: list[dict[str, Any]] = []
+        for idx, item in enumerate(available):
+            pid = profile_ids[idx % len(profile_ids)]
+            if pid not in next_slot:
+                next_slot[pid] = earliest
+                latest = self.video_repo.latest_pending_schedule(pid)
+                if latest:
+                    try:
+                        next_slot[pid] = max(earliest, datetime.fromisoformat(latest) + interval)
+                    except ValueError:
+                        logger.debug("Unreadable schedule_time %r for profile %s", latest, pid)
+            slot = next_slot[pid]
+            next_slot[pid] = slot + interval
 
-                if caption_template:
-                    final_caption = spin_caption(caption_template, title=raw_title, filename=v_path.name)
-                else:
-                    final_caption = v_path.name
-
-                slot_offset_min = 5 + int(idx * (min_interval_hours * 60))
-                sched_time = (now + timedelta(minutes=slot_offset_min)).strftime("%Y-%m-%d %H:%M:%S")
-
-                vid_id = self.video_repo.register_or_update(
-                    video_hash=item["hash"],
-                    file_path=str(v_path),
-                    file_name=final_caption,
-                    file_size=item["size"],
-                    mtime=item["mtime"],
-                    assigned_profile_id=target_profile_id,
-                    schedule_time=sched_time,
-                )
-
-                all_created_items.append(
-                    {
-                        "id": vid_id,
-                        "file_path": str(v_path),
-                        "file_name": final_caption,
-                        "assigned_profile_id": target_profile_id,
-                        "schedule_time": sched_time,
-                        "privacy": privacy,
-                        "allow_comment": allow_comment,
-                        "allow_duet": allow_duet,
-                        "allow_stitch": allow_stitch,
-                        "allow_hd": allow_hd,
-                        "is_ai_generated": is_ai_generated,
-                    }
-                )
-
-        logger.info(
-            "Multi-project batch distribution completed: %d videos across %d projects",
-            len(all_created_items),
-            len(project_batches),
-        )
-        return all_created_items
+            v_path: Path = item["path"]
+            raw_title = v_path.stem.replace("_", " ").replace("-", " ")
+            caption = (
+                spin_caption(caption_template, title=raw_title, filename=v_path.name) if caption_template else v_path.name
+            )
+            sched_time = slot.strftime("%Y-%m-%d %H:%M:%S")
+            vid_id = self.video_repo.register_or_update(
+                video_hash=item["hash"],
+                file_path=str(v_path),
+                file_name=caption,
+                file_size=item["size"],
+                mtime=item["mtime"],
+                assigned_profile_id=pid,
+                schedule_time=sched_time,
+                upload_options=upload_options,
+            )
+            created.append(
+                {
+                    "id": vid_id,
+                    "file_path": str(v_path),
+                    "file_name": caption,
+                    "assigned_profile_id": pid,
+                    "schedule_time": sched_time,
+                    **upload_options,
+                }
+            )
+        return created
 
     def execute_upload(
         self,
@@ -494,12 +425,19 @@ class UploadService:
                     )
                     return UploadResult(success=False, draft_id="", status=RemoteStatus.PENDING)
 
+                # Explicit arguments win, then the options stored with the video when it was queued.
+                def _opt(arg: bool | None, column: str, default: bool) -> bool:
+                    if arg is not None:
+                        return bool(arg)
+                    stored = video_row.get(column)
+                    return default if stored is None else bool(stored)
+
                 eff_privacy = privacy or video_row.get("privacy") or "PUBLIC_TO_EVERYONE"
-                eff_comment = allow_comment if allow_comment is not None else video_row.get("allow_comment", True)
-                eff_duet = allow_duet if allow_duet is not None else video_row.get("allow_duet", True)
-                eff_stitch = allow_stitch if allow_stitch is not None else video_row.get("allow_stitch", True)
-                eff_hd = allow_hd if allow_hd is not None else video_row.get("allow_hd", True)
-                eff_ai = is_ai_generated if is_ai_generated is not None else video_row.get("is_ai_generated", False)
+                eff_comment = _opt(allow_comment, "allow_comment", True)
+                eff_duet = _opt(allow_duet, "allow_duet", True)
+                eff_stitch = _opt(allow_stitch, "allow_stitch", True)
+                eff_hd = _opt(allow_hd, "allow_hd", True)
+                eff_ai = _opt(is_ai_generated, "is_ai_generated", False)
 
                 file_size_mb = (video_row.get("file_size") or 0) / (1024 * 1024)
                 _safe_log("VALIDATE", f"Tệp video: {video_row.get('file_path')} ({file_size_mb:.1f} MB)")

@@ -11,6 +11,9 @@ from typing import Any
 from src.infrastructure.database.connection import DEFAULT_DB_PATH, db_session
 from src.infrastructure.logging.redaction_logger import RedactionFilter
 
+# Upload options stored per video (video_registry columns); the upload uses them unless overridden.
+UPLOAD_OPTION_COLUMNS = ("privacy", "allow_comment", "allow_duet", "allow_stitch", "allow_hd", "is_ai_generated")
+
 
 class VideoRepository:
     """Repository for managing the `video_registry` table."""
@@ -30,8 +33,10 @@ class VideoRepository:
         mtime: float,
         assigned_profile_id: int | None = None,
         schedule_time: str | None = None,
+        upload_options: dict[str, Any] | None = None,
     ) -> int:
-        """Registers a new video file or updates metadata if already tracked."""
+        """Registers a new video file or updates metadata if already tracked. ``upload_options`` (privacy,
+        allow_comment/duet/stitch/hd, is_ai_generated) are stored for the upload; unset ones keep their value."""
         with db_session(self.db_path) as conn:
             conn.execute(
                 """
@@ -51,7 +56,24 @@ class VideoRepository:
             )
             # Retrieve row id
             row = conn.execute("SELECT id FROM video_registry WHERE video_hash = ?;", (video_hash,)).fetchone()
+            options = {k: v for k, v in (upload_options or {}).items() if k in UPLOAD_OPTION_COLUMNS and v is not None}
+            if options:
+                values = [v if k == "privacy" else int(bool(v)) for k, v in options.items()]
+                assignments = ", ".join(f"{k} = ?" for k in options)
+                conn.execute(f"UPDATE video_registry SET {assignments} WHERE id = ?;", (*values, row[0]))
             return int(row[0])
+
+    def latest_pending_schedule(self, profile_id: int) -> str | None:
+        """Latest schedule_time of the channel's videos still waiting to be posted, if any."""
+        with db_session(self.db_path, write=False) as conn:
+            row = conn.execute(
+                """
+                SELECT MAX(schedule_time) FROM video_registry
+                WHERE assigned_profile_id = ? AND status IN ('available', 'reserved') AND schedule_time IS NOT NULL;
+                """,
+                (profile_id,),
+            ).fetchone()
+            return str(row[0]) if row and row[0] else None
 
     def get_by_id(self, video_id: int) -> dict[str, Any] | None:
         with db_session(self.db_path, write=False) as conn:

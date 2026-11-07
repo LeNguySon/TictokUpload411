@@ -382,6 +382,12 @@ CREATE TABLE IF NOT EXISTS video_registry (
     published_at TIMESTAMP,
     retry_count INTEGER DEFAULT 0,
     error_message TEXT DEFAULT NULL,
+    privacy TEXT DEFAULT 'PUBLIC_TO_EVERYONE',
+    allow_comment INTEGER DEFAULT 1,
+    allow_duet INTEGER DEFAULT 1,
+    allow_stitch INTEGER DEFAULT 1,
+    allow_hd INTEGER DEFAULT 1,
+    is_ai_generated INTEGER DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

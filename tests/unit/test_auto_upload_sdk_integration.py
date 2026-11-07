@@ -136,10 +136,10 @@ def test_upload_service_distribute_folder_videos_to_queue(temp_db: Path, tmp_pat
     v2 = folder / "clip2.mov"
     v3 = folder / "clip3.mp4"
     v4 = folder / "clip4.mkv"
-    v1.write_bytes(b"video 1 content")
-    v2.write_bytes(b"video 2 content")
-    v3.write_bytes(b"video 3 content")
-    v4.write_bytes(b"video 4 content")
+    v1.write_bytes(b"video 1 content" + b"\x00" * 2048)
+    v2.write_bytes(b"video 2 content" + b"\x00" * 2048)
+    v3.write_bytes(b"video 3 content" + b"\x00" * 2048)
+    v4.write_bytes(b"video 4 content" + b"\x00" * 2048)
 
     upload_service = UploadService(
         profile_repo=profile_repo,
