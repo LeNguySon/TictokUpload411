@@ -36,9 +36,28 @@ from src.infrastructure.proxy.egress import build_proxy_url, redact_proxy_url, r
 
 logger = logging.getLogger(__name__)
 
+
+def _install_sdk_compat_shims() -> None:
+    """Works around SamMonny SDK defects that would otherwise fail silently inside the SDK.
+
+    SDK main after 1.8.3 calls ``random.uniform`` in TikTokHeadlessStudioUploader's Post click but never
+    imports ``random``: the NameError is swallowed, the Post button is not clicked and Studio uploads end
+    ambiguous. Binding the module is harmless on SDK builds that already import it.
+    """
+    import random
+
+    import sammonny.platforms.tiktok as sdk_tiktok
+
+    if getattr(sdk_tiktok, "random", None) is not random:
+        sdk_tiktok.random = random  # type: ignore[attr-defined]
+
+
+_install_sdk_compat_shims()
+
 PUBLIC_PRIVACY = "PUBLIC_TO_EVERYONE"
-# SamMonny SDK 1.8.3: the Cookie Hybrid media transfer is only simulated (execute_tos_upload sleeps for its
-# own tiktokcdn.com URL), so it can never publish a real video. Flip only when the SDK really uploads.
+# SamMonny SDK 1.8.3 (and main after it): the Cookie Hybrid media transfer can still be simulated
+# (execute_tos_upload sleeps instead of PUT, and main falls back to that path when the VOD session cannot be
+# opened), so a Hybrid "success" may carry no video. Flip only when the SDK really uploads (see test_sdk_contract).
 COOKIE_HYBRID_AVAILABLE = False
 
 

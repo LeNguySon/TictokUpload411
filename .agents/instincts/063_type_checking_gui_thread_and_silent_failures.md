@@ -40,3 +40,13 @@
 - Bảng `profiles` vẫn lưu plaintext `password`, `email_backup_password`, `cookies_json`/`cookie` (có test khẳng định
   `imported["password"] == ...`). Chỉ `refresh_token` được chuyển sang Vault (token_manager). Muốn chuyển các cột
   này sang Vault/DPAPI thì cần migration riêng.
+
+## SamMonny SDK main sau 1.8.3 (commit 64c53a0, eacbb93, 2026-11-07): độ tương thích
+- Vẫn ghi `version = 1.8.3` dù code đã khác bản phát hành ⇒ KHÔNG đóng gói vào `vendor/` khi chưa tăng phiên bản.
+- Lỗi SDK: `platforms/tiktok.py` dùng `random.uniform` khi bấm nút Post của Studio (HumanMouse) nhưng không
+  `import random` ⇒ NameError bị nuốt, nhánh `btn.click()` bị bỏ qua, upload Studio kết thúc ambiguous.
+  App vá bằng `_install_sdk_compat_shims()` trong `sammonny_adapter.py` (test: `test_sdk_contract.py`).
+- Hybrid: thử VOD AWS4 thật nhưng lỗi thì vẫn rơi về phiên TOS giả lập (`tos_sess_` ⇒ sleep thay vì PUT);
+  URL upload/`store_uri`/`upload_id` có giá trị dự phòng tự bịa; lỗi CommitUploadInner chỉ warning.
+  ⇒ Giữ `COOKIE_HYBRID_AVAILABLE = False`; test chặn bật lại khi SDK còn đường giả lập.
+- Kiểm tra app với SDK chưa phát hành mà không đổi venv: `PYTHONPATH=<sdk>/sdk/python python -m pytest tests`.

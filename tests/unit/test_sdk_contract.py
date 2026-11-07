@@ -52,3 +52,29 @@ def test_upload_trims_process_tree_once_with_real_sdk_api(tmp_path: Path):
         adapter.upload_video(profile_id=1, video_path=video, title="t", privacy="PUBLIC_TO_EVERYONE")
     assert trim.call_count == 1
     assert inspect.signature(MemoryManager.trim_process_tree_memory).parameters.keys() == {"root_pid"}
+
+
+def test_studio_post_click_can_use_random_in_sdk_tiktok_module():
+    """SamMonny SDK main (after 1.8.3) calls random.uniform() in the Studio Post click without importing
+    random: the NameError is swallowed and the post button is never clicked (upload ends ambiguous).
+    The adapter must make sure the module has `random` bound, whichever SDK build is installed."""
+    import random
+
+    import sammonny.platforms.tiktok as sdk_tiktok
+    import src.infrastructure.tiktok.sammonny_adapter  # noqa: F401  (installs the compatibility shim)
+
+    assert getattr(sdk_tiktok, "random", None) is random
+
+
+def test_cookie_hybrid_stays_disabled_while_sdk_simulates_the_transfer():
+    """The SDK's TOS upload still has a simulated path (sleep instead of PUT) that it falls back to when the
+    real VOD session cannot be opened, so a Hybrid 'success' may carry no video. Re-enable only when gone."""
+    import re
+
+    from sammonny.platforms.tiktok import TikTokPipeline
+    from src.infrastructure.tiktok import sammonny_adapter
+
+    source = inspect.getsource(TikTokPipeline.execute_tos_upload)
+    simulates = re.search(r"time\.sleep\(0\.01\)", source) is not None
+    if simulates:
+        assert sammonny_adapter.COOKIE_HYBRID_AVAILABLE is False
