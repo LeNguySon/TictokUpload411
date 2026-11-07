@@ -18,7 +18,49 @@ ROOT = Path(__file__).resolve().parent.parent
 SPECS = {"app": "tavm_app.spec", "admin": "tavm_admin.spec"}
 
 
+def pinned_versions() -> dict[str, str]:
+    """Exact pins (``name==x.y.z``) from pyproject.toml's dependencies."""
+    import re
+    import tomllib
+
+    deps = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]["dependencies"]
+    return {m.group(1): m.group(2) for d in deps if (m := re.match(r"^\s*([A-Za-z0-9_.-]+)==([^;\s]+)", d))}
+
+
+def environment_problems(installed: dict[str, str] | None = None) -> list[str]:
+    """Why this Python must not build the app (empty list = OK).
+
+    The shipped exe was once built with the system Python (sammonny 1.5.0, PyQt6 6.12): build only from the
+    project's .venv with the pinned SDK and a PyQt6 whose stubs/runtime match the tests (< 6.12)."""
+    from importlib import metadata
+
+    def version(dist: str) -> str | None:
+        if installed is not None:
+            return installed.get(dist)
+        try:
+            return metadata.version(dist)
+        except metadata.PackageNotFoundError:
+            return None
+
+    problems: list[str] = []
+    for dist, wanted in pinned_versions().items():
+        got = version(dist)
+        if got != wanted:
+            problems.append(f"{dist} {got or 'not installed'} != pinned {wanted}")
+    pyqt = version("PyQt6")
+    if pyqt is None or tuple(int(x) for x in pyqt.split(".")[:2]) >= (6, 12):
+        problems.append(f"PyQt6 {pyqt or 'not installed'} must be < 6.12")
+    return problems
+
+
 def build(target: str) -> None:
+    problems = environment_problems()
+    if problems:
+        bullet = "\n  - "
+        raise SystemExit(
+            f"Refusing to build from this Python ({sys.executable}):{bullet}{bullet.join(problems)}\n"
+            "Run with the project's .venv: .venv\\Scripts\\python packaging/build_exe.py app"
+        )
     spec = ROOT / "packaging" / SPECS[target]
     cmd = [
         sys.executable,
