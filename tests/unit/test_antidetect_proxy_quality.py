@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pytest
 from src.application.services.proxy_service import ProxyService
+from src.domain.fingerprint.browser_fingerprint import generate_fingerprint
 from src.domain.policies.network_leak_policy import NetworkLeakPolicy
 from src.infrastructure.browser.orbita_launcher import OrbitaLauncher
 from src.infrastructure.database.migrations.runner import run_all_migrations
@@ -106,10 +107,13 @@ def test_authenticated_proxy_preferences_injection(temp_env):
     gologin = data.get("gologin", {})
     assert gologin["name"] == "TikTokUS_Auth"
     assert gologin["canvasMode"] == "noise"
-    assert gologin["canvasNoise"] == 9.25
+    # Fingerprint values come from the profile's own fingerprint (here derived from its uuid), never from
+    # loose legacy columns, which held values shared by many profiles.
+    expected_fp = generate_fingerprint("test-uuid-101")
+    assert gologin["canvasNoise"] == expected_fp["canvas_noise"]
     assert gologin["webrtc"]["enable"] is False
     assert gologin["webrtc"]["mode"] == "disabled"
-    assert gologin["webgl"]["metadata"]["vendor"] == "Google Inc. (NVIDIA)"
+    assert gologin["webgl"]["metadata"]["vendor"] == expected_fp["webgl"]["vendor"]
 
     # Verify proxy authentication payload in Preferences
     proxy_conf = gologin.get("proxy", {})

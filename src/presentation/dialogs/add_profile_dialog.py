@@ -90,7 +90,6 @@ def create_profile(
             "project_id": project_id,
             "proxy_id": proxy_id,
             "storage_dir": str(prof_dir),
-            "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/152.0.0.0",
             "status": "LIVE" if cookie or token else "stopped",
             "cookie": cookie if cookie else None,
         }

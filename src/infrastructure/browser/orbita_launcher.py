@@ -13,6 +13,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
+from src.domain.fingerprint.browser_fingerprint import fingerprint_of, gologin_preferences
 from src.infrastructure.browser.daemon_proxy_sync import sync_daemon_proxy
 from src.infrastructure.browser.engine_paths import daemon_profiles_dir, discover_orbita_executable
 from src.infrastructure.browser.process_supervisor import BrowserProcessSupervisor
@@ -199,49 +200,14 @@ class OrbitaLauncher:
         gologin = pref_data.setdefault("gologin", {})
         gologin["name"] = profile_data.get("name", "Default")
         gologin["profile_id"] = str(profile_data.get("uuid") or profile_data.get("id", "profile_1"))
-        gologin["screenWidth"] = profile_data.get("screen_width", 1920)
-        gologin["screenHeight"] = profile_data.get("screen_height", 1080)
-        gologin["userAgent"] = (
-            profile_data.get("user_agent")
-            or "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36"
-        )
-        gologin["navigator"] = {"platform": "Win32", "max_touch_points": 0}
-        gologin["canvasMode"] = "noise"
-        gologin["canvasNoise"] = float(profile_data.get("canvas_noise", 8.751249))
-        gologin["audioContext"] = {"enable": True, "noiseValue": 5.793972911028913e-7}
-        gologin["clientRects"] = {"mode": "noise", "noise": 2.14810925182}
-        gologin["client_rects_noise_enable"] = True
-        gologin["getClientRectsNoice"] = 2.14810925182
-        gologin["get_client_rects_noise"] = 2.14810925182
-
-        vendor = profile_data.get("webgl_vendor") or "Google Inc. (NVIDIA)"
-        renderer = (
-            profile_data.get("webgl_renderer")
-            or "ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Direct3D11 vs_5_0 ps_5_0, D3D11)"
-        )
-        gologin["webgl"] = {"metadata": {"vendor": vendor, "renderer": renderer, "mode": True}}
-        gologin["webGl"] = {"vendor": vendor, "renderer": renderer, "mode": True}
-        gologin["webgl_noice_enable"] = True
-        gologin["webglNoiceEnable"] = True
-        gologin["webgl_noise_enable"] = True
-        gologin["webgl_noise_value"] = 91.240581
-        gologin["webglNoiseValue"] = 91.240581
-
-        gologin["mediaDevices"] = {
-            "enable": True,
-            "uid": "e8046704b3cb45338099e2261bc1be67a1b2",
-            "audioInputs": 1,
-            "audioOutputs": 1,
-            "videoInputs": 1,
-        }
+        # The profile's own fingerprint (stored, else derived from its uuid): never values shared by all profiles.
+        seed = str(profile_data.get("uuid") or profile_data.get("id") or profile_data.get("name") or "")
+        gologin.update(gologin_preferences(fingerprint_of(profile_data), seed=seed))
         gologin["webrtc"] = {
             "enable": False,
             "mode": "disabled",
             "should_fill_empty_ice_list": True,
         }
-        gologin["hardwareConcurrency"] = int(profile_data.get("cpu_cores", 8))
-        gologin["deviceMemory"] = int(profile_data.get("memory_gb", 8)) * 1024
-        gologin["doNotTrack"] = False
 
         # Align Timezone, Geolocation, and Languages with proxy/profile geolocation
         timezone_id = (

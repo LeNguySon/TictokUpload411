@@ -5,6 +5,7 @@ Coordinates between SamMonny GoLogin SDK and internal ProfileRepository.
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 
@@ -14,6 +15,45 @@ from src.infrastructure.database.repositories.project_repository import ProjectR
 from src.infrastructure.database.repositories.proxy_repository import ProxyRepository
 
 logger = logging.getLogger(__name__)
+
+
+
+def _daemon_fingerprint(gl: Any, profile_uuid: str) -> dict[str, Any] | None:
+    """The fingerprint the daemon generated for ``profile_uuid`` (None if its record cannot be read)."""
+    try:
+        info = gl.client.get_profile(profile_uuid)
+        fp = (getattr(info, "raw_data", None) or {}).get("fingerprint")
+    except Exception as e:
+        logger.warning("Daemon fingerprint of %s unavailable (%s): a local one is generated", profile_uuid, e)
+        return None
+    return fp if isinstance(fp, dict) and fp.get("navigator") else None
+
+
+def backfill_fingerprints(profile_repo: Any, daemon_client: Any | None) -> dict[str, int]:
+    """Gives every profile without a stored fingerprint its own fixed one: the daemon's record when it has one
+    (the browser already launches with it), otherwise a unique one derived from the profile uuid.
+    Network + DB work: run it off the GUI thread. Returns {"daemon": n, "generated": m}."""
+    from src.domain.fingerprint.browser_fingerprint import generate_fingerprint, profile_columns
+
+    counts = {"daemon": 0, "generated": 0}
+    for profile in profile_repo.list_all():
+        if profile.get("fingerprint_json") or not profile.get("uuid"):
+            continue
+        fp = None
+        if daemon_client is not None:
+            try:
+                info = daemon_client.get_profile(profile["uuid"])
+                raw_fp = (getattr(info, "raw_data", None) or {}).get("fingerprint") if info else None
+                fp = raw_fp if isinstance(raw_fp, dict) and raw_fp.get("navigator") else None
+            except Exception as e:
+                logger.debug("Daemon record of %s unavailable: %s", profile["uuid"], e)
+        source = "daemon" if fp else "generated"
+        fp = fp or generate_fingerprint(str(profile["uuid"]))
+        profile_repo.update(profile["id"], profile_columns(fp))
+        counts[source] += 1
+    if counts["daemon"] or counts["generated"]:
+        logger.info("Fingerprints assigned: %d from daemon records, %d generated", counts["daemon"], counts["generated"])
+    return counts
 
 
 class GoLoginSyncService:
@@ -104,6 +144,8 @@ class GoLoginSyncService:
                 "timezone_id": timezone_id,
                 "notes": notes,
             }
+            if fp.get("navigator"):
+                profile_payload["fingerprint_json"] = json.dumps(fp, ensure_ascii=False, sort_keys=True)
 
             if existing:
                 self.profile_repo.update(existing["id"], profile_payload)
@@ -150,6 +192,7 @@ class GoLoginSyncService:
         # 1. Create on GoLogin Daemon
         gologin_uuid = gl.create(create_payload)
         logger.info("GoLogin SDK created profile UUID: %s", gologin_uuid)
+        daemon_fp = _daemon_fingerprint(gl, gologin_uuid)
 
         # 2. Inject cookies if provided
         if cookie:
@@ -185,14 +228,13 @@ class GoLoginSyncService:
             "project_id": project_id,
             "proxy_id": proxy_id,
             "storage_dir": str(prof_dir),
-            "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/152.0.0.0",
             "status": "LIVE" if cookie else "stopped",
-            "canvas_noise": 8.0,
-            "audio_noise": 0.0001,
-            "webgl_vendor": "Google Inc. (Intel)",
-            "webgl_renderer": "ANGLE (Intel, Intel(R) UHD Graphics Direct3D11)",
             "cookie": cookie if cookie else None,
         }
+
+        if daemon_fp:
+            # Store the daemon's own fingerprint: app and daemon then apply the same one at every launch.
+            profile_data["fingerprint_json"] = json.dumps(daemon_fp, ensure_ascii=False, sort_keys=True)
 
         if extra_fields:
             for k, v in extra_fields.items():

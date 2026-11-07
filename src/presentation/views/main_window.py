@@ -43,7 +43,7 @@ from qfluentwidgets import (
 )
 
 from src.application.services.cookie_session_service import CookieSessionService
-from src.application.services.gologin_sync_service import GoLoginSyncService
+from src.application.services.gologin_sync_service import GoLoginSyncService, backfill_fingerprints
 from src.application.services.license_service import LicenseService
 from src.application.services.profile_service import ProfileService
 from src.application.services.proxy_service import ProxyService
@@ -285,6 +285,8 @@ class TikTokManagerMainWindow(QMainWindow):
         self.session_capture_timer.setInterval(10 * 60_000)
         self.session_capture_timer.timeout.connect(self._capture_open_sessions)
         self.session_capture_timer.start()
+        # Profiles created before fingerprints were stored get their own fixed one (once, in the background).
+        QTimer.singleShot(5000, self._backfill_fingerprints)
 
         self._apply_license()
         if self.license_service is not None:
@@ -1109,6 +1111,24 @@ class TikTokManagerMainWindow(QMainWindow):
             return statuses
 
         self._run_bg(_close_all, on_result=self._on_orbita_closed)
+
+    def _backfill_fingerprints(self) -> None:
+        """Assigns a fixed fingerprint to profiles that have none (daemon record first, else generated)."""
+
+        def run() -> dict[str, int]:
+            try:
+                from sammonny.core.client import SamMonnyDaemonClient
+
+                client: Any = SamMonnyDaemonClient(base_url="http://127.0.0.1:7654", sdk_url="http://127.0.0.1:36912")
+            except Exception:
+                client = None
+            return backfill_fingerprints(self.profile_repo, client)
+
+        def done(counts: dict[str, int]) -> None:
+            if counts.get("daemon") or counts.get("generated"):
+                self.refresh_profiles()
+
+        self._run_bg(run, on_result=done, on_error=lambda err: logger.warning("Fingerprint backfill failed: %s", err))
 
     def _capture_open_sessions(self) -> None:
         """Reads the refreshed cookies of every browser opened through the SDK (off the GUI thread)."""

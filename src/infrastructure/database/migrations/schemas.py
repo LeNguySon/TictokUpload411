@@ -158,7 +158,12 @@ CREATE TABLE IF NOT EXISTS profiles (
     cookie_email TEXT DEFAULT NULL,
     traffic_source_json TEXT DEFAULT NULL,
     optimal_hour INTEGER DEFAULT 12,
-    retention_stats_json TEXT DEFAULT NULL
+    retention_stats_json TEXT DEFAULT NULL,
+    fingerprint_json TEXT DEFAULT NULL,
+    audience_demographics_json TEXT DEFAULT NULL,
+    optimal_posting_hours_json TEXT DEFAULT NULL,
+    competitor_intelligence_json TEXT DEFAULT NULL,
+    publish_settings_json TEXT DEFAULT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_profiles_name ON profiles(name);

@@ -74,3 +74,15 @@
   host/store_uri/upload_id, CommitUploadInner lỗi ⇒ FAILED. App đã vendor + ghim `sammonny==1.8.4`.
   Test cần tới pha publish của Hybrid phải patch `_vod_client` (store_uri chứa `mock` ⇒ bỏ qua PUT thật).
   Hybrid vẫn TẮT trong app vì layout URL VOD chưa được kiểm chứng bằng upload thật.
+
+## Vân tay trình duyệt riêng, cố định cho từng hồ sơ (2026-11-07)
+- Bản ghi daemon (`GET /api/v1/profiles/{id}` → `raw_data["fingerprint"]`) có vân tay đầy đủ (navigator, screen,
+  webgl, canvas/audio/webgl noise, fonts, timezone, geolocation); daemon ghi lại Preferences từ bản ghi này mỗi lần
+  mở qua SDK. Trước đây app bỏ qua nó và lưu hằng số chung (UA `Chrome/152.0.0.0` cụt, canvas 8.0, Intel UHD...),
+  còn `prepare_profile_environment` ghi noise/GPU/media uid giống hệt nhau cho mọi hồ sơ khi mở trực tiếp.
+- Nay `profiles.fingerprint_json` (cùng schema daemon) là nguồn sự thật: tạo qua daemon ⇒ lưu vân tay daemon;
+  dự phòng ⇒ `generate_fingerprint(uuid)` (tất định theo uuid, không trùng); `ProfileRepository.create` tự điền;
+  Preferences dùng `gologin_preferences(fingerprint_of(profile))`; hồ sơ cũ ⇒ `backfill_fingerprints` lúc mở app.
+- Live: 65/65 hồ sơ có vân tay (18 từ daemon, 47 sinh mới). 7 bản ghi daemon tạo 20–22/10 (daemon cũ) dùng chung
+  noise 10.0/5e-07/90.0 + RTX 3060: daemon không có API sửa vân tay ⇒ phải sửa phía daemon hoặc tạo lại hồ sơ.
+- Đừng lấy cột rời (`canvas_noise`, `webgl_vendor`...) làm nguồn: chúng từng chứa giá trị dùng chung.
